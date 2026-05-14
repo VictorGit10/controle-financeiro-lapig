@@ -1,0 +1,52 @@
+# Database
+
+## Core Tables
+
+`projects`, `scholarship_holders`, `scholarships`, `funding_releases`, `expenses`, `dashboard_settings`. Plus `audit_logs` para rastreamento global de mudanças. All core tables use UUIDs with `updated_at` auto-triggers, except `dashboard_settings` and `audit_logs`. RLS is enabled on all tables — authenticated users get full CRUD, anonymous users see nothing. **RLS is intentionally permissive** (any authenticated user = admin) because public signup is disabled in the Supabase project; only pre-authorized emails can sign in.
+
+## Notable Schema Details
+
+- **External scholarships** (migration 008): `scholarships.project_id` is nullable. When NULL, `funding_source` text column identifies the external source (e.g., "CIAMB"). View `v_scholarship_timeline` shows "Externa: {source}" as project name.
+- **Cascade deletes reverted** (migration 022): FKs from scholarships, funding_releases, and expenses to projects originally used `ON DELETE CASCADE` (migration 007). This was reverted to `ON DELETE RESTRICT` (migration 022) to prevent catastrophic accidental deletion of historical financial data. Projects must be "inactivated" instead of deleted.
+- **Dynamic balance** (migrations 009-011): `projects.balance_date` records when the initial balance was reported. The `calc_project_monthly()` RPC accepts `p_balance_status` to control current-month payment logic. `calc_projects_batch()` is a batch variant that eliminates N+1 queries on the dashboard.
+- **Editor mode save** (migration 012): `save_editor_changes()` applies deletes/updates/inserts to scholarships in a single transaction, then logs the operation in `scholarship_audit`.
+- **Portuguese months + batch alerts + stats** (migration 013): `fmt_month_pt()` replaces `to_char` locale-dependent month labels. Adds `get_alerts_for_projects()` for N+1-free dashboard alerts, plus `funding_stats()` and `expenses_stats()` RPCs for CrudPage stats cards.
+- **Audit invalid data** (migration 014): Diagnostic SELECT queries to find records with invalid values (amount <= 0, inverted dates). Run before migration 015 to inspect problems before constraints are applied.
+- **Check constraints** (migration 015): Removes invalid records, adds `CHECK` constraints for positive monetary values (`amount > 0`) and date ordering (`start_date < end_date`) on `scholarships`, `funding_releases`, `expenses`, and `projects`.
+- **Save project RPC** (migration 016): `save_project()` creates or updates a project and its `dashboard_settings` entry in a single transaction, preventing inconsistent state if one of the two operations fails.
+- **Project balances history** (migration 017): `project_balances` table stores monthly balance snapshots per project. Triggers `trg_sync_project_balance` and `trg_balances_updated_at` keep `projects.initial_balance`, `yield_amount`, and `balance_date` in sync with the most recent balance row. RPCs: `upsert_project_balance()` and `get_balances_for_month()`.
+- **Integrity fixes** (migration 021): `sync_holder_active` now checks `start_date <= current_date` (not just `end_date >= current_date`), so future-dated scholarships no longer mark a holder as active. `sync_project_balance` now handles DELETE — when a balance row is deleted, `projects` is updated from the remaining latest row (or zeroed if none left).
+- **Global Audit Triggers** (migration 023): A centralized `audit_logs` table replaces the partial `scholarship_audit`. PostgreSQL triggers automatically log `INSERT`, `UPDATE`, and `DELETE` actions for `projects`, `scholarship_holders`, `scholarships`, `funding_releases`, and `expenses`, capturing `old_data`, `new_data`, and `performed_by`.
+- **project_balances RESTRICT** (migration 024): Alinha a FK de `project_balances.project_id` ao mesmo `ON DELETE RESTRICT` das demais tabelas financeiras (ver migração 022). Política do projeto: projetos **nunca são excluídos**, apenas inativados via campo `active`. Migrações 022 e 024 implementam RESTRICT como defesa em profundidade — qualquer tentativa de `DELETE` em `projects` com registros associados falha com FK violation, forçando o fluxo de inativação.
+- **Plano de Trabalho** (migration 025): Adiciona 4 tabelas: `rubricas` (catálogo fixo com 16 códigos: a-g, sub-rubricas de Pessoal, cip_ufg, cip_ua, dao), `planos_trabalho` (cabeçalho versionado por projeto — versao=0 original, 1+ remanejamento), `plano_rubricas` (valor previsto por rubrica em cada versão, com `descricao_livre` para sub-itens variáveis de b/e/f), `plano_desembolsos` (cronograma da Seção II.b). Índice parcial `uq_plano_ativo_por_projeto` + trigger `enforce_single_plano_ativo` garantem apenas 1 versão ativa por projeto. Cria também o bucket de Storage `plano-trabalho-docs` (privado, autenticado), e a coluna `projects.funape_managed` (preparação para Fase 2 — Balancete). `save_project()` ganha o parâmetro `p_funape_managed`.
+- **Balancete** (migration 026): Adiciona 3 tabelas: `balancetes` (cabeçalho de cada PDF importado — data_referencia, saldo_disponivel, rendimento_liquido, totais), `balancete_lancamentos` (linhas contábeis 7.1.3.x com `rubrica_code` resolvido automaticamente pelo trigger `trg_auto_resolve_rubrica`), `conta_rubrica_map` (mapeamento prefix-based de contas FUNAPE → rubricas, com seed inicial para 7.1.3.02 → 'd', 7.1.3.04 → 'a.bolsas', 7.1.3.05.01.99520 → 'cip_ua', etc.). Função `resolve_rubrica_for_conta()` faz longest-prefix-match. Cria o bucket Storage `balancete-pdfs`. **Política FUNAPE**: deleta `expenses` de projetos `funape_managed=true` (one-time) e instala trigger `block_expenses_for_funape` que bloqueia novos inserts/updates em `expenses` para esses projetos (erro com SQLSTATE 23514). `get_previsto_vs_realizado(p_project_id)` cruza o plano ativo com o balancete mais recente, agregando previsto/realizado/saldo/percentual por rubrica.
+- **Conta-rubrica audit + cadastro inline** (migration 027): Seeds adicionais ao `conta_rubrica_map` descobertos na auditoria de 4 balancetes reais — `7.1.3.05.01.00062 → cip_ufg` (FUNDO INSTITUCIONAL sem CIP no nome), `7.1.3.20 → f` (EQUIPAMENTOS / Investimento), `7.1.3.01.01 → a.colab` (ORDENADOS E SALARIOS), `7.1.3.01.02 → a.enc` (ENCARGOS S/ CLT), `7.1.3.01.03 → a.colab` (BENEFÍCIOS SOCIAIS). Estende `upsert_balancete(p_payload)` para aceitar `new_mappings: [{ conta_prefix, rubrica_code, descricao }]` opcional — inseridos em `conta_rubrica_map` ANTES dos lançamentos, de modo que o trigger auto-resolve já enxergue o mapeamento. Isso permite que a UI de revisão do balancete (modal split-view) cadastre mapeamentos pontuais para códigos novos sem trip ao banco a parte. Códigos `7.1.3.60.01.*` (IR/IOF s/ aplicação) e `7.1.3.62.01.*` (IOF s/ recebimento) ficam **intencionalmente não-mapeados** — tributos sobre rendimento financeiro não pertencem ao plano de trabalho.
+
+## Server-Side Functions (RPC)
+
+- `calc_project_monthly(p_project_id, p_start_date, p_end_date, p_balance_status)` — monthly projection per project (labels in pt-BR via `fmt_month_pt`)
+- `calc_projects_batch(p_project_ids[], p_start_date, p_balance_status)` — batch version for dashboard
+- `calc_general_dashboard(p_start_date, p_end_date, p_balance_status)` — consolidated KPIs across included projects
+- `get_project_alerts(p_project_id)` — alert rules for one project (low balance, expiring scholarships)
+- `get_alerts_for_projects(p_project_ids[])` — batch alerts for multiple projects
+- `save_editor_changes(p_project_id, p_deletes, p_updates, p_inserts)` — transactional save of editor mode changes with audit log
+- `save_project(p_name, p_id, ...)` — upsert project + dashboard_settings in single transaction
+- `upsert_project_balance(p_project_id, p_reference_month, p_reference_year, p_initial_balance, p_yield_amount, p_balance_date, p_notes)` — insert or update a monthly balance row; triggers `sync_project_balance`
+- `get_balances_for_month(p_month, p_year)` — returns all projects with their balance for the given month; projects without a balance row have null fields
+- `funding_stats()` — aggregated funding totals `{total, count}`
+- `expenses_stats()` — aggregated expense totals `{total, count, category_count}`
+- `fmt_month_pt(date)` — returns Portuguese month label (e.g., "Mai/26")
+- `upsert_plano_trabalho(p_payload jsonb)` — cria/atualiza uma versão do Plano de Trabalho a partir do JSON revisado (transacional: cabeçalho + rubricas + desembolsos). Calcula `versao = MAX(versao) + 1` em inserções.
+- `ativar_plano_trabalho(p_plano_id uuid)` — marca uma versão como a ativa (trigger desativa as demais).
+- `get_plano_ativo(p_project_id uuid) → jsonb` — retorna a versão ativa com `rubricas` e `desembolsos` embutidos.
+- `get_planos_historico(p_project_id uuid) → table` — lista resumida (sem rubricas) das versões em ordem `versao desc`.
+- `upsert_balancete(p_payload jsonb)` — cria/atualiza um balancete e substitui seus lançamentos. `rubrica_code` é setado automaticamente pelo trigger.
+- `get_balancetes_by_project(p_project_id uuid) → table` — lista dos balancetes do projeto em ordem `data_referencia desc`.
+- `get_balancete_detalhado(p_balancete_id uuid) → jsonb` — cabeçalho + lançamentos (com nome da rubrica resolvido).
+- `get_previsto_vs_realizado(p_project_id uuid) → jsonb` — cruza plano ativo + balancete mais recente. Retorna `{ has_plano, has_balancete, balancete_id, data_referencia, saldo_disponivel, rendimento_liquido, rubricas: [{rubrica_code, rubrica_name, previsto, realizado, saldo, perc_executado}], nao_mapeados: [{conta_codigo, ...}] }`.
+- `resolve_rubrica_for_conta(p_conta text) → text` — utility: longest-prefix-match de conta contábil → rubrica via `conta_rubrica_map`.
+
+## Views
+
+- `v_project_summary` — consolidated project totals (includes `balance_date`)
+- `v_scholarship_timeline` — per-holder scholarship history with external support

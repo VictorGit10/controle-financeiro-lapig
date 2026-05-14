@@ -1,0 +1,22 @@
+{
+  "name": "controlefinanceiro",
+  "version": "1.0.0",
+  "description": "Sistema de controle financeiro para gestão de projetos e bolsas do Laboratório de Processamento de Imagens e Geoprocessamento (LAPIG / UFG).",
+  "main": "index.js",
+  "scripts": {
+    "lint": "eslint frontend/js/",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "eslint": "^10.2.1",
+    "globals": "^17.5.0",
+    "happy-dom": "^20.9.0",
+    "mammoth": "^1.12.0",
+    "vitest": "^4.1.5"
+  }
+}

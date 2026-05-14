@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle Financeiro — Dashboard</title>
+  <meta name="description" content="Sistema de controle financeiro para gestão de projetos, bolsas e desembolsos.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://js.sentry-cdn.com; worker-src 'self' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://skxiivmkhpegefafdlty.supabase.co https://o450*.ingest.sentry.io https://cdn.jsdelivr.net;">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Exo+2:wght@600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@0.475.0/dist/umd/lucide.js" integrity="sha384-ARZ7PIiPKq1nrhaWxYbrSp3z8yOJCq63LaKAf9F09nqarfTanuHLtsAsFPHl31fU" crossorigin="anonymous"></script>
+  <script>if(typeof lucide==="undefined")document.write('<script src="vendor/lucide.js"><\/script>');</script>
+
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/dist/umd/supabase.js" integrity="sha384-l7yJnh/cWKcqeTC5adHUdc5b+J4Kb2QTGRSkCQehn1YT5xEFlrgwnXOYuvrtI1F6" crossorigin="anonymous"></script>
+  <script>if(typeof supabase==="undefined")document.write('<script src="vendor/supabase.js"><\/script>');</script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.js" integrity="sha384-sitkSLEO56SJYRloHWybrHos3JVvByQSlOZYJ1HiExytjxUlVOernDbpQcOgwtW8" crossorigin="anonymous"></script>
+  <script>if(typeof Chart==="undefined")document.write('<script src="vendor/chart.umd.js"><\/script>');</script>
+
+  <!-- Mammoth (DOCX → texto, usado pela página Plano de Trabalho) -->
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+  <script>if(typeof mammoth==="undefined")document.write('<script src="vendor/mammoth.browser.min.js"><\/script>');</script>
+
+  <!-- PDF.js (PDF → texto, usado pela importação de balancete) -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script>if(typeof pdfjsLib==="undefined")document.write('<script src="vendor/pdf.min.js"><\/script>');</script>
+  <script>
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    }
+  </script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ============================== -->
+  <!-- TELA DE LOGIN                  -->
+  <!-- ============================== -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-bg-animation">
+      <div class="login-bg-orb login-bg-orb--1"></div>
+      <div class="login-bg-orb login-bg-orb--2"></div>
+      <div class="login-bg-orb login-bg-orb--3"></div>
+    </div>
+
+    <div class="login-card">
+      <div class="login-card__header">
+        <div class="login-card__logo" style="background: transparent; box-shadow: none; width: auto; height: 80px; margin-bottom: 24px;">
+          <img src="images/lapig-logo.svg" alt="LAPIG Logo" style="height: 100%; width: auto; object-fit: contain;">
+        </div>
+        <h1 class="login-card__title" style="font-family: var(--font-heading);">Controle Financeiro</h1>
+        <p class="login-card__subtitle">Gestão de projetos e bolsas</p>
+      </div>
+
+      <form id="login-form" class="login-card__form">
+        <div class="input-group">
+          <i data-lucide="user" class="input-group__icon"></i>
+          <input 
+            type="text" 
+            id="login-email" 
+            class="input-group__field" 
+            placeholder="Seu usuário"
+            required 
+            autocomplete="username"
+          >
+        </div>
+
+        <div class="input-group">
+          <i data-lucide="lock" class="input-group__icon"></i>
+          <input 
+            type="password" 
+            id="login-password" 
+            class="input-group__field" 
+            placeholder="Sua senha"
+            required
+            autocomplete="current-password"
+          >
+          <button type="button" id="toggle-password" class="input-group__toggle" aria-label="Mostrar senha">
+            <i data-lucide="eye" class="input-group__toggle-icon"></i>
+          </button>
+        </div>
+
+        <div id="login-error" class="login-card__error" hidden>
+          <i data-lucide="alert-circle"></i>
+          <span id="login-error-text"></span>
+        </div>
+
+        <button type="submit" id="login-btn" class="btn btn--primary btn--full">
+          <span class="btn__text">Entrar</span>
+          <span class="btn__loader" hidden>
+            <i data-lucide="loader-2" class="spin"></i>
+          </span>
+        </button>
+      </form>
+
+      <div class="login-card__footer">
+        <p>Acesso restrito a usuários autorizados</p>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ============================== -->
+  <!-- APP PRINCIPAL                  -->
+  <!-- ============================== -->
+  <div id="app" class="app" hidden>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__brand" style="padding: var(--sp-6) var(--sp-6); justify-content: flex-start;">
+        <img src="images/lapig-logo.svg" alt="LAPIG Logo" style="height: 40px; width: auto; object-fit: contain;">
+      </div>
+
+      <nav class="sidebar__nav">
+        <ul class="sidebar__menu">
+          <li>
+            <button class="sidebar__link sidebar__link--active" data-page="projetos" id="nav-projetos">
+              <i data-lucide="folder-kanban"></i>
+              <span>Projetos</span>
+            </button>
+          </li>
+          <li>
+            <button class="sidebar__link" data-page="gestao" id="nav-gestao">
+              <i data-lucide="settings-2"></i>
+              <span>Gestão de Projetos</span>
+            </button>
+          </li>
+          <li>
+            <button class="sidebar__link" data-page="holders" id="nav-holders">
+              <i data-lucide="users"></i>
+              <span>Bolsistas</span>
+            </button>
+          </li>
+          <li>
+            <button class="sidebar__link" data-page="saldos" id="nav-saldos">
+              <i data-lucide="wallet"></i>
+              <span>Saldos</span>
+            </button>
+          </li>
+          <li>
+            <button class="sidebar__link" data-page="funding" id="nav-funding">
+              <i data-lucide="banknote"></i>
+              <span>Desembolsos</span>
+            </button>
+          </li>
+          <li>
+            <button class="sidebar__link" data-page="expenses" id="nav-expenses">
+              <i data-lucide="receipt"></i>
+              <span>Gastos</span>
+            </button>
+          </li>
+          <li>
+            <button class="sidebar__link" data-page="plano-trabalho" id="nav-plano-trabalho">
+              <i data-lucide="file-text"></i>
+              <span>Plano de Trabalho</span>
+            </button>
+          </li>
+          <li>
+            <button class="sidebar__link" data-page="dashboard" id="nav-dashboard">
+              <i data-lucide="layout-dashboard"></i>
+              <span>Visão Geral</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      <div class="sidebar__footer">
+        <div class="sidebar__user" id="sidebar-user">
+          <div class="sidebar__user-avatar" id="user-avatar">U</div>
+          <span class="sidebar__user-email" id="user-email">user@email.com</span>
+        </div>
+        <button class="sidebar__logout" id="logout-btn" title="Sair">
+          <i data-lucide="log-out"></i>
+          <span>Sair</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Content Area -->
+    <main class="main" id="main-content">
+      <header class="topbar">
+        <button class="topbar__toggle" id="sidebar-toggle" aria-label="Menu">
+          <i data-lucide="menu"></i>
+        </button>
+        <h2 class="topbar__title" id="page-title">Projetos</h2>
+        <div class="topbar__actions" id="page-actions"></div>
+
+        <!-- Notification Bell -->
+        <div class="notif-bell" id="notif-bell-wrapper">
+          <button class="notif-bell__btn" id="notif-bell-btn" aria-label="Notificações" title="Alertas do Sistema">
+            <i data-lucide="bell"></i>
+            <span class="notif-bell__badge" id="notif-badge" hidden>0</span>
+          </button>
+          <div class="notif-dropdown" id="notif-dropdown" hidden>
+            <div class="notif-dropdown__header">
+              <span class="notif-dropdown__title">Alertas do Sistema</span>
+              <span class="notif-dropdown__count" id="notif-count">0 alertas</span>
+            </div>
+            <div class="notif-dropdown__list" id="notif-list">
+              <p class="notif-dropdown__empty">Nenhum alerta ativo.</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="content" id="page-content">
+        <!-- Dynamic content injected here -->
+      </div>
+    </main>
+  </div>
+
+
+  <!-- ============================== -->
+  <!-- SCRIPTS                        -->
+  <!-- ============================== -->
+  <script type="module" src="js/pure-fns.js"></script>
+  <script type="module" src="js/parsers/balancete-parser.js"></script>
+  <script type="module" src="js/parsers/pt-parser.js"></script>
+  <script type="module" src="js/components/pdf-split-view.js"></script>
+  <script type="module" src="js/components/docx-split-view.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/chart-builder.js"></script>
+  <script src="js/pages/crud-page.js"></script>
+  <script src="js/pages/dashboard.js"></script>
+  <script src="js/pages/saldos.js"></script>
+  <script src="js/pages/projetos.js"></script>
+  <script src="js/pages/gestao-projetos.js"></script>
+  <script src="js/pages/holders.js"></script>
+  <script src="js/pages/funding.js"></script>
+  <script src="js/pages/expenses.js"></script>
+  <script src="js/pages/plano-trabalho.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

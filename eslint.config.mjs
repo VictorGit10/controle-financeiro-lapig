@@ -1,0 +1,88 @@
+import globals from "globals";
+
+export default [
+  {
+    files: ["frontend/js/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2021,
+      sourceType: "script",
+      globals: {
+        ...globals.browser,
+        // CDN libraries
+        supabase: "readonly",
+        lucide: "readonly",
+        Chart: "readonly",
+        mammoth: "readonly",
+        pdfjsLib: "readonly",
+        // IIFE globals (assigned on window by each module)
+        supabaseClient: "writable",
+        Router: "writable",
+        Auth: "writable",
+        App: "writable",
+        DashboardPage: "writable",
+        ProjetosPage: "writable",
+        GestaoPage: "writable",
+        SaldosPage: "writable",
+        HoldersPage: "writable",
+        FundingPage: "writable",
+        ExpensesPage: "writable",
+        PlanoTrabalhoPage: "writable",
+        CrudPage: "writable",
+        ChartBuilder: "writable",
+        SimulationEngine: "writable",
+        // pure-fns.js (window-bridged via <script type="module">)
+        formatBRL: "readonly",
+        formatDate: "readonly",
+        toInputDate: "readonly",
+        escapeAttr: "readonly",
+        localISODate: "readonly",
+        inferBalanceStatus: "readonly",
+        generateMonthSeries: "readonly",
+        calcProjectMonthly: "readonly",
+        diffProjections: "readonly",
+        parseBRL: "readonly",
+        // parsers + components (window-bridged via <script type="module">)
+        parseBalanceteText: "readonly",
+        parsePtFromHtml: "readonly",
+        PtFormatError: "readonly",
+        mountPdfSplitView: "readonly",
+        mountDocxSplitView: "readonly",
+        // supabase-config.js utilities (attached to window)
+        showToast: "readonly",
+        createModal: "readonly",
+        confirmAction: "readonly",
+        handleSupabaseResponse: "readonly",
+        exportToCSV: "readonly",
+      },
+    },
+    rules: {
+      "no-undef": "error",
+      "no-unused-vars": ["warn", { args: "none" }],
+      "no-redeclare": "off",
+      "no-dupe-keys": "error",
+      "no-dupe-args": "error",
+      "no-duplicate-case": "error",
+      "no-unreachable": "error",
+      "no-constant-condition": "warn",
+      "no-cond-assign": "error",
+      "no-sparse-arrays": "warn",
+      "no-template-curly-in-string": "warn",
+      "no-async-promise-executor": "error",
+      "no-unsafe-negation": "error",
+      "no-useless-escape": "warn",
+      eqeqeq: ["warn", "smart"],
+      curly: ["warn", "multi-line"],
+    },
+  },
+  {
+    files: [
+      "frontend/js/pure-fns.js",
+      "frontend/js/parsers/**/*.js",
+      "frontend/js/components/**/*.js",
+    ],
+    languageOptions: {
+      ecmaVersion: 2021,
+      sourceType: "module",
+    },
+  },
+];

@@ -1,0 +1,49 @@
+# ── Sistema Operacional ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor / IDE ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ── Python (scripts de importação) ───────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+*.egg-info/
+
+# ── Dados sensíveis / credenciais ─────────────────────────────
+# Nunca versionar chaves e senhas!
+*.env
+.env.local
+.env.production
+secrets.*
+config.local.*
+
+# Credenciais Supabase (se extraídas para arquivo separado)
+supabase-credentials.json
+
+# ── Planilhas Excel (dados brutos — grandes e binários) ───────
+# A planilha legada não precisa de versionamento de código.
+# Se quiser versionar, remova a linha abaixo.
+*.xlsx
+*.xls
+
+# ── Node (caso frontend evolua para bundler) ──────────────────
+node_modules/
+dist/
+.cache/
+.parcel-cache/
+
+# ── Logs e artefatos temporários ──────────────────────────────
+*.log
+*.tmp
+*.bak
+*.swp
