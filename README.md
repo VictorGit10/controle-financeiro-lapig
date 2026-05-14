@@ -52,6 +52,7 @@ ControleFinanceiro/
 │   ├── 024_restrict_project_balances.sql # project_balances FK → RESTRICT
 │   ├── 025_plano_trabalho.sql    # Plano de Trabalho (rubricas, versões, desembolsos) + funape_managed
 │   ├── 026_balancetes.sql        # Balancete FUNAPE (PDF), conta_rubrica_map, Previsto x Realizado, bloqueia expenses em FUNAPE
+│   ├── 027_conta_rubrica_audit.sql # Seeds de mapeamento conta→rubrica descobertos na auditoria + cadastro inline na UI
 │   └── utils/
 │       ├── generate_import_sql.py  # Gerador de SQL a partir do Excel
 │       └── check_dupes.py          # Verificador de duplicatas
@@ -85,7 +86,15 @@ ControleFinanceiro/
 │   │       ├── holders.js      # Gestão de bolsistas
 │   │       ├── funding.js      # Desembolsos (CrudPage)
 │   │       ├── expenses.js     # Gastos gerais (CrudPage)
-│   │       └── plano-trabalho.js  # Plano de Trabalho (import DOCX + IA)
+│   │       └── plano-trabalho.js  # Plano de Trabalho + Balancete (3 abas)
+│   │
+│   │   ├── components/
+│   │   │   ├── docx-split-view.js  # Split-view de revisão de DOCX
+│   │   │   └── pdf-split-view.js   # Split-view de revisão de PDF
+│   │   └── parsers/
+│   │       ├── pt-parser.js        # Parser determinístico de Plano de Trabalho (DOCX → JSON)
+│   │       ├── balancete-parser.js # Parser determinístico de Balancete (PDF → JSON)
+│   │       └── pt-rubrica-lookup.js # Tabela de aliases de rubricas
 │   └── vendor/                 # Fallback local dos CDN libs
 │       ├── chart.umd.js
 │       ├── lucide.js
@@ -101,6 +110,9 @@ ControleFinanceiro/
 ├── tests/
 │   ├── simulation.test.js      # Testes do SimulationEngine
 │   ├── utils.test.js            # Testes de funções utilitárias
+│   ├── pt-parser.test.js        # Testes do parser de Plano de Trabalho
+│   ├── balancete-parser.test.js # Testes do parser de Balancete
+│   ├── fixtures/                # HTMLs de exemplo de Planos de Trabalho reais
 │   └── sql/
 │       └── test_rpcs.sql        # Testes de integração das RPCs
 │
@@ -120,8 +132,8 @@ ControleFinanceiro/
 - **Bolsistas** — CRUD completo + visualização de rendimentos mensais com gráfico de barras empilhadas por projeto
 - **Desembolsos e Gastos** — Registro e acompanhamento por projeto
 - **Plano de Trabalho** — Página com 3 abas:
-  - **Orçamento** — Import de DOCX (plano + remanejamentos) com extração de rubricas por IA (Ollama Cloud `kimi-k2.6:cloud`) e versionamento
-  - **Balancetes** — Import de PDF mensal da FUNAPE com detecção automática do projeto e dos lançamentos contábeis
+  - **Orçamento** — Import de DOCX (plano + remanejamentos) com extração determinística de rubricas via `pt-parser.js` (Mammoth.js → HTML → parser) e versionamento
+  - **Balancetes** — Import de PDF mensal da FUNAPE com extração determinística via `balancete-parser.js` (pdf.js → texto → regex) e mapeamento automático conta → rubrica (`resolve_rubrica_for_conta`)
   - **Previsto x Realizado** — Comparação do orçamento previsto com o realizado por rubrica, % executado e saldo disponível
 - **Autenticação** — Login seguro via Supabase Auth com persistência de sessão
 
@@ -142,31 +154,22 @@ CI via GitHub Actions: lint + testes em todo push/PR para main/master.
 ## Configuração
 
 1. Crie um projeto no [Supabase](https://supabase.com)
-2. Execute os scripts SQL em `/database/` na ordem numérica (001 → 026)
+2. Execute os scripts SQL em `/database/` na ordem numérica (001 → 027)
 3. Preencha as credenciais em `frontend/js/supabase-config.js`
 4. Abra `frontend/index.html` no navegador (ou sirva com qualquer servidor estático)
 
-### Edge Functions (Plano de Trabalho + Balancete)
+### Edge Functions (deprecated)
 
-A página **Plano de Trabalho** depende de duas Edge Functions que fazem proxy para o Ollama Cloud:
+As Edge Functions `extract-plano-trabalho` e `extract-balancete` eram proxies para o Ollama Cloud (`kimi-k2.6:cloud`) e estão **deprecated desde 2026-05**. O frontend não as chama mais — a extração é 100% determinística via parsers no browser:
 
-**Via CLI:**
-```bash
-supabase secrets set OLLAMA_API_KEY=<sua-chave-do-ollama-cloud>
-supabase functions deploy extract-plano-trabalho
-supabase functions deploy extract-balancete
-```
+- **DOCX** → `mammoth.browser.min.js` (CDN) extrai HTML → `pt-parser.js` parseia tabelas de rubricas e desembolsos
+- **PDF** → `pdfjsLib` (CDN `pdfjs-dist@3.11.174` + worker) extrai texto com quebras preservadas pela coordenada Y → `balancete-parser.js` parseia lançamentos contábeis
 
-**Via dashboard (sem CLI):**
-- Project Settings → Edge Functions → Secrets → Add `OLLAMA_API_KEY`
-- Edge Functions → Deploy a new function → Via Editor → cole `supabase/functions/extract-plano-trabalho/index.ts` (nome `extract-plano-trabalho`)
-- Repita para `extract-balancete` colando `supabase/functions/extract-balancete/index.ts`
+As funções permanecem em `supabase/functions/` como histórico. Se necessário, deploy manual via `supabase functions deploy <name>`. Secret `OLLAMA_API_KEY` continua configurado mas não é consumido em runtime.
 
-(Opcional) Para fallback offline, baixe:
+**Bibliotecas para fallback offline:**
 - `mammoth.browser.min.js` de `https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js`
 - `pdf.min.js` de `https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js`
-
-para `frontend/vendor/`.
 
 ---
 
