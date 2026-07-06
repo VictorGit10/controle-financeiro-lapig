@@ -14,6 +14,7 @@ export default [
         Chart: "readonly",
         mammoth: "readonly",
         pdfjsLib: "readonly",
+        XLSX: "readonly",
         // IIFE globals (assigned on window by each module)
         supabaseClient: "writable",
         Router: "writable",
@@ -47,6 +48,8 @@ export default [
         PtFormatError: "readonly",
         mountPdfSplitView: "readonly",
         mountDocxSplitView: "readonly",
+        parseBolsaSpreadsheet: "readonly",
+        compareBolsaData: "readonly",
         // supabase-config.js utilities (attached to window)
         showToast: "readonly",
         createModal: "readonly",
