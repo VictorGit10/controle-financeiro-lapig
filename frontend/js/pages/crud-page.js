@@ -24,6 +24,7 @@ function CrudPage(config) {
     onSave = null,
     onDelete = null,
     loadExtra = null,
+    allowDelete = true,
   } = config;
 
   const art = gender === 'f' ? 'a' : 'o';
@@ -141,9 +142,10 @@ function CrudPage(config) {
                       <button class="btn btn--ghost btn--sm" onclick="${globalName}.openForm('${escapeAttr(r.id)}')" title="Editar">
                         <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                       </button>
+                      ${allowDelete ? `
                       <button class="btn btn--ghost btn--sm" onclick="${globalName}.remove('${escapeAttr(r.id)}')" title="Excluir">
                         <i data-lucide="trash-2" style="width:16px;height:16px;color:var(--danger);"></i>
-                      </button>
+                      </button>` : ''}
                     </div>
                   </td>
                 </tr>
@@ -208,19 +210,25 @@ function CrudPage(config) {
   async function openForm(id = null) {
     let record = {};
 
-    if (id) {
-      const { data, error } = await supabaseClient
-        .from(tableName)
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error) { showToast('Erro ao carregar', 'error'); return; }
-      record = data;
+    try {
+      if (id) {
+        const { data, error } = await supabaseClient
+          .from(tableName)
+          .select('*')
+          .eq('id', id)
+          .single();
+        if (error) { showToast('Erro ao carregar: ' + error.message, 'error'); return; }
+        record = data;
+      }
+
+      if (loadExtra) await loadExtra(record, id);
+    } catch (err) {
+      console.error('Erro ao abrir formulário:', err);
+      showToast(err.message || 'Erro ao carregar dados do registro.', 'error');
+      return;
     }
 
-    if (loadExtra) await loadExtra(record, id);
-
-    const formHTML = formFields.map(f => f(record, projectsCache)).join('');
+    const formHTML = formFields.map(f => f.render(record, projectsCache)).join('');
 
     createModal({
       title: id ? `Editar ${entityLabel}` : `Nov${gender === 'f' ? 'a' : 'o'} ${entityLabel}`,
@@ -235,6 +243,9 @@ function CrudPage(config) {
           if (f.type === 'number') val = parseFloat(val) || 0;
           if (f.type === 'boolean') val = el.checked;
           if (f.type === 'nullable-text' && !val) val = null;
+          // Campo de data vazio deve virar null: enviar "" para uma coluna
+          // date no Postgres causa "invalid input syntax for type date".
+          if (f.type === 'date' && !val) val = null;
           payload[f.key] = val;
         }
 
@@ -265,17 +276,22 @@ function CrudPage(config) {
   }
 
   async function remove(id) {
-    if (onDelete) {
-      await onDelete(id);
-    } else {
-      const confirmed = await confirmAction(`Excluir ${gender === 'f' ? 'esta' : 'este'} ${entityLabel.toLowerCase()}?`);
-      if (!confirmed) return;
+    try {
+      if (onDelete) {
+        await onDelete(id);
+      } else {
+        const confirmed = await confirmAction(`Excluir ${gender === 'f' ? 'esta' : 'este'} ${entityLabel.toLowerCase()}?`);
+        if (!confirmed) return;
 
-      const { error } = await supabaseClient.from(tableName).delete().eq('id', id);
-      if (error) { showToast('Erro: ' + error.message, 'error'); return; }
-      showToast(`${entityLabel} excluíd${art}.`, 'success');
+        const { error } = await supabaseClient.from(tableName).delete().eq('id', id);
+        if (error) { showToast('Erro: ' + error.message, 'error'); return; }
+        showToast(`${entityLabel} excluíd${art}.`, 'success');
+      }
+      await refresh();
+    } catch (err) {
+      console.error('Erro ao excluir:', err);
+      showToast(err.message || 'Erro ao excluir registro.', 'error');
     }
-    await refresh();
   }
 
   return { load, openForm, remove, refresh, onSearch, goToPage, exportCSV };

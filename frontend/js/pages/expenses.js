@@ -82,7 +82,7 @@ const ExpensesPage = (() => {
           </div>`,
       },
       {
-        id: 'fld-date', key: 'expense_date', label: 'Data', type: 'text', required: true, requiredMsg: 'Data é obrigatória.',
+        id: 'fld-date', key: 'expense_date', label: 'Data', type: 'date', required: true, requiredMsg: 'Data é obrigatória.',
         render: (rec) => `
           <div class="form-row">
             <div class="form-group">

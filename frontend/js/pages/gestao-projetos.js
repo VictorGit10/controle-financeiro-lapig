@@ -32,6 +32,11 @@ const GestaoPage = (() => {
     searchField: 'name',
     searchPlaceholder: 'Buscar por nome...',
 
+    // Exclusão de projetos é intencionalmente desabilitada: um projeto carrega
+    // histórico financeiro (bolsas, desembolsos, gastos, balancetes) e não deve
+    // ser removido pela interface. Para encerrar um projeto, use o status.
+    allowDelete: false,
+
     onSave: async (payload, id) => {
       if (id) payload.p_id = id;
       const { error } = await supabaseClient.rpc('save_project', payload);
@@ -39,32 +44,19 @@ const GestaoPage = (() => {
       showToast(id ? 'Projeto atualizado!' : 'Projeto criado!', 'success');
     },
 
-    onDelete: async (id) => {
-      const ok = await confirmAction(
-        'Excluir este projeto? Se houver bolsas, desembolsos ou gastos vinculados, a exclusão será bloqueada por segurança.'
-      );
-      if (!ok) return;
-
-      const { error } = await supabaseClient.from('projects').delete().eq('id', id);
-      if (error) {
-        if (error.code === '23503' || error.message.includes('restrict')) {
-          showToast('Não é possível excluir: o projeto possui registros vinculados (bolsas, desembolsos ou gastos).', 'error');
-        } else {
-          showToast('Erro ao excluir: ' + error.message, 'error');
-        }
-        return;
-      }
-      showToast('Projeto excluído.', 'success');
-    },
-
     loadExtra: async (record) => {
       if (record.id) {
-        const { data } = await supabaseClient
-          .from('dashboard_settings')
-          .select('include_in_general')
-          .eq('project_id', record.id)
-          .maybeSingle();
-        record._include_in_general = data ? data.include_in_general : true;
+        try {
+          const { data } = await supabaseClient
+            .from('dashboard_settings')
+            .select('include_in_general')
+            .eq('project_id', record.id)
+            .maybeSingle();
+          record._include_in_general = data ? data.include_in_general : true;
+        } catch (err) {
+          console.error('Erro ao carregar dashboard_settings:', err);
+          record._include_in_general = true;
+        }
       } else {
         record._include_in_general = true;
       }
@@ -112,7 +104,7 @@ const GestaoPage = (() => {
           </div>`,
       },
       {
-        id: 'fld-start', key: 'p_start_date', label: 'Início', type: 'text',
+        id: 'fld-start', key: 'p_start_date', label: 'Início', type: 'date',
         render: (rec) => `
           <div class="form-group">
             <label class="form-label">Início</label>
@@ -120,7 +112,7 @@ const GestaoPage = (() => {
           </div>`,
       },
       {
-        id: 'fld-end', key: 'p_end_date', label: 'Término', type: 'text',
+        id: 'fld-end', key: 'p_end_date', label: 'Término', type: 'date',
         render: (rec) => `
           <div class="form-group">
             <label class="form-label">Término</label>
