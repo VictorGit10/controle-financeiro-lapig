@@ -5,6 +5,8 @@
 const Router = (() => {
   const pages = {};
   let currentPage = null;
+  const guards = [];
+  const dirtyCheckers = [];
 
   const pageTitle = document.getElementById('page-title');
   const pageContent = document.getElementById('page-content');
@@ -15,12 +17,37 @@ const Router = (() => {
     pages[name] = { title, icon, render, actions };
   }
 
+  function registerGuard(fn) {
+    guards.push(fn);
+  }
+
+  function registerDirtyChecker(fn) {
+    dirtyCheckers.push(fn);
+  }
+
+  function hasUnsavedChanges() {
+    return dirtyCheckers.some(fn => fn());
+  }
+
+  async function canNavigate(to) {
+    for (const guard of guards) {
+      const result = await guard(currentPage, to);
+      if (result === false) return false;
+    }
+    return true;
+  }
+
   async function navigate(pageName) {
+    if (pageName === currentPage) return;
+
     const page = pages[pageName];
     if (!page) {
       console.warn(`Page "${pageName}" not registered.`);
       return;
     }
+
+    const allowed = await canNavigate(pageName);
+    if (!allowed) return;
 
     currentPage = pageName;
 
@@ -65,5 +92,5 @@ const Router = (() => {
     return currentPage;
   }
 
-  return { register, navigate, getCurrent };
+  return { register, navigate, getCurrent, registerGuard, registerDirtyChecker, hasUnsavedChanges };
 })();

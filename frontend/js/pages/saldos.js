@@ -348,6 +348,23 @@ const SaldosPage = (() => {
     await refresh();
   }
 
+  function isDirty() {
+    return dirtyRows.size > 0;
+  }
+
+  function discardBalanceChanges() {
+    dirtyRows = new Set();
+  }
+
+  Router.registerGuard(async (from, to) => {
+    if (dirtyRows.size === 0) return true;
+    const ok = await confirmAction('Alterações nos saldos não salvas serão perdidas. Continuar?');
+    if (ok) discardBalanceChanges();
+    return ok;
+  });
+
+  Router.registerDirtyChecker(isDirty);
+
   return {
     load,
     prevMonth,
@@ -357,5 +374,6 @@ const SaldosPage = (() => {
     markDirty,
     saveAllChanges,
     discardChanges,
+    isDirty,
   };
 })();

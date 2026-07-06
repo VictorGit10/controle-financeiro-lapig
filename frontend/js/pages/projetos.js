@@ -668,6 +668,30 @@ const ProjetosPage = (() => {
     renderView();
   }
 
+  function hasDraftChanges() {
+    if (!editorMode) return false;
+    if (draftScholarships.length !== originalScholarships.length) return true;
+    return draftScholarships.some(s => s._isNew || s._modified);
+  }
+
+  function isDirty() {
+    return hasDraftChanges();
+  }
+
+  function discardSimulationChanges() {
+    editorMode = false;
+    draftScholarships = originalScholarships.map(s => ({ ...s }));
+  }
+
+  Router.registerGuard(async (from, to) => {
+    if (!hasDraftChanges()) return true;
+    const ok = await confirmAction('Sair da simulação? As alterações não salvas serão descartadas.');
+    if (ok) discardSimulationChanges();
+    return ok;
+  });
+
+  Router.registerDirtyChecker(isDirty);
+
   return {
     load,
     onProjectChange,
@@ -679,5 +703,6 @@ const ProjetosPage = (() => {
     removeDraftScholarship,
     setBalanceStatus,
     onScholarshipSearch,
+    isDirty,
   };
 })();

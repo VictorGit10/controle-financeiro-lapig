@@ -18,7 +18,7 @@ const App = (() => {
     document.querySelectorAll('.sidebar__link').forEach(link => {
       link.addEventListener('click', () => {
         const page = link.dataset.page;
-        if (page) Router.navigate(page);
+        if (page && page !== Router.getCurrent()) Router.navigate(page);
       });
     });
 
@@ -51,6 +51,14 @@ const App = (() => {
   return { init };
 })();
 
+
+// Warn before closing/reloading the tab if any page has unsaved changes.
+window.addEventListener('beforeunload', (event) => {
+  if (Router?.hasUnsavedChanges?.()) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
 
 // ── Bootstrap ────────────────────────────────────────────────
 
