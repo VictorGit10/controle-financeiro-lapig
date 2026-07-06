@@ -154,8 +154,10 @@ const PlanoTrabalhoPage = (() => {
   }
 
   function onImportClick() {
-    if (currentTab === 'balancetes') return openImportBalancete();
-    return openImport();
+    if (currentTab === 'balancetes' || currentTab === 'previsto-real') {
+      return openImportQueue(BALANCETE_HANDLER);
+    }
+    return openImportQueue(PLANO_HANDLER);
   }
 
   function updateActionButton() {
@@ -794,164 +796,92 @@ const PlanoTrabalhoPage = (() => {
 
   /* ── Importação (modal multi-step) ────────────────────────── */
 
-  function openImport() {
-    if (!selectedProjectId) {
-      showToast('Selecione um projeto antes de importar.', 'error');
-      return;
-    }
-    if (typeof mammoth === 'undefined') {
-      showToast('Biblioteca mammoth não carregada — verifique conexão.', 'error');
-      return;
-    }
+  /* ── Importação em lote — fila de confirmação ─────────────────
+     Seleciona N arquivos e percorre uma fila: a mesma tela de
+     revisão (split-view) aparece para cada arquivo, com "arquivo
+     X de N" e botões Salvar / Pular. Cada tipo (balancete PDF,
+     plano DOCX) é um "handler" que reaproveita as funções
+     single-file (parse, render de revisão, save). ─────────────── */
 
+  // Seletores Projeto + Tipo injetados no topo da revisão de PLANO
+  // (no lote não existe mais o step-1 com esses campos).
+  function planoBatchSelectorsHTML() {
     const projOpts = allProjects.map(p =>
       `<option value="${p.id}" ${p.id === selectedProjectId ? 'selected' : ''}>${escapeAttr(p.name)}${p.code ? ' — ' + escapeAttr(p.code) : ''}</option>`
     ).join('');
-
-    const body = `
-      <div id="pt-import-step-1">
-        <p style="color:var(--text-secondary);margin-bottom:16px;">
-          Selecione o arquivo .docx do Plano de Trabalho ou Carta de Remanejamento. O conteúdo será extraído por IA e você poderá revisar antes de salvar.
-        </p>
-        <div class="form-group">
-          <label class="form-label">Projeto *</label>
+    return `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;padding:12px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-elevated);">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:12px;">Projeto *</label>
           <select id="pti-project" class="form-input">${projOpts}</select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Tipo *</label>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:12px;">Tipo *</label>
           <select id="pti-tipo" class="form-input">
             <option value="original">Plano original</option>
             <option value="remanejamento" selected>Remanejamento</option>
           </select>
-          <small style="color:var(--text-secondary);">Para o primeiro plano do projeto, marque como "original".</small>
         </div>
-        <div class="form-group">
-          <label class="form-label">Arquivo .docx *</label>
-          <input type="file" id="pti-file" accept=".docx" class="form-input">
-        </div>
-      </div>
-      <div id="pt-import-step-2" hidden style="text-align:center;padding:24px;">
-        <i data-lucide="loader-2" class="spin" style="width:32px;height:32px;color:var(--accent);"></i>
-        <p style="margin-top:16px;color:var(--text-secondary);">
-          <strong id="pti-progress-msg">Extraindo texto do documento…</strong>
-        </p>
-      </div>
-      <div id="pt-import-step-3" hidden></div>
-    `;
+      </div>`;
+  }
 
-    let extracted   = null;   // { data, warnings, raw_extraction }
-    let pickedFile  = null;
-    let tipo        = 'remanejamento';
-
-    // createModal sem onSave (assumimos controle total do botão para não fechar entre steps).
-    const { overlay, closeModal } = createModal({
-      title: 'Importar Plano de Trabalho',
-      bodyHTML: body,
-      maxWidth: '95vw',
-      saveLabel: 'Continuar',
-    });
-
-    const saveBtn = overlay.querySelector('#modal-save-btn');
-    saveBtn.addEventListener('click', async () => {
-      const origLabel = saveBtn.textContent;
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Processando…';
+  const PLANO_HANDLER = {
+    type: 'plano',
+    title: 'Importar planos / remanejamentos (DOCX)',
+    accept: '.docx',
+    extLabel: 'DOCX',
+    checkDeps() {
+      if (typeof mammoth === 'undefined') throw new Error('Biblioteca mammoth não carregada — verifique conexão.');
+    },
+    validExt(name) { return name.toLowerCase().endsWith('.docx'); },
+    async parse(file) {
+      const buf = await file.arrayBuffer();
+      const mres = await mammoth.convertToHtml({ arrayBuffer: buf });
+      const html = mres?.value || '';
+      let extracted;
       try {
-        const step3Visible = !overlay.querySelector('#pt-import-step-3').hasAttribute('hidden');
-        if (step3Visible) {
-          await onConfirmSave();
-          closeModal();
-          return;
-        }
-
-        // Step 1 → Step 2 → Step 3
-        const fileInput = overlay.querySelector('#pti-file');
-        const projSel   = overlay.querySelector('#pti-project');
-        const tipoSel   = overlay.querySelector('#pti-tipo');
-        pickedFile = fileInput.files?.[0];
-        tipo = tipoSel.value;
-        const targetProjectId = projSel.value;
-
-        if (!pickedFile)  throw new Error('Selecione um arquivo .docx.');
-        if (!pickedFile.name.toLowerCase().endsWith('.docx')) throw new Error('Apenas arquivos .docx são suportados.');
-        if (!targetProjectId) throw new Error('Selecione o projeto.');
-
-        overlay.querySelector('#pt-import-step-1').setAttribute('hidden', '');
-        overlay.querySelector('#pt-import-step-2').removeAttribute('hidden');
-        lucide.createIcons({ nodes: [overlay] });
-        saveBtn.setAttribute('hidden', '');
-
-        // 1. Mammoth: DOCX → HTML estruturado (preserva tabelas)
-        overlay.querySelector('#pti-progress-msg').textContent = 'Convertendo DOCX…';
-        const buf = await pickedFile.arrayBuffer();
-        const mres = await mammoth.convertToHtml({ arrayBuffer: buf });
-        const html = mres?.value || '';
-
-        // 2. Parser determinístico — falha-rápido se a tabela canônica sumir
-        overlay.querySelector('#pti-progress-msg').textContent = 'Extraindo rubricas…';
-        try {
-          extracted = parsePtFromHtml(html);
-        } catch (err) {
-          if (err instanceof PtFormatError) {
-            throw new Error(err.message);
-          }
-          throw err;
-        }
-
-        // 3. Render: split-view (DOCX à esquerda + form de revisão à direita)
-        overlay.querySelector('#pt-import-step-2').setAttribute('hidden', '');
-        const step3 = overlay.querySelector('#pt-import-step-3');
-        step3.innerHTML = `
-          <div id="pt-review-form">${renderReviewForm(extracted, pickedFile.name)}</div>
-          <div id="pt-splitview"></div>
-        `;
-        step3.removeAttribute('hidden');
-        const reviewFormHtml = step3.querySelector('#pt-review-form')?.outerHTML || '';
-        try {
-          await mountDocxSplitView(step3.querySelector('#pt-splitview'), {
-            file: pickedFile,
-            html, // reaproveita conversão
-            rightHTML: reviewFormHtml,
-            onMount: (rightEl) => { lucide.createIcons({ nodes: [rightEl] }); },
-          });
-          step3.querySelector('#pt-review-form')?.remove();
-        } catch (e) {
-          console.warn('Falha ao montar DOCX split-view:', e.message);
-        }
-        lucide.createIcons({ nodes: [step3] });
-
-        saveBtn.removeAttribute('hidden');
-        saveBtn.textContent = 'Salvar plano';
+        extracted = parsePtFromHtml(html);
       } catch (err) {
-        showToast(err.message || 'Erro ao processar.', 'error');
-        // volta ao step 1 se houve falha na extração
-        overlay.querySelector('#pt-import-step-2')?.setAttribute('hidden', '');
-        overlay.querySelector('#pt-import-step-3')?.setAttribute('hidden', '');
-        overlay.querySelector('#pt-import-step-1')?.removeAttribute('hidden');
-        saveBtn.removeAttribute('hidden');
-        saveBtn.textContent = origLabel;
-      } finally {
-        saveBtn.disabled = false;
+        if (err instanceof PtFormatError) throw new Error(err.message);
+        throw err;
       }
-    });
+      extracted._html = html;   // reaproveitado pelo split-view
+      return extracted;
+    },
+    async renderReview(hostEl, extracted, file) {
+      const rightHTML = `<div id="pt-review-form">${planoBatchSelectorsHTML()}${renderReviewForm(extracted, file.name)}</div>`;
+      hostEl.innerHTML = `<div id="pt-splitview"></div>`;
+      try {
+        return await mountDocxSplitView(hostEl.querySelector('#pt-splitview'), {
+          file,
+          html: extracted._html,
+          rightHTML,
+          onMount: (rightEl) => { lucide.createIcons({ nodes: [rightEl] }); },
+        });
+      } catch (e) {
+        // Split-view opcional: se falhar, mostra só o form.
+        console.warn('Falha ao montar DOCX split-view:', e.message);
+        hostEl.innerHTML = rightHTML;
+        lucide.createIcons({ nodes: [hostEl] });
+        return null;
+      }
+    },
+    async save(hostEl, extracted, file) {
+      const targetProjectId = hostEl.querySelector('#pti-project')?.value;
+      const tipo = hostEl.querySelector('#pti-tipo')?.value || 'remanejamento';
+      if (!targetProjectId) throw new Error('Selecione o projeto.');
 
-    async function onConfirmSave() {
-      if (!extracted) throw new Error('Sem dados extraídos.');
-      const targetProjectId = overlay.querySelector('#pti-project')?.value
-        || selectedProjectId;
-
-      const payload = collectReviewForm(overlay, extracted);
-      payload.project_id   = targetProjectId;
-      payload.tipo         = tipo;
-      payload.arquivo_nome = pickedFile.name;
+      const payload = collectReviewForm(hostEl, extracted);
+      payload.project_id     = targetProjectId;
+      payload.tipo           = tipo;
+      payload.arquivo_nome   = file.name;
       payload.raw_extraction = extracted.raw_extraction || extracted.data;
 
-      // Upload do .docx para Storage. Caminho: {project}/v{ts}_{nome}
-      const safeName = pickedFile.name.replace(/[^\w.-]/g, '_');
+      const safeName = file.name.replace(/[^\w.-]/g, '_');
       const path = `${targetProjectId}/${Date.now()}_${safeName}`;
       const upload = await supabaseClient.storage
         .from(STORAGE_BUCKET)
-        .upload(path, pickedFile, { contentType: pickedFile.type || 'application/octet-stream' });
+        .upload(path, file, { contentType: file.type || 'application/octet-stream' });
       if (upload.error) throw new Error('Falha no upload do arquivo: ' + upload.error.message);
       payload.arquivo_storage_path = path;
 
@@ -961,18 +891,355 @@ const PlanoTrabalhoPage = (() => {
         throw new Error('Erro ao salvar plano: ' + error.message);
       }
 
-      showToast('Plano importado com sucesso!', 'success');
-
-      // Garante seleção do projeto recém-importado
+      // Mantém o projeto recém-salvo como default do próximo arquivo.
       selectedProjectId = targetProjectId;
       localStorage.setItem(LS_PROJECT_KEY, selectedProjectId);
-      await refresh();
+      return { label: payload.titulo || file.name };
+    },
+  };
+
+  const BALANCETE_HANDLER = {
+    type: 'balancete',
+    title: 'Importar balancetes (PDF)',
+    accept: '.pdf,application/pdf',
+    extLabel: 'PDF',
+    checkDeps() {
+      if (typeof pdfjsLib === 'undefined') throw new Error('Biblioteca pdf.js não carregada — verifique conexão.');
+    },
+    validExt(name) { return name.toLowerCase().endsWith('.pdf'); },
+    async parse(file) {
+      const text = await extractPdfText(file);
+      return extractBalanceteFromText(text);   // { data, warnings } — detecta projeto pelo código
+    },
+    async renderReview(hostEl, extracted, file) {
+      hostEl.innerHTML = renderBalanceteReviewForm(extracted, file.name);
+      lucide.createIcons({ nodes: [hostEl] });
+      const splitHost = hostEl.querySelector('#bal-splitview');
+      const rightHTML = hostEl.querySelector('#bal-review-form')?.outerHTML || '';
+      try {
+        const pdfBuf = await file.arrayBuffer();
+        const view = await mountPdfSplitView(splitHost, {
+          pdfData: pdfBuf,
+          rightHTML,
+          onMount: (rightEl) => { lucide.createIcons({ nodes: [rightEl] }); },
+        });
+        hostEl.querySelector('#bal-review-form')?.remove();
+        return view;
+      } catch (e) {
+        // Split-view opcional: o form já está no host, não bloqueia o salvamento.
+        console.warn('Falha ao montar split-view do PDF:', e.message);
+        return null;
+      }
+    },
+    async save(hostEl, extracted, file) {
+      const targetProjectId = hostEl.querySelector('#bali-project-sel')?.value;
+      if (!targetProjectId) throw new Error('Selecione o projeto.');
+
+      const payload = collectBalanceteReview(hostEl, extracted);
+      payload.project_id     = targetProjectId;
+      payload.arquivo_nome   = file.name;
+      payload.raw_extraction = extracted.raw_extraction || extracted.data;
+
+      const safeName = file.name.replace(/[^\w.-]/g, '_');
+      const path = `${targetProjectId}/${Date.now()}_${safeName}`;
+      const up = await supabaseClient.storage
+        .from(BALANCETE_STORAGE_BUCKET)
+        .upload(path, file, { contentType: 'application/pdf' });
+      if (up.error) throw new Error('Falha no upload do PDF: ' + up.error.message);
+      payload.arquivo_storage_path = path;
+
+      const { error } = await supabaseClient.rpc('upsert_balancete', { p_payload: payload });
+      if (error) {
+        await supabaseClient.storage.from(BALANCETE_STORAGE_BUCKET).remove([path]).catch(() => {});
+        throw new Error('Erro ao salvar balancete: ' + error.message);
+      }
+      const newMappings = Array.isArray(payload.new_mappings) ? payload.new_mappings.length : 0;
+      return {
+        label: payload.data_referencia ? formatDate(payload.data_referencia) : file.name,
+        newMappings,
+      };
+    },
+    afterAllSaved() {
+      // Após importar balancetes, a aba mais útil é Previsto x Realizado.
+      currentTab = 'previsto-real';
+      localStorage.setItem(LS_TAB_KEY, currentTab);
+    },
+  };
+
+  // Controlador da fila: um único modal, várias telas.
+  function openImportQueue(handler) {
+    if (allProjects.length === 0) {
+      showToast('Cadastre um projeto antes de importar.', 'error');
+      return;
+    }
+    try { handler.checkDeps(); }
+    catch (e) { showToast(e.message, 'error'); return; }
+
+    const files       = [];
+    let   index       = 0;
+    let   phase       = 'selection';   // 'selection' | 'review'
+    const results     = [];            // [{ name, status, label? }]
+    const parsedCache = [];            // extracted por índice (lazy)
+    let   currentView = null;          // split-view atual (p/ destroy)
+    let   savedMappings = 0;
+    let   finalized   = false;
+
+    const { overlay, closeModal } = createModal({
+      title: handler.title,
+      bodyHTML: `<div id="iq-body"></div>`,
+      maxWidth: '95vw',
+      saveLabel: 'Continuar',
+      onClose: finalize,
+    });
+
+    const bodyEl  = overlay.querySelector('#iq-body');
+    const saveBtn = overlay.querySelector('#modal-save-btn');
+    saveBtn.addEventListener('click', onSaveClick);
+
+    renderSelection();
+
+    /* — Tela A: seleção de arquivos — */
+    function renderSelection() {
+      phase = 'selection';
+      bodyEl.innerHTML = `
+        <p style="color:var(--text-secondary);margin-bottom:12px;">
+          Selecione um ou vários arquivos <strong>${handler.extLabel}</strong>. Você vai revisar e confirmar cada um, um por vez.
+        </p>
+        <label id="iq-drop" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:28px;border:2px dashed var(--border-color);border-radius:10px;cursor:pointer;text-align:center;color:var(--text-secondary);">
+          <i data-lucide="upload-cloud" style="width:32px;height:32px;"></i>
+          <span>Arraste os arquivos aqui ou <strong>clique para escolher</strong></span>
+          <input type="file" id="iq-file" accept="${handler.accept}" multiple hidden>
+        </label>
+        <div id="iq-filelist" style="margin-top:12px;"></div>`;
+      lucide.createIcons({ nodes: [bodyEl] });
+      saveBtn.removeAttribute('hidden');
+      saveBtn.textContent = 'Continuar';
+      saveBtn.disabled = files.length === 0;
+
+      const input = bodyEl.querySelector('#iq-file');
+      const drop  = bodyEl.querySelector('#iq-drop');
+      input.addEventListener('change', () => { addFiles(input.files); input.value = ''; });
+      drop.addEventListener('dragover',  (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; });
+      drop.addEventListener('dragleave', () => { drop.style.borderColor = 'var(--border-color)'; });
+      drop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        drop.style.borderColor = 'var(--border-color)';
+        addFiles(e.dataTransfer.files);
+      });
+      renderFileList();
+    }
+
+    function addFiles(fileList) {
+      for (const f of Array.from(fileList || [])) {
+        if (!handler.validExt(f.name)) {
+          showToast(`"${f.name}" ignorado — não é ${handler.extLabel}.`, 'error');
+          continue;
+        }
+        if (files.some(x => x.name === f.name && x.size === f.size)) continue;   // evita duplicata
+        files.push(f);
+      }
+      renderFileList();
+      saveBtn.disabled = files.length === 0;
+    }
+
+    function renderFileList() {
+      const listEl = bodyEl.querySelector('#iq-filelist');
+      if (!listEl) return;
+      if (files.length === 0) { listEl.innerHTML = ''; return; }
+      listEl.innerHTML = `
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">${files.length} arquivo(s) selecionado(s):</div>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:4px;">
+          ${files.map((f, i) => `
+            <li style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-elevated);border-radius:6px;font-size:13px;">
+              <i data-lucide="file" style="width:16px;height:16px;color:var(--text-secondary);flex-shrink:0;"></i>
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeAttr(f.name)}</span>
+              <span style="color:var(--text-muted);font-size:11px;">${(f.size / 1024).toFixed(0)} KB</span>
+              <button class="btn btn--ghost btn--sm" data-iq-remove="${i}" title="Remover" style="color:var(--danger);padding:2px 6px;">
+                <i data-lucide="x" style="width:14px;height:14px;"></i>
+              </button>
+            </li>`).join('')}
+        </ul>`;
+      lucide.createIcons({ nodes: [listEl] });
+      listEl.querySelectorAll('[data-iq-remove]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          files.splice(Number(btn.getAttribute('data-iq-remove')), 1);
+          renderFileList();
+          saveBtn.disabled = files.length === 0;
+        });
+      });
+    }
+
+    /* — Botão principal (muda de papel conforme a fase) — */
+    async function onSaveClick() {
+      if (phase === 'selection') {
+        if (files.length === 0) return;
+        phase = 'review';
+        index = 0;
+        await processIndex();
+        return;
+      }
+      await saveCurrent();
+    }
+
+    /* — Cabeçalho de progresso "Arquivo X de N" + pontos — */
+    function progressHeaderHTML(showSkip) {
+      const f = files[index];
+      const dots = files.map((_, i) => {
+        const r = results[i];
+        const color = i < index
+          ? (r?.status === 'saved' ? 'var(--success)' : r?.status === 'error' ? 'var(--danger)' : 'var(--text-muted)')
+          : (i === index ? 'var(--accent)' : 'var(--border-color)');
+        return `<span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>`;
+      }).join('');
+      return `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border-color);flex-wrap:wrap;">
+          <div style="font-weight:600;color:var(--text-primary);white-space:nowrap;">Arquivo ${index + 1} de ${files.length}</div>
+          <div style="flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:13px;">${escapeAttr(f.name)}</div>
+          <div style="display:flex;gap:4px;align-items:center;">${dots}</div>
+          ${showSkip ? `<button class="btn btn--ghost btn--sm" id="iq-skip"><i data-lucide="skip-forward"></i> Pular</button>` : ''}
+        </div>`;
+    }
+
+    function wireSkip() {
+      const skipBtn = bodyEl.querySelector('#iq-skip');
+      if (skipBtn) skipBtn.addEventListener('click', skipCurrent);
+    }
+
+    /* — Processa o arquivo do índice atual (parse lazy → revisão) — */
+    async function processIndex() {
+      destroyView();
+      if (index >= files.length) { finish(); return; }
+
+      const file = files[index];
+
+      bodyEl.innerHTML = `
+        ${progressHeaderHTML(false)}
+        <div style="text-align:center;padding:32px;">
+          <i data-lucide="loader-2" class="spin" style="width:32px;height:32px;color:var(--accent);"></i>
+          <p style="margin-top:12px;color:var(--text-secondary);">Lendo ${escapeAttr(file.name)}…</p>
+        </div>`;
+      lucide.createIcons({ nodes: [bodyEl] });
+      saveBtn.setAttribute('hidden', '');
+
+      let extracted = parsedCache[index];
+      if (!extracted) {
+        try {
+          extracted = await handler.parse(file);
+          parsedCache[index] = extracted;
+        } catch (err) {
+          renderParseError(file, err);
+          return;
+        }
+      }
+
+      bodyEl.innerHTML = progressHeaderHTML(true);
+      const host = document.createElement('div');
+      host.id = 'iq-review-host';
+      bodyEl.appendChild(host);
+      try {
+        currentView = await handler.renderReview(host, extracted, file);
+      } catch (err) {
+        renderParseError(file, err);
+        return;
+      }
+      lucide.createIcons({ nodes: [bodyEl] });
+      wireSkip();
+
+      saveBtn.removeAttribute('hidden');
+      saveBtn.disabled = false;
+      saveBtn.textContent = index === files.length - 1 ? 'Salvar e concluir' : 'Salvar e próximo';
+    }
+
+    function renderParseError(file, err) {
+      results[index] = { name: file.name, status: 'error', error: err.message };
+      bodyEl.innerHTML = progressHeaderHTML(true);
+      const box = document.createElement('div');
+      box.innerHTML = `
+        <div class="callout callout--warning" style="margin:12px 0;">
+          <i data-lucide="alert-triangle"></i>
+          <div>
+            <strong>Não foi possível processar ${escapeAttr(file.name)}</strong>
+            <p style="margin:4px 0 0;">${escapeAttr(err.message || 'Erro desconhecido.')}</p>
+          </div>
+        </div>
+        <p style="color:var(--text-secondary);font-size:13px;">Pule este arquivo para continuar com os demais.</p>`;
+      bodyEl.appendChild(box);
+      lucide.createIcons({ nodes: [bodyEl] });
+      wireSkip();
+      saveBtn.setAttribute('hidden', '');   // só o "Pular" avança
+    }
+
+    async function saveCurrent() {
+      const host = bodyEl.querySelector('#iq-review-host');
+      const extracted = parsedCache[index];
+      if (!host || !extracted) { skipCurrent(); return; }
+
+      const origLabel = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Salvando…';
+      try {
+        const r = await handler.save(host, extracted, files[index]);
+        results[index] = { name: files[index].name, status: 'saved', label: r?.label };
+        if (r?.newMappings) savedMappings += r.newMappings;
+        advance();
+      } catch (err) {
+        showToast(err.message || 'Erro ao salvar.', 'error');
+        saveBtn.disabled = false;
+        saveBtn.textContent = origLabel;
+      }
+    }
+
+    function skipCurrent() {
+      if (!results[index]) results[index] = { name: files[index].name, status: 'skipped' };
+      advance();
+    }
+
+    function advance() {
+      index += 1;
+      if (index >= files.length) finish();
+      else processIndex();
+    }
+
+    function destroyView() {
+      if (currentView && typeof currentView.destroy === 'function') {
+        try { currentView.destroy(); } catch { /* noop */ }
+      }
+      currentView = null;
+    }
+
+    function finish() {
+      closeModal();   // dispara onClose → finalize()
+    }
+
+    // Finalização única (chamada tanto por concluir quanto por Cancelar).
+    function finalize() {
+      if (finalized) return;
+      finalized = true;
+      destroyView();
+
+      const saved   = results.filter(r => r?.status === 'saved').length;
+      const skipped = results.filter(r => r?.status === 'skipped').length;
+      const errored = results.filter(r => r?.status === 'error').length;
+
+      if (saved || skipped || errored) {
+        const parts = [];
+        if (saved)   parts.push(`${saved} salvo(s)`);
+        if (skipped) parts.push(`${skipped} pulado(s)`);
+        if (errored) parts.push(`${errored} com erro`);
+        showToast(parts.join(' · '), saved ? 'success' : 'info');
+      }
+
+      if (saved) {
+        if (typeof handler.afterAllSaved === 'function') handler.afterAllSaved();
+        const reload = savedMappings > 0 ? loadContaRubricaMap() : Promise.resolve();
+        reload.then(() => refresh());
+      }
     }
   }
 
   // A extração de DOCX migrou para parsePtFromHtml (parser determinístico,
   // sem IA). Veja frontend/js/parsers/pt-parser.js e a integração em
-  // openImport() acima. A Edge Function extract-plano-trabalho continua
+  // PLANO_HANDLER acima. A Edge Function extract-plano-trabalho continua
   // deployada mas não é mais chamada pelo frontend.
 
   /* ── Extração PDF → texto e Edge Function de balancete ───── */
@@ -1015,151 +1282,7 @@ const PlanoTrabalhoPage = (() => {
     return parseBalanceteText(text);
   }
 
-  /* ── Importação de Balancete (modal multi-step) ──────────── */
-
-  function openImportBalancete() {
-    if (!selectedProjectId) {
-      showToast('Selecione um projeto antes de importar.', 'error');
-      return;
-    }
-    if (typeof pdfjsLib === 'undefined') {
-      showToast('Biblioteca pdf.js não carregada — verifique conexão.', 'error');
-      return;
-    }
-
-    const body = `
-      <div id="bal-step-1">
-        <p style="color:var(--text-secondary);margin-bottom:16px;">
-          Selecione o PDF do Balancete Contábil Analítico. O sistema vai detectar automaticamente o projeto pelo código (ex.: 30.099) e extrair os lançamentos.
-        </p>
-        <div class="form-group">
-          <label class="form-label">Arquivo PDF *</label>
-          <input type="file" id="bali-file" accept=".pdf,application/pdf" class="form-input">
-        </div>
-      </div>
-      <div id="bal-step-2" hidden style="text-align:center;padding:24px;">
-        <i data-lucide="loader-2" class="spin" style="width:32px;height:32px;color:var(--accent);"></i>
-        <p style="margin-top:16px;color:var(--text-secondary);">
-          <strong id="bali-progress-msg">Lendo PDF…</strong>
-        </p>
-      </div>
-      <div id="bal-step-3" hidden></div>
-    `;
-
-    let extracted = null;
-    let pickedFile = null;
-
-    const { overlay, closeModal } = createModal({
-      title: 'Importar Balancete (PDF)',
-      bodyHTML: body,
-      maxWidth: '95vw',
-      saveLabel: 'Continuar',
-    });
-
-    const saveBtn = overlay.querySelector('#modal-save-btn');
-    saveBtn.addEventListener('click', async () => {
-      const origLabel = saveBtn.textContent;
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Processando…';
-      try {
-        const step3Visible = !overlay.querySelector('#bal-step-3').hasAttribute('hidden');
-        if (step3Visible) {
-          await onConfirmSave();
-          closeModal();
-          return;
-        }
-
-        const fileInput = overlay.querySelector('#bali-file');
-        pickedFile = fileInput.files?.[0];
-        if (!pickedFile) throw new Error('Selecione um arquivo PDF.');
-        if (!pickedFile.name.toLowerCase().endsWith('.pdf')) throw new Error('Apenas arquivos .pdf são suportados.');
-
-        overlay.querySelector('#bal-step-1').setAttribute('hidden', '');
-        overlay.querySelector('#bal-step-2').removeAttribute('hidden');
-        lucide.createIcons({ nodes: [overlay] });
-        saveBtn.setAttribute('hidden', '');
-
-        const text = await extractPdfText(pickedFile);
-        overlay.querySelector('#bali-progress-msg').textContent = 'Extraindo dados do PDF…';
-        extracted = extractBalanceteFromText(text);
-
-        overlay.querySelector('#bal-step-2').setAttribute('hidden', '');
-        const step3 = overlay.querySelector('#bal-step-3');
-        step3.innerHTML = renderBalanceteReviewForm(extracted, pickedFile.name);
-        step3.removeAttribute('hidden');
-        lucide.createIcons({ nodes: [step3] });
-
-        // Monta split-view: PDF à esquerda + form de revisão à direita.
-        const splitHost = step3.querySelector('#bal-splitview');
-        const rightHTML = step3.querySelector('#bal-review-form')?.outerHTML || '';
-        try {
-          const pdfBuf = await pickedFile.arrayBuffer();
-          await mountPdfSplitView(splitHost, {
-            pdfData: pdfBuf,
-            rightHTML,
-            onMount: (rightEl) => { lucide.createIcons({ nodes: [rightEl] }); },
-          });
-          // Remove o form-host original (já foi para dentro do split-view)
-          step3.querySelector('#bal-review-form')?.remove();
-        } catch (e) {
-          // Se split-view falhar, deixa o form sozinho — não bloqueia o salvamento.
-          console.warn('Falha ao montar split-view do PDF:', e.message);
-        }
-
-        saveBtn.removeAttribute('hidden');
-        saveBtn.textContent = 'Salvar balancete';
-      } catch (err) {
-        showToast(err.message || 'Erro ao processar.', 'error');
-        overlay.querySelector('#bal-step-2')?.setAttribute('hidden', '');
-        overlay.querySelector('#bal-step-3')?.setAttribute('hidden', '');
-        overlay.querySelector('#bal-step-1')?.removeAttribute('hidden');
-        saveBtn.removeAttribute('hidden');
-        saveBtn.textContent = origLabel;
-      } finally {
-        saveBtn.disabled = false;
-      }
-    });
-
-    async function onConfirmSave() {
-      if (!extracted) throw new Error('Sem dados extraídos.');
-      const projSel = overlay.querySelector('#bali-project-sel');
-      const targetProjectId = projSel?.value;
-      if (!targetProjectId) throw new Error('Selecione o projeto.');
-
-      const payload = collectBalanceteReview(overlay, extracted);
-      payload.project_id    = targetProjectId;
-      payload.arquivo_nome  = pickedFile.name;
-      payload.raw_extraction = extracted.raw_extraction || extracted.data;
-
-      const safeName = pickedFile.name.replace(/[^\w.-]/g, '_');
-      const path = `${targetProjectId}/${Date.now()}_${safeName}`;
-      const up = await supabaseClient.storage
-        .from(BALANCETE_STORAGE_BUCKET)
-        .upload(path, pickedFile, { contentType: 'application/pdf' });
-      if (up.error) throw new Error('Falha no upload do PDF: ' + up.error.message);
-      payload.arquivo_storage_path = path;
-
-      const { error } = await supabaseClient.rpc('upsert_balancete', { p_payload: payload });
-      if (error) {
-        await supabaseClient.storage.from(BALANCETE_STORAGE_BUCKET).remove([path]).catch(() => {});
-        throw new Error('Erro ao salvar balancete: ' + error.message);
-      }
-
-      const mappingsCount = Array.isArray(payload.new_mappings) ? payload.new_mappings.length : 0;
-      const msg = mappingsCount > 0
-        ? `Balancete importado! ${mappingsCount} mapeamento(s) salvos para próximas importações.`
-        : 'Balancete importado com sucesso!';
-      showToast(msg, 'success');
-
-      selectedProjectId = targetProjectId;
-      localStorage.setItem(LS_PROJECT_KEY, selectedProjectId);
-      currentTab = 'previsto-real';
-      localStorage.setItem(LS_TAB_KEY, currentTab);
-      // Recarrega o mapa para refletir novos mapeamentos cadastrados.
-      if (mappingsCount > 0) await loadContaRubricaMap();
-      await refresh();
-    }
-  }
+  /* ── Revisão de Balancete (usada pela fila em BALANCETE_HANDLER) ── */
 
   function renderBalanceteReviewForm(extracted, fileName) {
     const d = extracted.data || {};
@@ -1537,7 +1660,6 @@ const PlanoTrabalhoPage = (() => {
 
   return {
     load, onProjectChange, switchTab, onImportClick,
-    openImport, openImportBalancete,
     visualizar, ativar, excluir, baixar,
     verBalancete, excluirBalancete, baixarBalancete,
     _addRubrica, _addDesembolso,
