@@ -782,6 +782,38 @@ img { max-width: 100%; display: block; }
   letter-spacing: -0.02em;
 }
 
+.stat-card__hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ── Hub do Projeto — blocos por área (tela experimental) ── */
+.hub-section__metric {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.hub-section__metric span {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.hub-section__text {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
 
 /* ── Data Table ────────────────────────────────────────────── */
 
@@ -1666,6 +1698,12 @@ img { max-width: 100%; display: block; }
   background: rgba(255, 193, 7, 0.1);
   border: 1px solid rgba(255, 193, 7, 0.35);
 }
+.alert-banner--danger {
+  background: rgba(214, 48, 49, 0.08);
+  border: 1px solid rgba(214, 48, 49, 0.30);
+}
+.alert-banner--danger .alert-banner__icon { color: var(--danger); }
+.alert-banner--danger .alert-banner__body strong { color: var(--danger); }
 .alert-banner__icon {
   color: var(--warning);
   flex-shrink: 0;
@@ -1754,6 +1792,92 @@ img { max-width: 100%; display: block; }
   gap: var(--sp-3);
   margin-top: var(--sp-4);
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+
+
+/* ── Page Tabs ──────────────────────────────────────────── */
+
+.page-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+}
+
+.page-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.page-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.page-tab--active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+
+/* ── Reconciliation Sections ───────────────────────────── */
+
+.recon-section {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.recon-section__header {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Borda lateral colorida por categoria */
+.recon-section--novos    { border-left: 4px solid var(--success); }
+.recon-section--removidos { border-left: 4px solid var(--danger); }
+.recon-section--alterados { border-left: 4px solid var(--warning); }
+.recon-section--iguais   { border-left: 4px solid var(--border-default); }
+
+.recon-section--novos .recon-section__header    { background: var(--success-muted); }
+.recon-section--removidos .recon-section__header { background: var(--danger-muted); }
+.recon-section--alterados .recon-section__header { background: var(--warning-muted); }
+.recon-section--iguais .recon-section__header    { background: var(--bg-hover); }
+
+/* Campo alterado — destaque amarelo suave */
+.recon-field-changed {
+  background: var(--warning-muted);
+  font-weight: 600;
+}
+
+.recon-field-db {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--danger-muted);
+}
+
+/* Linha de reconciliação com hover */
+.recon-row:hover {
+  background: var(--bg-hover);
 }
 
 

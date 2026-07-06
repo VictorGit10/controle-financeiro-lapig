@@ -28,6 +28,10 @@
   <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
   <script>if(typeof mammoth==="undefined")document.write('<script src="vendor/mammoth.browser.min.js"><\/script>');</script>
 
+  <!-- SheetJS (XLSX parser, usado pela Reconciliação de Bolsas) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script>if(typeof XLSX==="undefined")document.write('<script src="vendor/xlsx.full.min.js"><\/script>');</script>
+
   <!-- PDF.js (PDF → texto, usado pela importação de balancete) -->
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script>if(typeof pdfjsLib==="undefined")document.write('<script src="vendor/pdf.min.js"><\/script>');</script>
@@ -166,6 +170,12 @@
             </button>
           </li>
           <li>
+            <button class="sidebar__link" data-page="hub" id="nav-hub">
+              <i data-lucide="telescope"></i>
+              <span>Visão do Projeto</span>
+            </button>
+          </li>
+          <li>
             <button class="sidebar__link" data-page="dashboard" id="nav-dashboard">
               <i data-lucide="layout-dashboard"></i>
               <span>Visão Geral</span>
@@ -228,6 +238,8 @@
   <script type="module" src="js/parsers/pt-parser.js"></script>
   <script type="module" src="js/components/pdf-split-view.js"></script>
   <script type="module" src="js/components/docx-split-view.js"></script>
+  <script type="module" src="js/parsers/bolsa-parser.js"></script>
+  <script type="module" src="js/parsers/bolsa-comparator.js"></script>
   <script src="js/supabase-config.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/simulation.js"></script>
@@ -242,6 +254,7 @@
   <script src="js/pages/funding.js"></script>
   <script src="js/pages/expenses.js"></script>
   <script src="js/pages/plano-trabalho.js"></script>
+  <script src="js/pages/hub.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
