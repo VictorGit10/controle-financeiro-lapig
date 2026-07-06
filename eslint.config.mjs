@@ -28,6 +28,8 @@ export default [
         FundingPage: "writable",
         ExpensesPage: "writable",
         PlanoTrabalhoPage: "writable",
+        FechamentoPage: "writable",
+        ImportQueue: "writable",
         CrudPage: "writable",
         ChartBuilder: "writable",
         SimulationEngine: "writable",

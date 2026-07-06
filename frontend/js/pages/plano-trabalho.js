@@ -155,9 +155,48 @@ const PlanoTrabalhoPage = (() => {
 
   function onImportClick() {
     if (currentTab === 'balancetes' || currentTab === 'previsto-real') {
-      return openImportQueue(BALANCETE_HANDLER);
+      return openQueue(BALANCETE_HANDLER);
     }
-    return openImportQueue(PLANO_HANDLER);
+    return openQueue(PLANO_HANDLER);
+  }
+
+  // Abre a fila genérica (ImportQueue) com um handler desta página.
+  function openQueue(handler) {
+    if (allProjects.length === 0) {
+      showToast('Cadastre um projeto antes de importar.', 'error');
+      return;
+    }
+    ImportQueue.open({
+      title: handler.title,
+      handlers: [handler],
+      onFinished: async (summary) => {
+        if (!summary.saved) return;
+        if (summary.newMappings > 0) await loadContaRubricaMap();
+        refresh();
+      },
+    });
+  }
+
+  /**
+   * Contexto para uso dos handlers fora desta página (Fechamento Mensal):
+   * garante projetos + mapeamento conta→rubrica carregados e devolve os
+   * handlers de plano (DOCX) e balancete (PDF).
+   */
+  async function getImportHandlers() {
+    if (allProjects.length === 0) {
+      const { data, error } = await supabaseClient
+        .from('projects')
+        .select('id,name,code,funape_managed,active')
+        .order('name', { ascending: true });
+      if (error) throw new Error('Erro ao carregar projetos: ' + error.message);
+      allProjects = data || [];
+      if (allProjects.length === 0) throw new Error('Cadastre um projeto antes de importar.');
+      if (!selectedProjectId || !allProjects.find(p => p.id === selectedProjectId)) {
+        selectedProjectId = allProjects[0].id;
+      }
+    }
+    if (contaRubricaMap.length === 0) await loadContaRubricaMap();
+    return { plano: PLANO_HANDLER, balancete: BALANCETE_HANDLER };
   }
 
   function updateActionButton() {
@@ -796,12 +835,11 @@ const PlanoTrabalhoPage = (() => {
 
   /* ── Importação (modal multi-step) ────────────────────────── */
 
-  /* ── Importação em lote — fila de confirmação ─────────────────
-     Seleciona N arquivos e percorre uma fila: a mesma tela de
-     revisão (split-view) aparece para cada arquivo, com "arquivo
-     X de N" e botões Salvar / Pular. Cada tipo (balancete PDF,
-     plano DOCX) é um "handler" que reaproveita as funções
-     single-file (parse, render de revisão, save). ─────────────── */
+  /* ── Handlers de importação (consumidos pela ImportQueue) ─────
+     Cada tipo (balancete PDF, plano DOCX) é um "handler" que
+     reaproveita as funções single-file (parse, render de revisão,
+     save). O controlador da fila vive em js/import-queue.js e
+     também é usado pela página Fechamento Mensal. ─────────────── */
 
   // Seletores Projeto + Tipo injetados no topo da revisão de PLANO
   // (no lote não existe mais o step-1 com esses campos).
@@ -827,6 +865,7 @@ const PlanoTrabalhoPage = (() => {
 
   const PLANO_HANDLER = {
     type: 'plano',
+    badge: 'Plano',
     title: 'Importar planos / remanejamentos (DOCX)',
     accept: '.docx',
     extLabel: 'DOCX',
@@ -900,6 +939,7 @@ const PlanoTrabalhoPage = (() => {
 
   const BALANCETE_HANDLER = {
     type: 'balancete',
+    badge: 'Balancete',
     title: 'Importar balancetes (PDF)',
     accept: '.pdf,application/pdf',
     extLabel: 'PDF',
@@ -965,277 +1005,6 @@ const PlanoTrabalhoPage = (() => {
       localStorage.setItem(LS_TAB_KEY, currentTab);
     },
   };
-
-  // Controlador da fila: um único modal, várias telas.
-  function openImportQueue(handler) {
-    if (allProjects.length === 0) {
-      showToast('Cadastre um projeto antes de importar.', 'error');
-      return;
-    }
-    try { handler.checkDeps(); }
-    catch (e) { showToast(e.message, 'error'); return; }
-
-    const files       = [];
-    let   index       = 0;
-    let   phase       = 'selection';   // 'selection' | 'review'
-    const results     = [];            // [{ name, status, label? }]
-    const parsedCache = [];            // extracted por índice (lazy)
-    let   currentView = null;          // split-view atual (p/ destroy)
-    let   savedMappings = 0;
-    let   finalized   = false;
-
-    const { overlay, closeModal } = createModal({
-      title: handler.title,
-      bodyHTML: `<div id="iq-body"></div>`,
-      maxWidth: '95vw',
-      saveLabel: 'Continuar',
-      onClose: finalize,
-    });
-
-    const bodyEl  = overlay.querySelector('#iq-body');
-    const saveBtn = overlay.querySelector('#modal-save-btn');
-    saveBtn.addEventListener('click', onSaveClick);
-
-    renderSelection();
-
-    /* — Tela A: seleção de arquivos — */
-    function renderSelection() {
-      phase = 'selection';
-      bodyEl.innerHTML = `
-        <p style="color:var(--text-secondary);margin-bottom:12px;">
-          Selecione um ou vários arquivos <strong>${handler.extLabel}</strong>. Você vai revisar e confirmar cada um, um por vez.
-        </p>
-        <label id="iq-drop" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:28px;border:2px dashed var(--border-color);border-radius:10px;cursor:pointer;text-align:center;color:var(--text-secondary);">
-          <i data-lucide="upload-cloud" style="width:32px;height:32px;"></i>
-          <span>Arraste os arquivos aqui ou <strong>clique para escolher</strong></span>
-          <input type="file" id="iq-file" accept="${handler.accept}" multiple hidden>
-        </label>
-        <div id="iq-filelist" style="margin-top:12px;"></div>`;
-      lucide.createIcons({ nodes: [bodyEl] });
-      saveBtn.removeAttribute('hidden');
-      saveBtn.textContent = 'Continuar';
-      saveBtn.disabled = files.length === 0;
-
-      const input = bodyEl.querySelector('#iq-file');
-      const drop  = bodyEl.querySelector('#iq-drop');
-      input.addEventListener('change', () => { addFiles(input.files); input.value = ''; });
-      drop.addEventListener('dragover',  (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; });
-      drop.addEventListener('dragleave', () => { drop.style.borderColor = 'var(--border-color)'; });
-      drop.addEventListener('drop', (e) => {
-        e.preventDefault();
-        drop.style.borderColor = 'var(--border-color)';
-        addFiles(e.dataTransfer.files);
-      });
-      renderFileList();
-    }
-
-    function addFiles(fileList) {
-      for (const f of Array.from(fileList || [])) {
-        if (!handler.validExt(f.name)) {
-          showToast(`"${f.name}" ignorado — não é ${handler.extLabel}.`, 'error');
-          continue;
-        }
-        if (files.some(x => x.name === f.name && x.size === f.size)) continue;   // evita duplicata
-        files.push(f);
-      }
-      renderFileList();
-      saveBtn.disabled = files.length === 0;
-    }
-
-    function renderFileList() {
-      const listEl = bodyEl.querySelector('#iq-filelist');
-      if (!listEl) return;
-      if (files.length === 0) { listEl.innerHTML = ''; return; }
-      listEl.innerHTML = `
-        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:6px;">${files.length} arquivo(s) selecionado(s):</div>
-        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:4px;">
-          ${files.map((f, i) => `
-            <li style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-elevated);border-radius:6px;font-size:13px;">
-              <i data-lucide="file" style="width:16px;height:16px;color:var(--text-secondary);flex-shrink:0;"></i>
-              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeAttr(f.name)}</span>
-              <span style="color:var(--text-muted);font-size:11px;">${(f.size / 1024).toFixed(0)} KB</span>
-              <button class="btn btn--ghost btn--sm" data-iq-remove="${i}" title="Remover" style="color:var(--danger);padding:2px 6px;">
-                <i data-lucide="x" style="width:14px;height:14px;"></i>
-              </button>
-            </li>`).join('')}
-        </ul>`;
-      lucide.createIcons({ nodes: [listEl] });
-      listEl.querySelectorAll('[data-iq-remove]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          files.splice(Number(btn.getAttribute('data-iq-remove')), 1);
-          renderFileList();
-          saveBtn.disabled = files.length === 0;
-        });
-      });
-    }
-
-    /* — Botão principal (muda de papel conforme a fase) — */
-    async function onSaveClick() {
-      if (phase === 'selection') {
-        if (files.length === 0) return;
-        phase = 'review';
-        index = 0;
-        await processIndex();
-        return;
-      }
-      await saveCurrent();
-    }
-
-    /* — Cabeçalho de progresso "Arquivo X de N" + pontos — */
-    function progressHeaderHTML(showSkip) {
-      const f = files[index];
-      const dots = files.map((_, i) => {
-        const r = results[i];
-        const color = i < index
-          ? (r?.status === 'saved' ? 'var(--success)' : r?.status === 'error' ? 'var(--danger)' : 'var(--text-muted)')
-          : (i === index ? 'var(--accent)' : 'var(--border-color)');
-        return `<span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>`;
-      }).join('');
-      return `
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border-color);flex-wrap:wrap;">
-          <div style="font-weight:600;color:var(--text-primary);white-space:nowrap;">Arquivo ${index + 1} de ${files.length}</div>
-          <div style="flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:13px;">${escapeAttr(f.name)}</div>
-          <div style="display:flex;gap:4px;align-items:center;">${dots}</div>
-          ${showSkip ? `<button class="btn btn--ghost btn--sm" id="iq-skip"><i data-lucide="skip-forward"></i> Pular</button>` : ''}
-        </div>`;
-    }
-
-    function wireSkip() {
-      const skipBtn = bodyEl.querySelector('#iq-skip');
-      if (skipBtn) skipBtn.addEventListener('click', skipCurrent);
-    }
-
-    /* — Processa o arquivo do índice atual (parse lazy → revisão) — */
-    async function processIndex() {
-      destroyView();
-      if (index >= files.length) { finish(); return; }
-
-      const file = files[index];
-
-      bodyEl.innerHTML = `
-        ${progressHeaderHTML(false)}
-        <div style="text-align:center;padding:32px;">
-          <i data-lucide="loader-2" class="spin" style="width:32px;height:32px;color:var(--accent);"></i>
-          <p style="margin-top:12px;color:var(--text-secondary);">Lendo ${escapeAttr(file.name)}…</p>
-        </div>`;
-      lucide.createIcons({ nodes: [bodyEl] });
-      saveBtn.setAttribute('hidden', '');
-
-      let extracted = parsedCache[index];
-      if (!extracted) {
-        try {
-          extracted = await handler.parse(file);
-          parsedCache[index] = extracted;
-        } catch (err) {
-          renderParseError(file, err);
-          return;
-        }
-      }
-
-      bodyEl.innerHTML = progressHeaderHTML(true);
-      const host = document.createElement('div');
-      host.id = 'iq-review-host';
-      bodyEl.appendChild(host);
-      try {
-        currentView = await handler.renderReview(host, extracted, file);
-      } catch (err) {
-        renderParseError(file, err);
-        return;
-      }
-      lucide.createIcons({ nodes: [bodyEl] });
-      wireSkip();
-
-      saveBtn.removeAttribute('hidden');
-      saveBtn.disabled = false;
-      saveBtn.textContent = index === files.length - 1 ? 'Salvar e concluir' : 'Salvar e próximo';
-    }
-
-    function renderParseError(file, err) {
-      results[index] = { name: file.name, status: 'error', error: err.message };
-      bodyEl.innerHTML = progressHeaderHTML(true);
-      const box = document.createElement('div');
-      box.innerHTML = `
-        <div class="callout callout--warning" style="margin:12px 0;">
-          <i data-lucide="alert-triangle"></i>
-          <div>
-            <strong>Não foi possível processar ${escapeAttr(file.name)}</strong>
-            <p style="margin:4px 0 0;">${escapeAttr(err.message || 'Erro desconhecido.')}</p>
-          </div>
-        </div>
-        <p style="color:var(--text-secondary);font-size:13px;">Pule este arquivo para continuar com os demais.</p>`;
-      bodyEl.appendChild(box);
-      lucide.createIcons({ nodes: [bodyEl] });
-      wireSkip();
-      saveBtn.setAttribute('hidden', '');   // só o "Pular" avança
-    }
-
-    async function saveCurrent() {
-      const host = bodyEl.querySelector('#iq-review-host');
-      const extracted = parsedCache[index];
-      if (!host || !extracted) { skipCurrent(); return; }
-
-      const origLabel = saveBtn.textContent;
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Salvando…';
-      try {
-        const r = await handler.save(host, extracted, files[index]);
-        results[index] = { name: files[index].name, status: 'saved', label: r?.label };
-        if (r?.newMappings) savedMappings += r.newMappings;
-        advance();
-      } catch (err) {
-        showToast(err.message || 'Erro ao salvar.', 'error');
-        saveBtn.disabled = false;
-        saveBtn.textContent = origLabel;
-      }
-    }
-
-    function skipCurrent() {
-      if (!results[index]) results[index] = { name: files[index].name, status: 'skipped' };
-      advance();
-    }
-
-    function advance() {
-      index += 1;
-      if (index >= files.length) finish();
-      else processIndex();
-    }
-
-    function destroyView() {
-      if (currentView && typeof currentView.destroy === 'function') {
-        try { currentView.destroy(); } catch { /* noop */ }
-      }
-      currentView = null;
-    }
-
-    function finish() {
-      closeModal();   // dispara onClose → finalize()
-    }
-
-    // Finalização única (chamada tanto por concluir quanto por Cancelar).
-    function finalize() {
-      if (finalized) return;
-      finalized = true;
-      destroyView();
-
-      const saved   = results.filter(r => r?.status === 'saved').length;
-      const skipped = results.filter(r => r?.status === 'skipped').length;
-      const errored = results.filter(r => r?.status === 'error').length;
-
-      if (saved || skipped || errored) {
-        const parts = [];
-        if (saved)   parts.push(`${saved} salvo(s)`);
-        if (skipped) parts.push(`${skipped} pulado(s)`);
-        if (errored) parts.push(`${errored} com erro`);
-        showToast(parts.join(' · '), saved ? 'success' : 'info');
-      }
-
-      if (saved) {
-        if (typeof handler.afterAllSaved === 'function') handler.afterAllSaved();
-        const reload = savedMappings > 0 ? loadContaRubricaMap() : Promise.resolve();
-        reload.then(() => refresh());
-      }
-    }
-  }
 
   // A extração de DOCX migrou para parsePtFromHtml (parser determinístico,
   // sem IA). Veja frontend/js/parsers/pt-parser.js e a integração em
@@ -1659,7 +1428,7 @@ const PlanoTrabalhoPage = (() => {
   }
 
   return {
-    load, onProjectChange, switchTab, onImportClick,
+    load, onProjectChange, switchTab, onImportClick, getImportHandlers,
     visualizar, ativar, excluir, baixar,
     verBalancete, excluirBalancete, baixarBalancete,
     _addRubrica, _addDesembolso,

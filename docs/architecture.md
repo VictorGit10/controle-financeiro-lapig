@@ -19,10 +19,10 @@ Scripts in `index.html` must load in dependency order. Changing the order will b
 5. `router.js` — no dependencies
 6. `chart-builder.js` — depends on Chart.js (CDN)
 7. `pages/crud-page.js` — depends on `supabaseClient`, `handleSupabaseResponse`
-8. Page modules (projetos, gestao, holders, saldos, funding, expenses, plano-trabalho, hub, dashboard) — depend on `Router`, `supabaseClient`, `ChartBuilder`, `SimulationEngine`, `CrudPage`
+8. Page modules (projetos, gestao, holders, saldos, funding, expenses, plano-trabalho, fechamento, hub, dashboard) — depend on `Router`, `supabaseClient`, `ChartBuilder`, `SimulationEngine`, `CrudPage`, `ImportQueue` (`js/import-queue.js`, carregado logo após `router.js`)
 9. `app.js` — bootstrap, depends on `Router`, `Auth`. Registra também um handler `beforeunload` que chama `Router.hasUnsavedChanges()` para avisar ao fechar/recarregar a aba com mudanças pendentes.
 
-The page `plano-trabalho` also depends on `mammoth` (DOCX → HTML, CDN com fallback em `frontend/vendor/mammoth.browser.min.js`), `pdfjsLib` (PDF → texto, CDN `pdfjs-dist@3.11.174` + worker), e dos parsers determinísticos `pt-parser.js` / `balancete-parser.js` (ES modules bridge-ados ao `window` como `parsePtFromHtml` / `parseBalanceteText`). A importação é em **lote** (`openImportQueue`): uma fila selection→review percorre N arquivos com "Arquivo X de N" e Salvar/Pular. O CSP em `index.html` inclui `worker-src 'self' https://cdn.jsdelivr.net blob:` para permitir o worker do pdf.js.
+The page `plano-trabalho` also depends on `mammoth` (DOCX → HTML, CDN com fallback em `frontend/vendor/mammoth.browser.min.js`), `pdfjsLib` (PDF → texto, CDN `pdfjs-dist@3.11.174` + worker), e dos parsers determinísticos `pt-parser.js` / `balancete-parser.js` (ES modules bridge-ados ao `window` como `parsePtFromHtml` / `parseBalanceteText`). A importação é em **lote** (`ImportQueue`, componente global): uma fila selection→review percorre N arquivos com "Arquivo X de N" e Salvar/Pular, roteando cada arquivo para o handler do seu tipo (PDF → balancete, DOCX → plano, XLSX → bolsas FUNAPE). O CSP em `index.html` inclui `worker-src 'self' https://cdn.jsdelivr.net blob:` para permitir o worker do pdf.js.
 
 The page `holders` (aba Reconciliação) depende de `XLSX` (SheetJS, CDN `xlsx@0.18.5` + fallback em `frontend/vendor/xlsx.full.min.js`) e dos parsers `bolsa-parser.js` / `bolsa-comparator.js` (ES modules bridge-ados ao `window` como `parseBolsaSpreadsheet` / `compareBolsaData`).
 

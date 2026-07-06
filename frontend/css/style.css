@@ -509,6 +509,20 @@ img { max-width: 100%; display: block; }
   gap: var(--sp-1);
 }
 
+.sidebar__section {
+  padding: var(--sp-4) var(--sp-4) var(--sp-1);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.sidebar__section:first-child {
+  padding-top: 0;
+}
+
 .sidebar__link {
   display: flex;
   align-items: center;

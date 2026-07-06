@@ -48,8 +48,8 @@ const HoldersPage = (() => {
     const btn = document.querySelector('#page-actions button');
     if (!btn) return;
     if (currentTab === 'reconciliacao') {
-      btn.innerHTML = '<i data-lucide="upload"></i> Importar Planilha FUNAPE';
-      btn.onclick = () => openImportReconciliacao();
+      btn.innerHTML = '<i data-lucide="upload"></i> Importar Planilhas FUNAPE';
+      btn.onclick = () => openImportBolsas();
     } else {
       btn.innerHTML = '<i data-lucide="user-plus"></i> Novo Bolsista';
       btn.onclick = () => HoldersPage.openForm();
@@ -1060,192 +1060,400 @@ const HoldersPage = (() => {
   }
 
   // ── Aba Reconciliação ──────────────────────────────────────
+  // A importação roda na ImportQueue (js/import-queue.js) com o
+  // handler de bolsas abaixo — revisão human-in-the-loop por
+  // arquivo, com seletor de projeto (sugerido por CPF) e
+  // competência. A aba em si mostra instruções + histórico
+  // (tabela `reconciliacoes`, migração 031).
 
-  let reconDiff = null; // resultado da comparação
-  let reconProjectId = localStorage.getItem('cf_recon_project_id') || '';
+  const BOLSA_STORAGE_BUCKET = 'bolsa-planilhas';
+
+  let _bolsaCtx = null;   // { projects, universe } — contexto dos handlers
 
   function renderReconciliacaoTab() {
-    const projectOptions = allProjects.map(p =>
-      `<option value="${p.id}" ${reconProjectId === p.id ? 'selected' : ''}>${escapeAttr(p.name)}</option>`
-    ).join('');
-
-    let diffHTML = '';
-    if (reconDiff) {
-      diffHTML = renderReconciliationDiff(reconDiff);
-    }
-
     const content = document.createElement('div');
     content.innerHTML = `
       <div class="card fade-in" style="margin-top:var(--sp-3);">
         <div class="card__header">
           <div>
             <h3 class="card__title">Reconciliação de Bolsas FUNAPE</h3>
-            <p class="card__subtitle">Compare a planilha do sistema FUNAPE com os dados cadastrados</p>
+            <p class="card__subtitle">Compare as planilhas do sistema FUNAPE (uma por projeto) com os dados cadastrados</p>
           </div>
+          <button class="btn btn--primary" onclick="HoldersPage.openImportBolsas()">
+            <i data-lucide="upload" style="width:16px;height:16px;"></i>
+            Importar planilhas (.xlsx)
+          </button>
         </div>
         <div style="padding:var(--sp-4);">
-          <div style="display:flex;gap:var(--sp-3);align-items:end;flex-wrap:wrap;">
-            <div class="form-group" style="margin:0;flex:1;min-width:200px;">
-              <label class="form-label">Projeto</label>
-              <select class="form-input" id="recon-project-select" onchange="HoldersPage.onReconProjectChange(this.value)">
-                <option value="">Selecione um projeto...</option>
-                ${projectOptions}
-              </select>
-            </div>
-            <button class="btn btn--primary" onclick="HoldersPage.openImportReconciliacao()" ${!reconProjectId ? 'disabled' : ''}>
-              <i data-lucide="upload" style="width:16px;height:16px;"></i>
-              Importar Planilha (.xlsx)
-            </button>
+          <p style="color:var(--text-secondary);font-size:0.9rem;margin:0;">
+            Selecione uma ou várias planilhas de uma vez — o projeto é sugerido automaticamente
+            pelos CPFs e cada arquivo é revisado antes de aplicar. As reconciliações aplicadas
+            ficam registradas abaixo, por competência.
+          </p>
+          <div id="recon-hist-area" style="margin-top:var(--sp-4);">
+            <div class="skeleton skeleton--card" style="height:120px;"></div>
           </div>
-          <div id="recon-diff-area">${diffHTML}</div>
         </div>
       </div>
     `;
     containerEl.appendChild(content);
     lucide.createIcons();
+
+    loadReconHistorico().then(({ rows, error }) => {
+      const area = document.getElementById('recon-hist-area');
+      if (!area) return;
+      area.innerHTML = renderReconHistoricoHTML(rows, error);
+      lucide.createIcons({ nodes: [area] });
+    });
   }
 
-  function onReconProjectChange(projectId) {
-    reconProjectId = projectId;
-    localStorage.setItem('cf_recon_project_id', projectId);
-    reconDiff = null;
-    renderPage();
+  async function loadReconHistorico() {
+    const { data, error } = await supabaseClient
+      .from('reconciliacoes')
+      .select('id, competencia, arquivo_nome, resumo, created_at, projects:project_id(name)')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (error) return { rows: [], error };
+    return { rows: data || [], error: null };
   }
 
-  async function openImportReconciliacao() {
-    if (!reconProjectId) {
-      showToast('Selecione um projeto primeiro.', 'warning');
+  function formatCompetencia(isoDate) {
+    if (!isoDate) return '—';
+    const [y, m] = String(isoDate).split('-');
+    return m && y ? `${m}/${y}` : isoDate;
+  }
+
+  function renderReconHistoricoHTML(rows, error) {
+    if (error) {
+      const missing = error.code === '42P01' || /does not exist/i.test(error.message || '');
+      return `
+        <div class="alert-banner alert-banner--warning">
+          <i data-lucide="alert-triangle" class="alert-banner__icon"></i>
+          <div class="alert-banner__body">
+            ${missing
+              ? '<strong>Histórico indisponível</strong><div style="font-size:0.85rem;color:var(--text-secondary);">Execute a migração <code>031_reconciliacoes.sql</code> para habilitar o registro das reconciliações.</div>'
+              : `<strong>Erro ao carregar histórico</strong><div style="font-size:0.85rem;color:var(--text-secondary);">${escapeAttr(error.message)}</div>`}
+          </div>
+        </div>`;
+    }
+    if (!rows.length) {
+      return '<p style="color:var(--text-muted);font-size:0.85rem;">Nenhuma reconciliação registrada ainda.</p>';
+    }
+    return `
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Competência</th>
+              <th>Projeto</th>
+              <th>Arquivo</th>
+              <th style="text-align:center;">Novos</th>
+              <th style="text-align:center;">Alterados</th>
+              <th style="text-align:center;">Removidos</th>
+              <th style="text-align:center;">Aplicadas</th>
+              <th>Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => {
+              const s = r.resumo || {};
+              return `
+                <tr>
+                  <td style="font-weight:600;">${formatCompetencia(r.competencia)}</td>
+                  <td>${escapeAttr(r.projects?.name || '—')}</td>
+                  <td style="font-size:0.8rem;color:var(--text-secondary);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeAttr(r.arquivo_nome || '—')}</td>
+                  <td style="text-align:center;">${s.novos ?? '—'}</td>
+                  <td style="text-align:center;">${s.alterados ?? '—'}</td>
+                  <td style="text-align:center;">${s.removidos ?? '—'}</td>
+                  <td style="text-align:center;font-weight:600;">${s.aplicadas ?? '—'}</td>
+                  <td style="font-size:0.8rem;">${formatDate(r.created_at?.substring(0, 10))}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  async function openImportBolsas() {
+    let handler;
+    try {
+      handler = await getBolsaImportHandler();
+    } catch (e) {
+      showToast(e.message, 'error');
+      return;
+    }
+    ImportQueue.open({
+      title: handler.title,
+      handlers: [handler],
+      onFinished: (summary) => { if (summary.saved) refresh(); },
+    });
+  }
+
+  /* ── Handler de bolsas (contrato da ImportQueue) ──────────── */
+
+  // Carrega projetos + universo global de bolsistas (para vincular
+  // pessoas já cadastradas via outro projeto e sugerir o projeto da
+  // planilha pelos CPFs).
+  async function loadBolsaContext() {
+    const [projRes, holdRes] = await Promise.all([
+      supabaseClient.from('projects').select('id, name').order('name'),
+      supabaseClient
+        .from('scholarship_holders')
+        .select('id, full_name, cpf, email, education_level, scholarships(project_id, status)'),
+    ]);
+    if (projRes.error) throw new Error('Erro ao carregar projetos: ' + projRes.error.message);
+    if (holdRes.error) throw new Error('Erro ao carregar bolsistas: ' + holdRes.error.message);
+    if (!(projRes.data || []).length) throw new Error('Cadastre um projeto antes de importar.');
+    _bolsaCtx = { projects: projRes.data || [], universe: holdRes.data || [] };
+    return _bolsaCtx;
+  }
+
+  // Competência default = mês anterior (fechamento do mês que passou).
+  function previousMonthYM() {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  // Sugere o projeto da planilha: maioria dos CPFs com bolsa ativa nele.
+  function suggestProjectForRows(rows) {
+    const byCpf = new Map();
+    (_bolsaCtx?.universe || []).forEach(h => { if (h.cpf) byCpf.set(h.cpf, h); });
+    const score = new Map();
+    rows.forEach(r => {
+      const h = r.cpf ? byCpf.get(r.cpf) : null;
+      (h?.scholarships || []).forEach(s => {
+        if (s.status === 'active' && s.project_id) {
+          score.set(s.project_id, (score.get(s.project_id) || 0) + 1);
+        }
+      });
+    });
+    let best = '', bestN = 0;
+    score.forEach((n, pid) => { if (n > bestN) { best = pid; bestN = n; } });
+    return best;
+  }
+
+  async function computeBolsaDiff(host, extracted) {
+    const area = host.querySelector('#bolsa-diff-area');
+    const projectId = host.querySelector('#bolsa-project-sel')?.value || '';
+    extracted.projectId = projectId;
+    extracted.diff = null;
+    if (!area) return;
+    if (!projectId) {
+      area.innerHTML = '<p style="color:var(--text-muted);font-size:0.9rem;">Selecione o projeto para comparar com o banco.</p>';
+      return;
+    }
+    area.innerHTML = '<div class="skeleton skeleton--card" style="height:120px;"></div>';
+
+    const { data: dbData, error } = await supabaseClient
+      .from('scholarships')
+      .select(`
+        holder_id,
+        amount,
+        start_date,
+        end_date,
+        status,
+        scholarship_type,
+        scholarship_id:id,
+        scholarship_holders!holder_id(id, full_name, cpf, email, education_level)
+      `)
+      .eq('project_id', projectId)
+      .eq('status', 'active');
+
+    if (error) {
+      area.innerHTML = `
+        <div class="callout callout--warning">
+          <i data-lucide="alert-triangle"></i>
+          <div><strong>Erro ao carregar bolsas do projeto</strong><p style="margin:4px 0 0;">${escapeAttr(error.message)}</p></div>
+        </div>`;
+      lucide.createIcons({ nodes: [area] });
       return;
     }
 
-    const modalHTML = `
-      <div id="recon-step-1">
-        <div style="text-align:center;padding:var(--sp-6) 0;">
-          <i data-lucide="file-spreadsheet" style="width:48px;height:48px;color:var(--accent);margin-bottom:var(--sp-3);"></i>
-          <h3 style="margin-bottom:var(--sp-2);">Importar Planilha de Bolsas</h3>
-          <p style="color:var(--text-secondary);margin-bottom:var(--sp-4);">
-            Selecione o arquivo .xlsx baixado do sistema FUNAPE.<br>
-            Apenas bolsas com status <strong>"Ativo"</strong> serão comparadas.
-          </p>
-          <input type="file" id="recon-file-input" accept=".xlsx,.xls"
-            style="display:inline-block;margin-bottom:var(--sp-3);">
-        </div>
-      </div>
-      <div id="recon-step-2" style="display:none;">
-        <div style="text-align:center;padding:var(--sp-6) 0;">
-          <div class="spinner" style="margin:0 auto var(--sp-3);"></div>
-          <p id="recon-step-2-msg">Lendo planilha...</p>
-        </div>
-      </div>
-    `;
+    const dbScholarships = (dbData || []).map(s => ({
+      holder_id: s.scholarship_holders?.id || s.holder_id,
+      full_name: s.scholarship_holders?.full_name || '?',
+      cpf: s.scholarship_holders?.cpf || null,
+      email: s.scholarship_holders?.email || null,
+      education_level: s.scholarship_holders?.education_level || null,
+      scholarship_id: s.scholarship_id,
+      amount: s.amount,
+      start_date: s.start_date,
+      end_date: s.end_date,
+      status: s.status,
+      scholarship_type: s.scholarship_type || null,
+    }));
 
-    const { overlay } = createModal({
-      title: 'Reconciliação de Bolsas',
-      bodyHTML: modalHTML,
-      maxWidth: '600px',
-      hideCancelBtn: false,
-      saveLabel: 'Analisar',
-      saveClass: 'btn--primary',
-      onSave: async () => {
-        const fileInput = document.getElementById('recon-file-input');
-        if (!fileInput || !fileInput.files.length) {
-          throw new Error('Selecione um arquivo .xlsx.');
+    const universe = (_bolsaCtx?.universe || []).map(h => ({
+      id: h.id,
+      full_name: h.full_name,
+      cpf: h.cpf || null,
+      email: h.email || null,
+      education_level: h.education_level || null,
+    }));
+
+    const diff = compareBolsaData(extracted.rows, dbScholarships, universe);
+    diff._warnings = extracted.warnings;
+    extracted.diff = diff;
+
+    area.innerHTML = renderReconciliationDiff(diff);
+    lucide.createIcons({ nodes: [area] });
+  }
+
+  /**
+   * Devolve o handler de importação de planilhas FUNAPE para a
+   * ImportQueue. Usado por esta página e pelo Fechamento Mensal.
+   * opts.defaultCompetencia: 'YYYY-MM' pré-selecionada na revisão.
+   */
+  async function getBolsaImportHandler(opts = {}) {
+    await loadBolsaContext();
+    const defaultComp = opts.defaultCompetencia || previousMonthYM();
+
+    return {
+      type: 'bolsas',
+      badge: 'Bolsas',
+      title: 'Importar planilhas de bolsas FUNAPE (XLSX)',
+      accept: '.xlsx,.xls',
+      extLabel: 'XLSX',
+      checkDeps() {
+        if (typeof XLSX === 'undefined') throw new Error('Biblioteca SheetJS não carregada — verifique conexão.');
+        if (typeof parseBolsaSpreadsheet === 'undefined' || typeof compareBolsaData === 'undefined') {
+          throw new Error('Parser de bolsas não carregado. Recarregue a página.');
+        }
+      },
+      validExt(name) { return /\.(xlsx|xls)$/i.test(name); },
+
+      async parse(file) {
+        const buf = await file.arrayBuffer();
+        const { data: rows, warnings } = parseBolsaSpreadsheet(buf);
+        if (!rows.length) throw new Error('Nenhuma bolsa ativa encontrada na planilha.');
+        return { rows, warnings, diff: null, projectId: suggestProjectForRows(rows) };
+      },
+
+      async renderReview(host, extracted, file) {
+        const projOpts = _bolsaCtx.projects.map(p =>
+          `<option value="${p.id}" ${p.id === extracted.projectId ? 'selected' : ''}>${escapeAttr(p.name)}</option>`
+        ).join('');
+        host.innerHTML = `
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:12px;padding:12px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-elevated);">
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:12px;">Projeto *</label>
+              <select id="bolsa-project-sel" class="form-input">
+                <option value="">Selecione…</option>
+                ${projOpts}
+              </select>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label" style="font-size:12px;">Competência *</label>
+              <input type="month" id="bolsa-competencia" class="form-input" value="${defaultComp}">
+            </div>
+          </div>
+          <div id="bolsa-diff-area"></div>`;
+        const sel = host.querySelector('#bolsa-project-sel');
+        sel.addEventListener('change', () => computeBolsaDiff(host, extracted));
+        await computeBolsaDiff(host, extracted);
+        return null;
+      },
+
+      async save(host, extracted, file) {
+        const projectId = host.querySelector('#bolsa-project-sel')?.value;
+        if (!projectId) throw new Error('Selecione o projeto.');
+        const compYM = host.querySelector('#bolsa-competencia')?.value;
+        if (!compYM) throw new Error('Informe a competência (mês de referência).');
+        const diff = extracted.diff;
+        if (!diff) throw new Error('Aguarde a comparação com o banco antes de salvar.');
+
+        // Coleta os itens aprovados (checkbox marcado), escopados à revisão atual.
+        const pick = (section, arr) => {
+          const out = [];
+          host.querySelectorAll(`.recon-item-check[data-section="${section}"]`).forEach((cb, i) => {
+            if (cb.checked && arr[i]) out.push(arr[i]);
+          });
+          return out;
+        };
+        const approvedCreates = pick('novos', diff.novos);
+        const approvedEnds    = pick('removidos', diff.removidos);
+        const approvedUpdates = pick('alterados', diff.alterados);
+
+        let aplicadas = 0;
+        if (approvedCreates.length || approvedEnds.length || approvedUpdates.length) {
+          // holder_id presente em um "create" → vincula a bolsa a um holder
+          // existente (pessoa de outro projeto) em vez de criar duplicado.
+          const creates = approvedCreates.map(n => ({
+            holder_id: n.existingHolderId || '',
+            nome: n.nome,
+            cpf: n.cpf || '',
+            email: n.email || '',
+            tipo: n.tipo || '',
+            formacao: n.formacao || '',
+            valor: n.valor,
+            inicio: n.duracao_inicio,
+            fim: n.duracao_fim,
+          }));
+          const updates = approvedUpdates.map(a => ({
+            holder_id: a.holder_id,
+            scholarship_id: a.scholarship_id,
+            amount: a.spreadsheet.valor,
+            start_date: a.spreadsheet.duracao_inicio,
+            end_date: a.spreadsheet.duracao_fim,
+            scholarship_type: a.spreadsheet.tipo || '',
+            cpf: a.cpfNew || '',
+            full_name: a.nameNew || '',
+            education_level: a.formacaoNew || '',
+          }));
+          const ends = approvedEnds.map(r => ({ scholarship_id: r.scholarship_id }));
+
+          const { data, error } = await supabaseClient.rpc('apply_reconciliation', {
+            p_project_id: projectId,
+            p_actions: { creates, updates, ends },
+          });
+          if (error) throw new Error('Erro ao aplicar: ' + error.message);
+          aplicadas = data || 0;
         }
 
-        const file = fileInput.files[0];
-        document.getElementById('recon-step-1').style.display = 'none';
-        document.getElementById('recon-step-2').style.display = 'block';
-
-        // Ler arquivo
-        const arrayBuffer = await file.arrayBuffer();
-
-        // Parsear com bolsa-parser
-        const msg2 = document.getElementById('recon-step-2-msg');
-        if (msg2) msg2.textContent = 'Extraindo dados da planilha...';
-
-        // Aguardar próximo frame para a UI atualizar
-        await new Promise(r => setTimeout(r, 50));
-
-        if (typeof parseBolsaSpreadsheet === 'undefined') {
-          throw new Error('Parser de planilha não carregado. Recarregue a página.');
+        // Trilha de auditoria: planilha no Storage + registro em `reconciliacoes`.
+        // Best-effort: se a migração 031 ainda não rodou, avisa sem desfazer o apply.
+        let storagePath = null;
+        try {
+          const safeName = file.name.replace(/[^\w.-]/g, '_');
+          const path = `${projectId}/${Date.now()}_${safeName}`;
+          const up = await supabaseClient.storage
+            .from(BOLSA_STORAGE_BUCKET)
+            .upload(path, file, { contentType: file.type || 'application/octet-stream' });
+          if (up.error) throw new Error(up.error.message);
+          storagePath = path;
+        } catch (e) {
+          showToast('Planilha não arquivada no Storage: ' + e.message, 'error');
         }
 
-        const { data: spreadsheetRows, warnings } = parseBolsaSpreadsheet(arrayBuffer);
-
-        if (warnings.length > 0) {
-          console.warn('[Reconciliação] Avisos do parser:', warnings);
+        const { error: regError } = await supabaseClient.from('reconciliacoes').insert({
+          project_id: projectId,
+          competencia: compYM + '-01',
+          arquivo_nome: file.name,
+          arquivo_storage_path: storagePath,
+          resumo: {
+            novos: diff.novos.length,
+            removidos: diff.removidos.length,
+            alterados: diff.alterados.length,
+            iguais: diff.iguais.length,
+            aplicadas,
+          },
+        });
+        if (regError) {
+          showToast('Histórico não registrado (rode a migração 031): ' + regError.message, 'error');
         }
 
-        if (!spreadsheetRows.length) {
-          throw new Error('Nenhuma bolsa ativa encontrada na planilha.');
+        // Recarrega o universo: próximos arquivos da fila enxergam os
+        // bolsistas recém-criados (evita duplicar entre planilhas).
+        if (aplicadas > 0) {
+          try { await loadBolsaContext(); } catch { /* noop */ }
         }
 
-        // Carregar bolsas ativas do projeto do banco
-        if (msg2) msg2.textContent = 'Carregando dados do sistema...';
-        await new Promise(r => setTimeout(r, 50));
-
-        const { data: dbData, error: dbError } = await supabaseClient
-          .from('scholarships')
-          .select(`
-            holder_id,
-            amount,
-            start_date,
-            end_date,
-            status,
-            scholarship_type,
-            scholarship_id:id,
-            scholarship_holders!holder_id(id, full_name, cpf, email, education_level)
-          `)
-          .eq('project_id', reconProjectId)
-          .eq('status', 'active');
-
-        if (dbError) {
-          throw new Error('Erro ao carregar bolsas: ' + dbError.message);
-        }
-
-        // Achatar dados do holder (Supabase retorna nested)
-        const dbScholarships = (dbData || []).map(s => ({
-          holder_id: s.scholarship_holders?.id || s.holder_id,
-          full_name: s.scholarship_holders?.full_name || '?',
-          cpf: s.scholarship_holders?.cpf || null,
-          email: s.scholarship_holders?.email || null,
-          education_level: s.scholarship_holders?.education_level || null,
-          scholarship_id: s.scholarship_id,
-          amount: s.amount,
-          start_date: s.start_date,
-          end_date: s.end_date,
-          status: s.status,
-          scholarship_type: s.scholarship_type || null,
-        }));
-
-        // Comparar dados
-        if (typeof compareBolsaData === 'undefined') {
-          throw new Error('Módulo de comparação não carregado. Recarregue a página.');
-        }
-
-        // allHolders (universo global) permite resolver pessoas já cadastradas
-        // via outro projeto, evitando criar holders duplicados.
-        const holderUniverse = (allHolders || []).map(h => ({
-          id: h.id,
-          full_name: h.full_name,
-          cpf: h.cpf || null,
-          email: h.email || null,
-          education_level: h.education_level || null,
-        }));
-
-        reconDiff = compareBolsaData(spreadsheetRows, dbScholarships, holderUniverse);
-        reconDiff._warnings = warnings;
-        reconDiff._spreadsheetCount = spreadsheetRows.length;
-        reconDiff._dbCount = dbScholarships.length;
-
-        // Fechar modal e renderizar resultado
-        const closeBtn = overlay.querySelector('[data-modal-close]');
-        if (closeBtn) closeBtn.click();
-
-        renderPage();
-        showToast(`${spreadsheetRows.length} bolsas analisadas.`, 'success');
-      }
-    });
+        const projName = _bolsaCtx.projects.find(p => p.id === projectId)?.name || file.name;
+        return { label: `${projName} — ${formatCompetencia(compYM + '-01')}` };
+      },
+    };
   }
 
   // Formata o valor de um campo de "alterados" conforme o tipo do campo.
@@ -1490,105 +1698,19 @@ const HoldersPage = (() => {
       `;
     }
 
-    // Botão Aplicar
-    const applyHTML = hasChanges ? `
-      <div style="margin-top:var(--sp-4);text-align:right;">
-        <button class="btn btn--primary btn--lg" onclick="HoldersPage.applyApprovedChanges()">
-          <i data-lucide="check-check" style="width:18px;height:18px;"></i>
-          Aplicar Alterações Aprovadas
-        </button>
-      </div>
-    ` : '<p style="text-align:center;color:var(--success);font-weight:600;margin-top:var(--sp-4);">✅ Todos os dados estão sincronizados!</p>';
+    // Rodapé: quem aplica é o botão Salvar da ImportQueue.
+    const footerHTML = hasChanges
+      ? `<p style="margin-top:var(--sp-4);color:var(--text-secondary);font-size:0.85rem;text-align:right;">
+           Desmarque o que não deve ser aplicado — ao clicar em <strong>Salvar</strong>, as mudanças aprovadas são aplicadas e a reconciliação é registrada.
+         </p>`
+      : '<p style="text-align:center;color:var(--success);font-weight:600;margin-top:var(--sp-4);">✅ Todos os dados estão sincronizados — Salvar apenas registra a conferência do mês.</p>';
 
-    return warningsHTML + summaryHTML + novosHTML + removidosHTML + alteradosHTML + iguaisHTML + applyHTML;
+    return warningsHTML + summaryHTML + novosHTML + removidosHTML + alteradosHTML + iguaisHTML + footerHTML;
   }
 
   function reconToggleAll(section, checked) {
     const checkboxes = document.querySelectorAll(`.recon-item-check[data-section="${section}"]`);
     checkboxes.forEach(cb => { cb.checked = checked; });
-  }
-
-  async function applyApprovedChanges() {
-    if (!reconDiff || !reconProjectId) return;
-
-    const { novos, removidos, alterados } = reconDiff;
-
-    // Coletar itens aprovados (checkbox marcado)
-    const approvedCreates = [];
-    document.querySelectorAll('.recon-item-check[data-section="novos"]').forEach((cb, i) => {
-      if (cb.checked && novos[i]) {
-        approvedCreates.push(novos[i]);
-      }
-    });
-
-    const approvedEnds = [];
-    document.querySelectorAll('.recon-item-check[data-section="removidos"]').forEach((cb, i) => {
-      if (cb.checked && removidos[i]) {
-        approvedEnds.push(removidos[i]);
-      }
-    });
-
-    const approvedUpdates = [];
-    document.querySelectorAll('.recon-item-check[data-section="alterados"]').forEach((cb, i) => {
-      if (cb.checked && alterados[i]) {
-        approvedUpdates.push(alterados[i]);
-      }
-    });
-
-    if (!approvedCreates.length && !approvedEnds.length && !approvedUpdates.length) {
-      showToast('Nenhuma alteração aprovada para aplicar.', 'warning');
-      return;
-    }
-
-    const confirmed = await confirmAction(
-      `Aplicar ${approvedCreates.length} criação(ões), ${approvedUpdates.length} atualização(ões) e ${approvedEnds.length} encerramento(s)?`
-    );
-    if (!confirmed) return;
-
-    // Montar payload para a RPC
-    // holder_id presente em um "create" → vincula a bolsa a um holder existente
-    // (pessoa já cadastrada via outro projeto) em vez de criar duplicado.
-    const creates = approvedCreates.map(n => ({
-      holder_id: n.existingHolderId || '',
-      nome: n.nome,
-      cpf: n.cpf || '',
-      email: n.email || '',
-      tipo: n.tipo || '',
-      formacao: n.formacao || '',
-      valor: n.valor,
-      inicio: n.duracao_inicio,
-      fim: n.duracao_fim,
-    }));
-
-    const updates = approvedUpdates.map(a => ({
-      holder_id: a.holder_id,
-      scholarship_id: a.scholarship_id,
-      amount: a.spreadsheet.valor,
-      start_date: a.spreadsheet.duracao_inicio,
-      end_date: a.spreadsheet.duracao_fim,
-      scholarship_type: a.spreadsheet.tipo || '',
-      cpf: a.cpfNew || '',
-      full_name: a.nameNew || '',
-      education_level: a.formacaoNew || '',
-    }));
-
-    const ends = approvedEnds.map(r => ({
-      scholarship_id: r.scholarship_id,
-    }));
-
-    const { data, error } = await supabaseClient.rpc('apply_reconciliation', {
-      p_project_id: reconProjectId,
-      p_actions: { creates, updates, ends },
-    });
-
-    if (error) {
-      showToast('Erro ao aplicar: ' + error.message, 'error');
-      return;
-    }
-
-    reconDiff = null;
-    showToast(`${data} alteração(ões) aplicada(s) com sucesso!`, 'success');
-    await refresh();
   }
 
   // ── Ferramenta de merge de bolsistas duplicados ────────────
@@ -1847,5 +1969,5 @@ const HoldersPage = (() => {
     await refresh();
   }
 
-  return { load, openForm, remove, manageScholarships, openScholarshipForm, viewTimeline, onSearch, onProjectFilter, onToggleInactive, toggleProjectGroup, switchTab, onReconProjectChange, openImportReconciliacao, reconToggleAll, applyApprovedChanges, openMergeTool, mergeSelectedGroup, mergeAddSelected, mergeRemoveSelected, mergeApplyManual };
+  return { load, openForm, remove, manageScholarships, openScholarshipForm, viewTimeline, onSearch, onProjectFilter, onToggleInactive, toggleProjectGroup, switchTab, openImportBolsas, getBolsaImportHandler, reconToggleAll, openMergeTool, mergeSelectedGroup, mergeAddSelected, mergeRemoveSelected, mergeApplyManual };
 })();

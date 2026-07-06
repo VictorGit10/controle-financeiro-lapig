@@ -49,17 +49,17 @@ Custom CRUD for scholarship holders (not using CrudPage) because of unique featu
 
 ### Aba "Reconciliação"
 
-Compara a planilha de bolsas baixada do sistema FUNAPE (.xlsx) com os dados cadastrados no banco, permitindo sincronizar o cadastro.
+Compara as planilhas de bolsas baixadas do sistema FUNAPE (.xlsx, **uma por projeto**) com os dados cadastrados no banco, permitindo sincronizar o cadastro.
 
-- **Seletor de projeto** (`cf_recon_project_id`) — a reconciliação é por projeto. Botão "Importar Planilha FUNAPE" no topbar muda conforme a aba.
-- **Importação** — modal de 2 passos: seleciona XLSX → `parseBolsaSpreadsheet` (`bolsa-parser.js`, SheetJS) extrai as linhas (só status "Ativo" da FUNAPE entram na comparação) → carrega as bolsas ativas do projeto + o universo global de holders → `compareBolsaData` (`bolsa-comparator.js`) classifica as diferenças.
+- **Importação em lote** (`openImportBolsas`) — roda na **ImportQueue** (`js/import-queue.js`) com o handler de bolsas (`getBolsaImportHandler`, também usado pelo Fechamento Mensal): seleciona um ou vários XLSX → revisão um-por-um. `parseBolsaSpreadsheet` (`bolsa-parser.js`, SheetJS) extrai as linhas (só status "Ativo" da FUNAPE entram na comparação) → o **projeto é sugerido automaticamente** pelos CPFs (maioria com bolsa ativa no projeto) e pode ser trocado; o usuário informa a **competência** (default: mês anterior) → `compareBolsaData` (`bolsa-comparator.js`) classifica as diferenças contra as bolsas ativas do projeto + o universo global de holders.
 - **Diff** — 4 categorias com checkboxes de aprovação (marcar/desmarcar todos por categoria):
   - **Novos** — bolsas na planilha e não no banco. `matchKind='link'` (pessoa já existe em outro projeto via CPF/nome único → vincula, `existingHolderId` preenchido) ou `'new'` (pessoa realmente nova). Backfills de `cpfNew`/`nameNew`/`formacaoNew` quando o banco está em branco.
   - **Removidos** — bolsas no banco sem correspondência na planilha (serão encerradas).
   - **Alterados** — mesmo bolsista, campos divergentes (nome, valor, datas, tipo) ou backfill de CPF/formação.
   - **Iguais** — match exato, sem ação.
 - **Matching** — Tier 1 por CPF exato (no projeto), Tier 2 por nome normalizado; resolução global via CPF → nome (nome único only) para evitar duplicados.
-- **Aplicar** (`applyApprovedChanges`) — monta `{ creates, updates, ends }` com os itens marcados e chama `apply_reconciliation` (migrações 028/029). `creates` com `holder_id` viram vínculo (não criam duplicado).
+- **Salvar** (botão da fila) — monta `{ creates, updates, ends }` com os itens marcados e chama `apply_reconciliation` (migrações 028/029). `creates` com `holder_id` viram vínculo (não criam duplicado). Em seguida arquiva o XLSX no bucket `bolsa-planilhas` e registra a reconciliação em `reconciliacoes` (migração 031) — best-effort: se a migração não rodou, avisa sem desfazer o apply. Com o diff 100% "iguais", Salvar apenas registra a conferência do mês.
+- **Histórico** — a aba lista as últimas reconciliações registradas (competência, projeto, arquivo, contagens do diff, aplicadas).
 - **Merge de duplicados** (`openMergeTool`) — lista grupos de mesmo nome (sugere como canônico quem tem CPF) com radio "Manter" e botão "Mesclar este grupo" → `merge_holders`. Há também mescla **manual** (escolher quaisquer cadastros) para duplicados com nomes divergentes que a detecção automática não agrupa.
 
 ## SaldosPage (`saldos.js`)
@@ -95,7 +95,7 @@ Visualização da versão **ativa** do Plano de Trabalho.
 - **Tabela hierárquica de rubricas** — a-g com sub-itens de `a-Pessoal` indentados; sub-itens livres de b/e/f via `descricao_livre`.
 - **Cronograma de desembolso** — parcela, data prevista, valor.
 - **Sidebar de versões** — chips Original/Remanejamento, badge Ativa, botões Ver / Ativar / Baixar / Excluir.
-- **Importação** (fila em lote, `openImportQueue`): seleciona um ou vários DOCX → revisão um-por-um com cabeçalho "Arquivo X de N" e botões **Salvar e próximo** / **Salvar e concluir** / **Pular**. Mammoth.js extrai HTML → `parsePtFromHtml` (`pt-parser.js`, parser determinístico, sem IA) → form editável (com seletores Projeto + Tipo no topo do lote) → split-view DOCX ↔ form → upload Storage + `upsert_plano_trabalho` RPC. O projeto salvo vira default do próximo arquivo. `versao` é calculado server-side; trigger `enforce_single_plano_ativo` garante 1 versão ativa. A Edge Function `extract-plano-trabalho` permanece deployada mas **não é mais chamada** (deprecated).
+- **Importação** (fila em lote, `ImportQueue`): seleciona um ou vários DOCX → revisão um-por-um com cabeçalho "Arquivo X de N" e botões **Salvar e próximo** / **Salvar e concluir** / **Pular**. Mammoth.js extrai HTML → `parsePtFromHtml` (`pt-parser.js`, parser determinístico, sem IA) → form editável (com seletores Projeto + Tipo no topo do lote) → split-view DOCX ↔ form → upload Storage + `upsert_plano_trabalho` RPC. O projeto salvo vira default do próximo arquivo. `versao` é calculado server-side; trigger `enforce_single_plano_ativo` garante 1 versão ativa. A Edge Function `extract-plano-trabalho` permanece deployada mas **não é mais chamada** (deprecated).
 
 ### Aba "Balancetes"
 
@@ -103,7 +103,7 @@ Lista cronológica dos balancetes mensais importados (FUNAPE PDF).
 
 - **Tabela** — data referência, emissão, saldo disponível, rendimento, total débitos, ações (Ver / Baixar / Excluir).
 - **Detalhamento** — clicar "Ver" abre modal com todos os lançamentos `7.1.3.x` e a rubrica resolvida.
-- **Importação** (fila em lote, `openImportQueue`): seleciona um ou vários PDF → revisão um-por-um ("Arquivo X de N", Salvar/Pular). **pdf.js** extrai texto preservando quebras de linha pela coordenada Y → `parseBalanceteText` (`balancete-parser.js`, parser determinístico, sem IA) → form de revisão com **detecção automática do projeto** pelo `project_code` no PDF (procura em `projects.code`) → split-view PDF ↔ form → upload `balancete-pdfs` + `upsert_balancete` RPC. Linhas não-mapeadas podem ser salvas como `new_mappings` inline (checkbox "salvar") — cadastradas em `conta_rubrica_map` antes dos lançamentos. O trigger `trg_auto_resolve_rubrica` em `balancete_lancamentos` resolve a rubrica de cada lançamento automaticamente. A Edge Function `extract-balancete` permanece deployada mas **não é mais chamada** (deprecated).
+- **Importação** (fila em lote, `ImportQueue`): seleciona um ou vários PDF → revisão um-por-um ("Arquivo X de N", Salvar/Pular). **pdf.js** extrai texto preservando quebras de linha pela coordenada Y → `parseBalanceteText` (`balancete-parser.js`, parser determinístico, sem IA) → form de revisão com **detecção automática do projeto** pelo `project_code` no PDF (procura em `projects.code`) → split-view PDF ↔ form → upload `balancete-pdfs` + `upsert_balancete` RPC. Linhas não-mapeadas podem ser salvas como `new_mappings` inline (checkbox "salvar") — cadastradas em `conta_rubrica_map` antes dos lançamentos. O trigger `trg_auto_resolve_rubrica` em `balancete_lancamentos` resolve a rubrica de cada lançamento automaticamente. A Edge Function `extract-balancete` permanece deployada mas **não é mais chamada** (deprecated).
 - Após importar, a aba muda para "Previsto x Realizado" automaticamente (`afterAllSaved`).
 
 ### Aba "Previsto x Realizado"
@@ -119,6 +119,19 @@ Cruzamento do plano ativo com o balancete mais recente (RPC `get_previsto_vs_rea
 ## CrudPage Generic Module
 
 `CrudPage(config)` in `crud-page.js` is a factory function that generates a full CRUD page from a config object. Key config properties: `tableName`, `dateField`, `entityLabel`, `entityIcon`, `globalName`, `gender`, `columns`, `formFields`, `statsCards`, `statsRpc`, **`allowDelete`** (default `true` — quando `false`, oculta o botão de excluir da tabela; usado por `gestao-projetos.js`). `formFields` agora usam `f.render(record, projectsCache)` (antes `f(...)`) e suportam `type: 'date'` (campo vazio vira `null` — enviar `""` para coluna `date` do Postgres causa `invalid input syntax`). `openForm` e `remove` envolvem o acesso ao banco em `try/catch` com toast de erro. Returns `{ load, openForm, remove, refresh, onSearch, goToPage, exportCSV }`. Server-side pagination via `.range(from, to)` with `{ count: 'exact' }`. CSV export fetches all records without pagination.
+
+## FechamentoPage (`fechamento.js`)
+
+Rotina de conciliação mensal — a porta de entrada única dos 3 artefatos que todo projeto FUNAPE recebe por mês.
+
+- **Seletor de competência** — `<input type="month">`, default mês anterior (o fechamento cuida do mês que passou).
+- **4 stat cards** — Projetos fechados (balancete + bolsas ok), Balancetes, Planilhas de bolsas, Planos ativos (X / total).
+- **Checklist da competência** — tabela com os projetos `funape_managed` ativos × colunas Plano de Trabalho (ativo?), Balancete (existe `balancetes.data_referencia` no mês?) e Planilha de Bolsas (existe `reconciliacoes.competencia` no mês? — migração 031; sem a migração mostra banner de aviso).
+- **Importar arquivos do mês** — abre a **ImportQueue** com os 3 handlers ao mesmo tempo (`PlanoTrabalhoPage.getImportHandlers()` + `HoldersPage.getBolsaImportHandler({ defaultCompetencia })`): PDFs viram balancetes, DOCX viram planos/remanejamentos, XLSX viram reconciliações de bolsas — tudo numa fila só, com badge de tipo por arquivo e revisão human-in-the-loop um-por-um.
+
+## ImportQueue (`js/import-queue.js`)
+
+Componente global (classic script, não é página) extraído de `plano-trabalho.js`. `ImportQueue.open({ title, handlers, onFinished })` — tela de seleção com drag-and-drop, roteamento de cada arquivo para o primeiro handler cujo `validExt()` aceite, revisão sequencial ("Arquivo X de N", Salvar/Pular), parse com cache por arquivo, toast de resumo e `afterAllSaved()` por handler. `onFinished({ saved, skipped, errored, newMappings, savedByType, results })` deixa cada página decidir seu refresh. Contrato do handler documentado no cabeçalho do arquivo.
 
 ## HubPage (`hub.js`)
 
