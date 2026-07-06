@@ -19,10 +19,16 @@ Scripts in `index.html` must load in dependency order. Changing the order will b
 5. `router.js` — no dependencies
 6. `chart-builder.js` — depends on Chart.js (CDN)
 7. `pages/crud-page.js` — depends on `supabaseClient`, `handleSupabaseResponse`
-8. Page modules (projetos, gestao, holders, saldos, funding, expenses, plano-trabalho, dashboard) — depend on `Router`, `supabaseClient`, `ChartBuilder`, `SimulationEngine`, `CrudPage`
-9. `app.js` — bootstrap, depends on `Router`, `Auth`
+8. Page modules (projetos, gestao, holders, saldos, funding, expenses, plano-trabalho, hub, dashboard) — depend on `Router`, `supabaseClient`, `ChartBuilder`, `SimulationEngine`, `CrudPage`
+9. `app.js` — bootstrap, depends on `Router`, `Auth`. Registra também um handler `beforeunload` que chama `Router.hasUnsavedChanges()` para avisar ao fechar/recarregar a aba com mudanças pendentes.
 
-The page `plano-trabalho` also depends on `mammoth` (DOCX → texto, CDN com fallback em `frontend/vendor/mammoth.browser.min.js`), `pdfjsLib` (PDF → texto, CDN `pdfjs-dist@3.11.174` + worker), e nas Edge Functions `extract-plano-trabalho` e `extract-balancete`. O CSP em `index.html` inclui `worker-src 'self' https://cdn.jsdelivr.net blob:` para permitir o worker do pdf.js.
+The page `plano-trabalho` also depends on `mammoth` (DOCX → HTML, CDN com fallback em `frontend/vendor/mammoth.browser.min.js`), `pdfjsLib` (PDF → texto, CDN `pdfjs-dist@3.11.174` + worker), e dos parsers determinísticos `pt-parser.js` / `balancete-parser.js` (ES modules bridge-ados ao `window` como `parsePtFromHtml` / `parseBalanceteText`). A importação é em **lote** (`openImportQueue`): uma fila selection→review percorre N arquivos com "Arquivo X de N" e Salvar/Pular. O CSP em `index.html` inclui `worker-src 'self' https://cdn.jsdelivr.net blob:` para permitir o worker do pdf.js.
+
+The page `holders` (aba Reconciliação) depende de `XLSX` (SheetJS, CDN `xlsx@0.18.5` + fallback em `frontend/vendor/xlsx.full.min.js`) e dos parsers `bolsa-parser.js` / `bolsa-comparator.js` (ES modules bridge-ados ao `window` como `parseBolsaSpreadsheet` / `compareBolsaData`).
+
+## Router Guards & Dirty Tracking
+
+`router.js` expõe além de `register/navigate/getCurrent`: `registerGuard(fn)`, `registerDirtyChecker(fn)` e `hasUnsavedChanges()`. Guards são funções `async (from, to) => boolean` consultadas antes de cada `navigate` (uma retornando `false` cancela a troca). Dirty checkers são funções `() => boolean` cuja união alimenta `hasUnsavedChanges()`. `projetos.js` registra ambos para o modo Editor (rascunhos não salvos); `saldos.js` registra ambos para linhas sujas (`dirtyRows`). `app.js` usa `hasUnsavedChanges()` no `beforeunload`. Navegar para a página corrente é no-op (evita re-render redundante).
 
 ## Frontend Module Pattern
 
@@ -36,9 +42,11 @@ Simplified login: users type a short name (e.g., "Laerte") which is mapped to a 
 
 `chart-builder.js` provides `buildFinancialChart()` — a shared Chart.js configuration for the monthly projection charts used by both DashboardPage and ProjectsPage. Also exports a `COLORS` object with the palette: funding (teal), bolsas (gold), gastos (red), positive balance (green), negative balance (red).
 
-## Edge Functions
+## Edge Functions (deprecated)
 
 Edge Functions Deno/TypeScript ficam em `supabase/functions/<name>/`. Deploy via `supabase functions deploy <name>`; secrets via `supabase secrets set KEY=value`. As funções recebem `SUPABASE_URL` e `SUPABASE_ANON_KEY` automaticamente do runtime.
+
+> **Deprecated desde 2026-05.** O frontend **não chama mais** nenhuma das duas Edge Functions — a extração é 100% determinística no browser (`pt-parser.js` para DOCX, `balancete-parser.js` para PDF). As funções permanecem deployadas como histórico; o secret `OLLAMA_API_KEY` segue configurado mas não é consumido em runtime. Descrições históricas abaixo.
 
 **`extract-plano-trabalho`** — recebe `{ text: string }` (texto bruto do DOCX extraído pelo Mammoth.js no browser), chama o **Ollama Cloud** (`kimi-k2.6:cloud`, endpoint `https://ollama.com/api/chat`, secret `OLLAMA_API_KEY`) e retorna `{ data: {...plano...}, warnings: [...], raw_extraction: {...} }`. Exige JWT do Supabase (rejeita anônimo). O prompt do sistema mapeia rubrica → código estável (a-g, cip_*, dao) e usa um exemplo few-shot do Plano Acelen para guiar a extração.
 
