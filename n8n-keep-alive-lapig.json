@@ -1,0 +1,87 @@
+{
+  "name": "LAPIG - Keep Alive Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 */2 * *"
+            }
+          ]
+        }
+      },
+      "name": "Agendamento keep-alive",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://skxiivmkhpegefafdlty.supabase.co/rest/v1/projects",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "sb_publishable_cWm8BfwIb2JQ-WIOOjkQfA_jvTt7OmG"
+            },
+            {
+              "name": "select",
+              "value": "id,name,active"
+            },
+            {
+              "name": "order",
+              "value": "active.desc,name.asc"
+            },
+            {
+              "name": "limit",
+              "value": "10"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer sb_publishable_cWm8BfwIb2JQ-WIOOjkQfA_jvTt7OmG"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Listar projetos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    }
+  ],
+  "connections": {
+    "Agendamento keep-alive": {
+      "main": [
+        [
+          {
+            "node": "Listar projetos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "supabase"
+    },
+    {
+      "name": "lapig"
+    }
+  ]
+}
