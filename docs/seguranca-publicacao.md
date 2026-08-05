@@ -52,6 +52,28 @@ select tablename, policyname, roles
 > ativos — se existir política `anon` para isso, confirme que ela expõe
 > apenas os campos/linhas realmente públicos.
 
+### 2b. Nenhuma função executável por `anon` — CRÍTICO
+
+Esta é a barreira que **não** é o RLS. Funções `security definer` rodam
+como o dono e **burlam o RLS**; o Postgres concede EXECUTE a `PUBLIC` por
+padrão e o PostgREST expõe o schema `public` como RPC ao `anon`. Uma única
+função definer sem guard = vazamento sem senha.
+
+- [ ] Rodar `database/035_lockdown_anon.sql` (revoga EXECUTE de `anon` em
+      todo o schema + `alter default privileges` para as funções futuras).
+- [ ] Confirmar que a query abaixo volta **vazia**:
+
+```sql
+select p.proname
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+   and has_function_privilege('anon', p.oid, 'EXECUTE');
+```
+
+> A própria migração 035 já faz essa asserção e aborta se falhar — dá para
+> reexecutá-la a qualquer momento como reauditoria.
+
 ### 3. Storage privado
 
 - [ ] Buckets `plano-trabalho-docs`, `balancete-pdfs` e `bolsa-planilhas`
