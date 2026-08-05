@@ -101,7 +101,7 @@ const PlanoTrabalhoPage = (() => {
 
     const { data, error } = await supabaseClient
       .from('projects')
-      .select('id,name,code,funape_managed,active')
+      .select('id,name,code,active')
       .order('name', { ascending: true });
 
     if (error) {
@@ -186,7 +186,7 @@ const PlanoTrabalhoPage = (() => {
     if (allProjects.length === 0) {
       const { data, error } = await supabaseClient
         .from('projects')
-        .select('id,name,code,funape_managed,active')
+        .select('id,name,code,active')
         .order('name', { ascending: true });
       if (error) throw new Error('Erro ao carregar projetos: ' + error.message);
       allProjects = data || [];
@@ -226,11 +226,14 @@ const PlanoTrabalhoPage = (() => {
   /* ── Render ───────────────────────────────────────────────── */
 
   function renderEmpty() {
+    const isAdminUser = typeof Auth !== 'undefined' && Auth.isAdmin();
     containerEl.innerHTML = `
       <div class="empty-state">
-        <i data-lucide="folder-x" class="empty-state__icon"></i>
-        <h3 class="empty-state__title">Nenhum projeto cadastrado</h3>
-        <p class="empty-state__text">Cadastre um projeto em Gestão de Projetos antes de importar planos.</p>
+        <i data-lucide="${isAdminUser ? 'folder-x' : 'folder-plus'}" class="empty-state__icon"></i>
+        <h3 class="empty-state__title">${isAdminUser ? 'Nenhum projeto cadastrado' : 'Nenhum centro de custo vinculado'}</h3>
+        <p class="empty-state__text">${isAdminUser
+          ? 'Cadastre um projeto em Gestão de Projetos antes de importar planos.'
+          : 'Crie um novo na aba <strong>Gestão de Projetos</strong>, ou peça ao administrador para atribuir um existente.'}</p>
       </div>`;
     lucide.createIcons();
   }
@@ -242,19 +245,16 @@ const PlanoTrabalhoPage = (() => {
         <select id="pt-project-sel" class="form-input" onchange="PlanoTrabalhoPage.onProjectChange()">
           ${allProjects.map(p => `
             <option value="${p.id}" ${p.id === selectedProjectId ? 'selected' : ''}>
-              ${escapeAttr(p.name)}${p.code ? ' — ' + escapeAttr(p.code) : ''}${p.funape_managed ? ' (FUNAPE)' : ''}${p.active === false ? ' [inativo]' : ''}
+              ${escapeAttr(p.name)}${p.code ? ' — ' + escapeAttr(p.code) : ''}${p.active === false ? ' [inativo]' : ''}
             </option>`).join('')}
         </select>
       </div>`;
   }
 
   function renderPage() {
-    const project = allProjects.find(p => p.id === selectedProjectId);
-    const isFunape = project?.funape_managed === true;
-
     let tabContent;
-    if (currentTab === 'balancetes')         tabContent = renderBalancetesTab(isFunape);
-    else if (currentTab === 'previsto-real') tabContent = renderPrevistoRealTab(isFunape);
+    if (currentTab === 'balancetes')         tabContent = renderBalancetesTab();
+    else if (currentTab === 'previsto-real') tabContent = renderPrevistoRealTab();
     else                                     tabContent = renderOrcamentoTab();
 
     containerEl.innerHTML = `
@@ -337,17 +337,10 @@ const PlanoTrabalhoPage = (() => {
 
   /* ── Tab: Balancetes ─────────────────────────────────────── */
 
-  function renderBalancetesTab(isFunape) {
-    const intro = isFunape
-      ? `<p style="color:var(--text-secondary);margin-bottom:16px;">
+  function renderBalancetesTab() {
+    const intro = `<p style="color:var(--text-secondary);margin-bottom:16px;">
            Importe o balancete mensal da FUNAPE em PDF. Os gastos por rubrica são extraídos e cruzados com o orçamento do plano ativo.
-         </p>`
-      : `<div class="callout callout--warning" style="margin-bottom:16px;">
-           <i data-lucide="alert-triangle"></i>
-           <div>
-             Este projeto <strong>não está marcado como gerido pela FUNAPE</strong>. Para usar balancete, ative o flag em Gestão de Projetos.
-           </div>
-         </div>`;
+         </p>`;
 
     if (balancetes.length === 0) {
       return `
@@ -406,7 +399,7 @@ const PlanoTrabalhoPage = (() => {
 
   /* ── Tab: Previsto x Realizado ───────────────────────────── */
 
-  function renderPrevistoRealTab(isFunape) {
+  function renderPrevistoRealTab() {
     if (!prevReal || prevReal.has_plano === false) {
       return `
         <div class="empty-state">
@@ -420,9 +413,7 @@ const PlanoTrabalhoPage = (() => {
         <div class="empty-state">
           <i data-lucide="file-plus-2" class="empty-state__icon"></i>
           <h3 class="empty-state__title">Sem balancete importado</h3>
-          <p class="empty-state__text">${isFunape
-            ? 'Importe o balancete da FUNAPE na aba "Balancetes" para ver Previsto x Realizado.'
-            : 'Este projeto não é FUNAPE — Previsto x Realizado só funciona para projetos com balancete importado.'}</p>
+          <p class="empty-state__text">Importe o balancete da FUNAPE na aba "Balancetes" para ver Previsto x Realizado.</p>
         </div>`;
     }
 

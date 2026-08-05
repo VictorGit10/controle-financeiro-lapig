@@ -38,7 +38,7 @@ function CrudPage(config) {
   let _searchTimer = null;
 
   async function loadProjects() {
-    const result = await supabaseClient.from('projects').select('id, name, funape_managed').order('name');
+    const result = await supabaseClient.from('projects').select('id, name').order('name');
     projectsCache = handleSupabaseResponse(result, 'Erro ao carregar projetos') || [];
   }
 
@@ -96,34 +96,44 @@ function CrudPage(config) {
     const stats = statsCards ? statsCards(statsData) : [];
     const totalPages = Math.ceil(totalCount / pageSize);
 
-    containerEl.innerHTML = `
-      ${stats.length ? `
-        <div class="stats-grid fade-in">
-          ${stats.map(s => `
-            <div class="stat-card">
-              <div class="stat-card__icon stat-card__icon--${s.iconClass}">
-                <i data-lucide="${s.icon}"></i>
-              </div>
-              <div class="stat-card__content">
-                <div class="stat-card__label">${s.label}</div>
-                <div class="stat-card__value ${s.currency ? 'currency' : ''} ${s.valueClass || ''}">${s.currency ? formatBRL(s.value) : s.value}</div>
-              </div>
+    // Shell fixo (stats + busca + área da lista): criado uma vez e
+    // preservado nos refreshes seguintes — re-renderizar o container
+    // inteiro destruía o input de busca com foco enquanto o usuário
+    // digitava (a cada debounce de 300ms).
+    if (!containerEl.querySelector('#crud-list-area')) {
+      containerEl.innerHTML = `
+        <div id="crud-stats-area"></div>
+        ${searchable ? `
+          <div class="holders-toolbar" style="margin-top: 16px;">
+            <input type="text" class="form-input holders-toolbar__search"
+              placeholder="${searchPlaceholder}" value="${escapeAttr(searchQuery)}"
+              oninput="${globalName}.onSearch(this.value)">
+            <button class="btn btn--secondary btn--sm" onclick="${globalName}.exportCSV()" title="Exportar CSV">
+              <i data-lucide="download" style="width:16px;height:16px;"></i> Exportar
+            </button>
+          </div>
+        ` : ''}
+        <div id="crud-list-area"></div>
+      `;
+    }
+
+    containerEl.querySelector('#crud-stats-area').innerHTML = stats.length ? `
+      <div class="stats-grid fade-in">
+        ${stats.map(s => `
+          <div class="stat-card">
+            <div class="stat-card__icon stat-card__icon--${s.iconClass}">
+              <i data-lucide="${s.icon}"></i>
             </div>
-          `).join('')}
-        </div>
-      ` : ''}
+            <div class="stat-card__content">
+              <div class="stat-card__label">${s.label}</div>
+              <div class="stat-card__value ${s.currency ? 'currency' : ''} ${s.valueClass || ''}">${s.currency ? formatBRL(s.value) : s.value}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : '';
 
-      ${searchable ? `
-        <div class="holders-toolbar" style="margin-top: 16px;">
-          <input type="text" class="form-input holders-toolbar__search"
-            placeholder="${searchPlaceholder}" value="${escapeAttr(searchQuery)}"
-            oninput="${globalName}.onSearch(this.value)">
-          <button class="btn btn--secondary btn--sm" onclick="${globalName}.exportCSV()" title="Exportar CSV">
-            <i data-lucide="download" style="width:16px;height:16px;"></i> Exportar
-          </button>
-        </div>
-      ` : ''}
-
+    containerEl.querySelector('#crud-list-area').innerHTML = `
       ${records.length ? `
         <div class="data-table-wrapper fade-in" style="animation-delay: 0.1s;">
           <table class="data-table">

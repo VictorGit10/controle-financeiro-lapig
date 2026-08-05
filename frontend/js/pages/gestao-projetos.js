@@ -147,16 +147,6 @@ const GestaoPage = (() => {
             <label for="fld-include-dashboard" class="form-label" style="margin:0;cursor:pointer;">Incluir no Dashboard Geral</label>
           </div>`,
       },
-      {
-        id: 'fld-funape', key: 'p_funape_managed', label: 'Gerido pela FUNAPE', type: 'boolean',
-        render: (rec) => `
-          <div class="form-group" style="display:flex;align-items:center;gap:8px;">
-            <input type="checkbox" id="fld-funape"
-              ${rec.funape_managed ? 'checked' : ''}
-              style="width:18px;height:18px;accent-color:var(--accent);">
-            <label for="fld-funape" class="form-label" style="margin:0;cursor:pointer;">Projeto gerido pela FUNAPE (gastos virão do balancete)</label>
-          </div>`,
-      },
     ],
   });
 

@@ -80,7 +80,6 @@ const FundingPage = (() => {
               <input class="form-input" type="number" step="0.01" id="fld-amount" value="${rec.amount || ''}">
             </div>
           </div>`,
-        readOnly: true,
       },
       {
         id: 'fld-amount', key: 'amount', label: 'Valor', type: 'number', required: true, requiredMsg: 'Valor é obrigatório.', min: 0.01, minMsg: 'Valor deve ser positivo.',

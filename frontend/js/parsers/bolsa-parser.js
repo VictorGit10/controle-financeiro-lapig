@@ -48,6 +48,9 @@ function normalizeCPF(raw) {
   if (digits.length === 11) return digits;
   // CPF pode vir como número (ex: 13626629767) — já são 11 dígitos
   if (digits.length >= 11) return digits.slice(0, 11);
+  // Célula numérica do Excel perde zeros à esquerda: CPF começando
+  // com 0 chega com 9-10 dígitos — repõe os zeros.
+  if (digits.length === 9 || digits.length === 10) return digits.padStart(11, '0');
   return null; // inválido
 }
 
@@ -99,8 +102,11 @@ const ACTIVE_STATUSES = ['ativo', 'aguardando aditamento', 'aguardando preenchim
 
 function isAtivoFunape(status) {
   if (!status) return false;
+  // Match exato (não substring): "Inativo" contém "ativo" e entraria
+  // como ativo. Status desconhecidos caem no diff como "removidos" e
+  // passam pela revisão humana.
   const s = String(status).trim().toLowerCase();
-  return ACTIVE_STATUSES.some(a => s.includes(a));
+  return ACTIVE_STATUSES.includes(s);
 }
 
 // ── Parser principal ────────────────────────────────────────

@@ -21,7 +21,6 @@ const ProjetosPage = (() => {
   // Project data for selected project
   let projectData          = null;
   let fundingData          = [];
-  let expensesData         = [];
 
   // Simulation mode state
   let editorMode           = false;
@@ -62,11 +61,14 @@ const ProjetosPage = (() => {
     allProjects = projects || [];
 
     if (allProjects.length === 0) {
+      const isAdminUser = typeof Auth !== 'undefined' && Auth.isAdmin();
       containerEl.innerHTML = `
         <div class="empty-state">
           <i data-lucide="folder-plus" class="empty-state__icon"></i>
-          <h3 class="empty-state__title">Nenhum projeto ainda</h3>
-          <p class="empty-state__text">Cadastre projetos na aba <strong>Gestão de Projetos</strong>.</p>
+          <h3 class="empty-state__title">${isAdminUser ? 'Nenhum projeto ainda' : 'Nenhum centro de custo vinculado'}</h3>
+          <p class="empty-state__text">${isAdminUser
+            ? 'Cadastre projetos na aba <strong>Gestão de Projetos</strong>.'
+            : 'Crie um novo na aba <strong>Gestão de Projetos</strong>, ou peça ao administrador para atribuir um existente.'}</p>
         </div>`;
       lucide.createIcons();
       return;
@@ -126,14 +128,13 @@ const ProjetosPage = (() => {
     const todayStartStr = localISODate().slice(0, 8) + '01';
 
     // Fetch all data in parallel
-    const [projectRes, scholarshipsRes, fundingRes, expensesRes, alertsRes, monthlyRes] = await Promise.all([
+    const [projectRes, scholarshipsRes, fundingRes, alertsRes, monthlyRes] = await Promise.all([
       supabaseClient.from('projects').select('*').eq('id', selectedProjectId).single(),
       supabaseClient.from('scholarships')
         .select('*, holder:holder_id(id, full_name)')
         .eq('project_id', selectedProjectId)
         .order('start_date'),
       supabaseClient.from('funding_releases').select('*').eq('project_id', selectedProjectId).order('release_date'),
-      supabaseClient.from('expenses').select('*').eq('project_id', selectedProjectId).order('expense_date'),
       supabaseClient.rpc('get_project_alerts', { p_project_id: selectedProjectId }),
       supabaseClient.rpc('calc_project_monthly', {
         p_project_id: selectedProjectId,
@@ -147,7 +148,7 @@ const ProjetosPage = (() => {
       return;
     }
 
-    const suppErrors = [scholarshipsRes, fundingRes, expensesRes, alertsRes, monthlyRes].filter(r => r.error);
+    const suppErrors = [scholarshipsRes, fundingRes, alertsRes, monthlyRes].filter(r => r.error);
     if (suppErrors.length) {
       console.warn('Partial load errors:', suppErrors.map(r => r.error.message));
     }
@@ -156,7 +157,6 @@ const ProjetosPage = (() => {
     draftScholarships    = (scholarshipsRes.data || []).map(s => ({ ...s }));
     originalScholarships = draftScholarships.map(s => ({ ...s }));
     fundingData          = fundingRes.data || [];
-    expensesData         = expensesRes.data || [];
     const alerts         = alertsRes.data || [];
     const monthlyData    = monthlyRes.data || [];
 
@@ -175,14 +175,14 @@ const ProjetosPage = (() => {
     let monthlyData;
     let originalMonthlyData = [];
     if (editorMode) {
-      monthlyData         = SimulationEngine.calcProjectMonthly(projectData, draftScholarships, fundingData, expensesData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
-      originalMonthlyData = SimulationEngine.calcProjectMonthly(projectData, originalScholarships, fundingData, expensesData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
+      monthlyData         = SimulationEngine.calcProjectMonthly(projectData, draftScholarships, fundingData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
+      originalMonthlyData = SimulationEngine.calcProjectMonthly(projectData, originalScholarships, fundingData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
     } else {
       // Always use SimulationEngine so that balance status changes reflect immediately.
       // monthlyDataFromDB (from the RPC) is used only as a reference when there is no
       // user-driven balance-status selection and the local data mirrors the DB perfectly.
       // Using SimulationEngine here ensures the selector always triggers a visible update.
-      monthlyData = SimulationEngine.calcProjectMonthly(projectData, draftScholarships, fundingData, expensesData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
+      monthlyData = SimulationEngine.calcProjectMonthly(projectData, draftScholarships, fundingData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
     }
 
     // KPI calculations
@@ -279,7 +279,7 @@ const ProjetosPage = (() => {
             <i data-lucide="landmark"></i>
           </div>
           <div class="stat-card__content">
-            <div class="stat-card__label">Saldo Atual (FUNAPE)</div>
+            <div class="stat-card__label">Saldo Atual</div>
             <div class="stat-card__value currency">${formatBRL(saldoAtual)}</div>
             ${projectData.balance_date
               ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">em ${formatDate(projectData.balance_date)}</div>`

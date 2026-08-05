@@ -10,7 +10,10 @@ Router.register('holders', {
     btn.id = 'holders-action-btn';
     btn.className = 'btn btn--primary btn--sm';
     btn.innerHTML = '<i data-lucide="user-plus"></i> Novo Bolsista';
-    btn.addEventListener('click', () => HoldersPage.openForm());
+    // onclick (não addEventListener): updateActionButton() troca a ação
+    // por aba sobrescrevendo onclick — um listener extra dispararia as
+    // duas ações no mesmo clique.
+    btn.onclick = () => HoldersPage.openForm();
     container.appendChild(btn);
   },
 
@@ -256,10 +259,15 @@ const HoldersPage = (() => {
   }
 
   function renderPage() {
+    // Reconciliação agora é professor-acessível (apply_reconciliation escopado
+    // pela mig. 034); só a mescla de duplicados (merge_holders) segue admin.
+    const isAdminUser = typeof Auth !== 'undefined' && Auth.isAdmin();
+    const visibleTabs = TABS;
+
     // ── Barra de abas ──────────────────────────────────────
     const tabsBarHTML = `
       <div class="page-tabs" style="margin-bottom:var(--sp-4);">
-        ${TABS.map(t => `
+        ${visibleTabs.map(t => `
           <button class="page-tab ${currentTab === t.id ? 'page-tab--active' : ''}"
             onclick="HoldersPage.switchTab('${t.id}')">
             <i data-lucide="${t.icon}" style="width:16px;height:16px;"></i>
@@ -384,15 +392,19 @@ const HoldersPage = (() => {
             onchange="HoldersPage.onToggleInactive(this.checked)">
           <span>Mostrar inativos${kpis.inactiveHolderCount > 0 ? ` (${kpis.inactiveHolderCount})` : ''}</span>
         </label>
+        ${isAdminUser ? `
         <button class="btn btn--ghost btn--sm" onclick="HoldersPage.openMergeTool()" title="Mesclar bolsistas duplicados">
           <i data-lucide="git-merge" style="width:16px;height:16px;"></i> Mesclar duplicados
-        </button>
+        </button>` : ''}
       </div>
     `;
 
-    // Banner de bolsistas duplicados (mesmo nome) → oferece merge
+    // Banner de bolsistas duplicados (mesmo nome) → oferece merge.
+    // Admin-only: o merge usa a RPC merge_holders (admin). Professor não
+    // consegue agir sobre duplicados — a unique de CPF (mig. 028) + o merge
+    // admin mitigam; esconder evita um botão que falharia ao clicar.
     const dupGroups = findDuplicateHolderGroups();
-    const dupBannerHTML = dupGroups.length ? `
+    const dupBannerHTML = (dupGroups.length && isAdminUser) ? `
       <div class="alert-banner alert-banner--danger" style="margin-bottom:var(--sp-3);">
         <i data-lucide="copy" class="alert-banner__icon"></i>
         <div class="alert-banner__body" style="display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);flex-wrap:wrap;">

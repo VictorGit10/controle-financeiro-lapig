@@ -53,6 +53,7 @@ const ImportQueue = (() => {
     let   currentView  = null;          // split-view atual (p/ destroy)
     let   newMappings  = 0;
     let   finalized    = false;
+    let   saving       = false;         // bloqueia fechar o modal durante handler.save()
 
     const { overlay, closeModal } = createModal({
       title: title || (handlers.length === 1 ? handlers[0].title : 'Importar arquivos'),
@@ -60,6 +61,13 @@ const ImportQueue = (() => {
       maxWidth: '95vw',
       saveLabel: 'Continuar',
       onClose: finalize,
+      canClose: () => {
+        if (saving) {
+          showToast('Aguarde — salvando o arquivo atual…', 'info');
+          return false;
+        }
+        return true;
+      },
     });
 
     const bodyEl  = overlay.querySelector('#iq-body');
@@ -264,12 +272,15 @@ const ImportQueue = (() => {
       const origLabel = saveBtn.textContent;
       saveBtn.disabled = true;
       saveBtn.textContent = 'Salvando…';
+      saving = true;
       try {
         const r = await handler.save(host, extracted, files[index]);
+        saving = false;
         results[index] = { name: files[index].name, status: 'saved', label: r?.label, type: handler.type };
         if (r?.newMappings) newMappings += r.newMappings;
         advance();
       } catch (err) {
+        saving = false;
         showToast(err.message || 'Erro ao salvar.', 'error');
         saveBtn.disabled = false;
         saveBtn.textContent = origLabel;

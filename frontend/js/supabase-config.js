@@ -65,7 +65,7 @@ function createToastContainer() {
 }
 
 // Utility: Create modal
-function createModal({ title, bodyHTML, onSave, saveLabel = 'Salvar', saveClass = 'btn--primary', maxWidth = '520px', onClose, hideCancelBtn = false }) {
+function createModal({ title, bodyHTML, onSave, saveLabel = 'Salvar', saveClass = 'btn--primary', maxWidth = '520px', onClose, hideCancelBtn = false, canClose = null }) {
   // Remove existing modal
   const existing = document.querySelector('.modal-overlay');
   if (existing) existing.remove();
@@ -93,8 +93,12 @@ function createModal({ title, bodyHTML, onSave, saveLabel = 'Salvar', saveClass 
   document.body.appendChild(overlay);
   lucide.createIcons({ nodes: [overlay] });
 
-  // Close handlers
-  const closeModal = () => { if (onClose) onClose(); overlay.remove(); };
+  // Close handlers (canClose pode vetar — ex.: salvamento em andamento)
+  const closeModal = () => {
+    if (canClose && !canClose()) return;
+    if (onClose) onClose();
+    overlay.remove();
+  };
   overlay.querySelectorAll('[data-modal-close]').forEach(el => {
     el.addEventListener('click', closeModal);
   });

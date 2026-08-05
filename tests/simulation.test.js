@@ -41,7 +41,7 @@ describe('calcProjectMonthly', () => {
     const funding = [
       { amount: 10000, release_date: '2026-01-15' },
     ];
-    const result = calcProjectMonthly(baseProject, baseScholarships, funding, [], {
+    const result = calcProjectMonthly(baseProject, baseScholarships, funding, {
       startDateParam: '2026-01-01',
       balanceStatus: 'unpaid_current',
     });
@@ -54,7 +54,7 @@ describe('calcProjectMonthly', () => {
   });
 
   it('calcula saldo acumulativo', () => {
-    const result = calcProjectMonthly(baseProject, baseScholarships, [], [], {
+    const result = calcProjectMonthly(baseProject, baseScholarships, [], {
       startDateParam: '2026-01-01',
       balanceStatus: 'unpaid_current',
     });
@@ -66,25 +66,12 @@ describe('calcProjectMonthly', () => {
     expect(result[2].net_balance).toBe(4000);
   });
 
-  it('deduz despesas do saldo', () => {
-    const expenses = [
-      { amount: 500, expense_date: '2026-02-10' },
-    ];
-    const result = calcProjectMonthly(baseProject, baseScholarships, [], expenses, {
-      startDateParam: '2026-01-01',
-      balanceStatus: 'unpaid_current',
-    });
-    // Feb: 8000 - 2000 (bolsa) - 500 (despesa) = 5500
-    expect(result[1].other_expense).toBe(500);
-    expect(result[1].net_balance).toBe(5500);
-  });
-
   it('ignora bolsas canceladas', () => {
     const scholarships = [
       { status: 'active', amount: 2000, start_date: '2026-01-01', end_date: '2026-06-30' },
       { status: 'cancelled', amount: 5000, start_date: '2026-01-01', end_date: '2026-06-30' },
     ];
-    const result = calcProjectMonthly(baseProject, scholarships, [], [], {
+    const result = calcProjectMonthly(baseProject, scholarships, [], {
       startDateParam: '2026-01-01',
       balanceStatus: 'unpaid_current',
     });
@@ -95,7 +82,7 @@ describe('calcProjectMonthly', () => {
     const scholarships = [
       { status: 'active', amount: 3000, start_date: '2026-03-01', end_date: '2026-04-30' },
     ];
-    const result = calcProjectMonthly(baseProject, scholarships, [], [], {
+    const result = calcProjectMonthly(baseProject, scholarships, [], {
       startDateParam: '2026-01-01',
       balanceStatus: 'unpaid_current',
     });
@@ -109,7 +96,7 @@ describe('calcProjectMonthly', () => {
 
   it('inclui yield_amount no saldo base', () => {
     const project = { ...baseProject, yield_amount: 1500 };
-    const result = calcProjectMonthly(project, baseScholarships, [], [], {
+    const result = calcProjectMonthly(project, baseScholarships, [], {
       startDateParam: '2026-01-01',
       balanceStatus: 'unpaid_current',
     });
@@ -118,7 +105,7 @@ describe('calcProjectMonthly', () => {
   });
 
   it('balanceStatus paid_current adiciona bolsa ao saldo', () => {
-    const result = calcProjectMonthly(baseProject, baseScholarships, [], [], {
+    const result = calcProjectMonthly(baseProject, baseScholarships, [], {
       startDateParam: '2026-01-01',
       balanceStatus: 'paid_current',
     });
@@ -127,7 +114,7 @@ describe('calcProjectMonthly', () => {
   });
 
   it('balanceStatus unpaid_previous subtrai bolsa anterior', () => {
-    const result = calcProjectMonthly(baseProject, baseScholarships, [], [], {
+    const result = calcProjectMonthly(baseProject, baseScholarships, [], {
       startDateParam: '2026-02-01',
       balanceStatus: 'unpaid_previous',
     });
@@ -137,7 +124,7 @@ describe('calcProjectMonthly', () => {
 
   it('projeto sem end_date vai ate dezembro', () => {
     const project = { initial_balance: 5000, yield_amount: 0, end_date: null };
-    const result = calcProjectMonthly(project, [], [], [], {
+    const result = calcProjectMonthly(project, [], [], {
       startDateParam: '2026-01-01',
     });
     const monthsUntilDec = 12 - new Date('2026-01-01T00:00:00').getMonth();

@@ -30,6 +30,7 @@ const DashboardPage = (() => {
   let _chartInstance = null;
   let currentBalanceStatus = 'unpaid_current';
   let _autoSelected = false;
+  let _bellInited = false;
 
   const STORAGE_KEY = 'cf_dashboard_selected_projects';
 
@@ -84,9 +85,14 @@ const DashboardPage = (() => {
   /* ── Notification Bell ───────────────────────────────────── */
 
   function _initBell() {
+    // O sino vive no topbar estático: registrar os listeners uma única
+    // vez, senão cada visita ao Dashboard empilha um par de handlers e
+    // o toggle de panel.hidden vira no-op.
+    if (_bellInited) return;
     const btn   = document.getElementById('notif-bell-btn');
     const panel = document.getElementById('notif-dropdown');
     if (!btn || !panel) return;
+    _bellInited = true;
 
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -179,7 +185,7 @@ const DashboardPage = (() => {
     let activeHolders = [];
     if (selectedIds.size > 0) {
       const projectIdList = [...selectedIds];
-      const { data: scholarships } = await supabaseClient
+      const { data: scholarships, error: schError } = await supabaseClient
         .from('scholarships')
         .select(`
           id, amount, start_date, end_date, status, project_id,
@@ -192,6 +198,7 @@ const DashboardPage = (() => {
         .gte('end_date', localISODate())
         .order('amount', { ascending: false });
 
+      if (schError) showToast('Erro ao carregar bolsistas ativos: ' + schError.message, 'error');
       activeHolders = scholarships || [];
     }
 
@@ -203,9 +210,10 @@ const DashboardPage = (() => {
     if (selectedProjects.length > 0) {
       const activeIds = selectedProjects.filter(p => p.active).map(p => p.id);
       if (activeIds.length > 0) {
-        const { data: alertsData } = await supabaseClient.rpc('get_alerts_for_projects', {
+        const { data: alertsData, error: alertsError } = await supabaseClient.rpc('get_alerts_for_projects', {
           p_project_ids: activeIds
         });
+        if (alertsError) showToast('Erro ao carregar alertas: ' + alertsError.message, 'error');
         allAlerts = alertsData || [];
       }
     }
@@ -273,7 +281,7 @@ const DashboardPage = (() => {
             <i data-lucide="landmark"></i>
           </div>
           <div class="stat-card__content">
-            <div class="stat-card__label">Saldo Atual (FUNAPE)</div>
+            <div class="stat-card__label">Saldo Atual</div>
             <div class="stat-card__value currency">${formatBRL(totalSaldoAtual)}</div>
             ${repBalanceDate
               ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">em ${formatDate(repBalanceDate)}</div>`
@@ -314,7 +322,6 @@ const DashboardPage = (() => {
           <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <div class="dash-legend-item"><span style="background:rgba(42,157,143,0.8);"></span>Desembolsos</div>
             <div class="dash-legend-item"><span style="background:rgba(196,147,63,0.8);"></span>Bolsas</div>
-            <div class="dash-legend-item"><span style="background:rgba(217,67,67,0.7);"></span>Outros Gastos</div>
             <div class="dash-legend-item"><span style="background:var(--accent);border-radius:50%;"></span>Saldo</div>
           </div>
         </div>
@@ -434,14 +441,13 @@ const DashboardPage = (() => {
           monthMap.set(key, {
             month_label: row.month_label, month_start: row.month_start,
             initial_balance: 0, scholarship_expense: 0,
-            funding_income: 0, other_expense: 0, net_balance: 0,
+            funding_income: 0, net_balance: 0,
           });
         }
         const agg = monthMap.get(key);
         agg.initial_balance     += Number(row.initial_balance || 0);
         agg.scholarship_expense += Number(row.scholarship_expense || 0);
         agg.funding_income      += Number(row.funding_income || 0);
-        agg.other_expense       += Number(row.other_expense || 0);
         agg.net_balance         += Number(row.net_balance || 0);
       });
     } else {
@@ -461,14 +467,13 @@ const DashboardPage = (() => {
             monthMap.set(key, {
               month_label: row.month_label, month_start: row.month_start,
               initial_balance: 0, scholarship_expense: 0,
-              funding_income: 0, other_expense: 0, net_balance: 0,
+              funding_income: 0, net_balance: 0,
             });
           }
           const agg = monthMap.get(key);
           agg.initial_balance     += Number(row.initial_balance || 0);
           agg.scholarship_expense += Number(row.scholarship_expense || 0);
           agg.funding_income      += Number(row.funding_income || 0);
-          agg.other_expense       += Number(row.other_expense || 0);
           agg.net_balance         += Number(row.net_balance || 0);
         });
       });

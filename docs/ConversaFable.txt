@@ -1,0 +1,93 @@
+Como o sistema funciona (resumo do fluxo real)
+
+O app é uma SPA vanilla JS sem build, com Supabase como backend (PostgREST + RPCs + Storage + Auth). Cada página é um IIFE que se registra num Router em memória (sem hash/URL); o estado compartilhado entre telas vive em localStorage (cf_*). O ciclo operacional mensal é:
+
+1. Fechamento Mensal (fechamento.js) — checklist por competência: cada projeto ativo precisa de balancete (PDF), planilha de bolsas conferida (XLSX) e plano ativo (DOCX). O botão único abre a ImportQueue com os 3 handlers, roteando por extensão, com revisão humana arquivo a arquivo.
+2. Parsers determinísticos no browser — balancete-parser (pdf.js → regex), pt-parser (mammoth → HTML), bolsa-parser/bolsa-comparator (SheetJS → diff contra o banco). O save de cada um chama RPCs transacionais (upsert_balancete, upsert_plano_trabalho, apply_reconciliation).
+3. Saldos (saldos.js) — digitação manual mensal em project_balances; um trigger sincroniza o saldo mais recente para projects.initial_balance (cache), que alimenta todas as projeções.
+4. Projeções — calc_project_monthly (SQL) espelhado em pure-fns.js (JS) para a simulação client-side da aba Projetos; Dashboard agrega via calc_projects_batch.
+
+---
+Bugs encontrados (por gravidade)
+
+1. Desembolsos não salvam — quebra total da página (alto)
+
+Em funding.js:71-84, o campo composto de data tem key: 'release_date', required: true e readOnly: true. Em crud-page.js:239 o loop de payload pula campos readOnly (if (f.readOnly) continue;), então release_date nunca é coletado — e a validação em crud-page.js:252-255 então lança "Data é obrigatória." em todo save, mesmo com a data preenchida. Criar ou editar qualquer Desembolso falha sempre. Como desembolsos entram na projeção mensal, isso afeta os gráficos também. Correção: remover o readOnly: true desse campo (a coleta funciona pelo id: 'fld-date') ou fazer a validação pular campos readOnly.
+
+2. Sino de notificações para de abrir (médio)
+
+dashboard.js:86-101 — _initBell() roda a cada visita ao Dashboard e adiciona novos addEventListener no botão e no document. Na segunda visita, um clique alterna panel.hidden duas vezes (par de handlers = no-op): o dropdown de alertas simplesmente não abre mais até recarregar a página. Precisa de guard de inicialização única.
+
+3. Botão de ação de Bolsistas dispara duas ações ao mesmo tempo (médio)
+
+holders.js — o Router registra o botão com addEventListener('click', openForm) (linha 13), mas updateActionButton() (linha 47) só sobrescreve btn.onclick. Na aba Reconciliação, um clique em "Importar Planilhas FUNAPE" executa openForm() e openImportBolsas() em paralelo — dois modais em corrida; qual aparece depende de qual query termina por último (o createModal remove o modal do concorrente). Às vezes o usuário verá o modal de "Novo Bolsista" no lugar da importação.
+
+4. Saldos: null vira 0 e a semântica documentada se perde (médio)
+
+saldos.js:322-323 envia initialBalance ?? 0 / yieldAmount ?? 0 ao RPC, e a coluna é NOT NULL DEFAULT 0 (migração 017). A distinção "campo vazio = não informado" só existe quando a linha inteira está vazia; preencher só rendimento ou só a data grava saldo 0 — que o KPI "Com Saldo" passa a contar como informado. Além disso, o constraint chk_balance_date_matches_month rejeita datas fora do mês de referência com erro críptico do Postgres no toast (comum quando o saldo de junho é informado em 3 de julho) — vale validar no frontend com mensagem clara.
+
+5. CSP do Sentry é inválida (baixo, mas silencioso)
+
+index.html:8 — connect-src ... https://o450*.ingest.sentry.io: wildcard no meio do hostname não é sintaxe CSP válida; browsers ignoram essa source. Se o Sentry for ativado (window.SENTRY_DSN), os eventos serão bloqueados pela CSP sem ninguém perceber. Usar o host completo do projeto Sentry.
+
+6. inferBalanceStatus ignora a data do saldo depois do dia 7 (conceitual)
+
+pure-fns.js:64 — if (now.getDate() > 7) return 'paid_current'; retorna "já pago" independente de quão velho seja o balanceDate (o teste em utils.test.js:173 codifica isso). Com um saldo desatualizado de meses, o sistema assume as bolsas do mês atual como pagas e infla a projeção. A segunda condição (checar se balanceDate é do mês corrente) fica inalcançável na prática. Vale decidir a semântica pretendida: provavelmente "paid_current só se o balance_date for do mês corrente e posterior ao dia 7".
+
+7. Exclusões apagam o Storage antes do banco (baixo)
+
+plano-trabalho.js (excluir, excluirBalancete): o arquivo é removido do bucket antes do DELETE na tabela. Se o delete falhar, sobra registro apontando para arquivo inexistente (download quebrado). Inverter a ordem.
+
+Menores
+
+- crud-page.js:201 — exportCSV: se data vier vazio sem error, error.message lança TypeError.
+- Re-login sem recarregar a página deixa conteúdo estale: App.init() repetido navega para a página corrente, que é no-op no Router (router.js:41).
+- docs/pages.md e docs/architecture.md ainda descrevem ExpensesPage, funape_managed e o trigger block_expenses_for_funape — desatualizados em relação ao refactor 032 do working tree.
+- No merge de duplicados (holders.js:1849), h.email é interpolado sem escapeAttr (inconsistente com o resto).
+
+---
+Gargalos (performance e UX)
+
+1. Busca do CrudPage mata o próprio input — cada pausa de 300ms dispara refresh(), que re-renderiza o container inteiro via innerHTML, destruindo o campo de busca com foco. Quem digita "mate" vê o cursor sumir depois de "mat". A página Bolsistas resolve isso certo (re-renderiza só #holders-table-area); o CrudPage deveria fazer o mesmo.
+2. Dashboard em cascata — renderFull() espera calc_projects_batch, depois scholarships, depois get_alerts_for_projects em série (3+ round-trips que poderiam ser um Promise.all).
+3. Contagens buscando linhas inteiras — hub.js:114 baixa todos os ids de monitoramento só para contar; usar { count: 'exact', head: true } (como holders.remove já faz).
+4. Re-render total a cada tecla no modo Simulação — projetos.js:updateDraftField re-renderiza a página inteira a cada onchange, perdendo o foco do campo; editar vários valores em sequência exige re-clicar a cada campo.
+5. Bolsistas recarrega tudo a cada micro-operação — salvar uma bolsa refaz a query completa de holders+bolsas e reabre o modal. Ok na escala atual (~dezenas), mas é o padrão que mais vai pesar conforme crescer.
+
+---
+Fusão de telas — de 10 para ~6
+
+O hub ("Visão do Projeto") já validou a ideia de "projeto atual" único compartilhado (cf_selected_project_id). A consolidação natural:
+
+┌─────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────┐
+│       Hoje (10 telas)       │                                   Proposta (6)                                    │
+├─────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┤
+│ Fechamento, Saldos          │ Fechamento Mensal — absorve Saldos: a tabela de saldos da competência vira parte  │
+│                             │ do checklist                                                                      │
+├─────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┤
+│ Projetos, Visão do Projeto, │ Projeto — hub promovido a tela central, com abas: Visão · Projeção & Simulação    │
+│  Plano de Trabalho,         │ (atual Projetos) · Plano & Execução (atuais 3 abas do Plano de Trabalho) ·        │
+│ Observações                 │ Observações (filtrada pelo projeto)                                               │
+├─────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┤
+│ Visão Geral                 │ Visão Geral (inalterada)                                                          │
+├─────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┤
+│ Bolsistas                   │ Bolsistas (já tem abas Bolsistas/Reconciliação)                                   │
+├─────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────┤
+│ Gestão de Projetos,         │ Cadastros — Desembolsos vira aba de Gestão de Projetos (é cadastro por projeto,   │
+│ Desembolsos                 │ baixa frequência)                                                                 │
+└─────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────┘
+
+Dois argumentos fortes a favor: (a) o padrão de abas já existe e funciona bem em Plano de Trabalho e Bolsistas; (b) as páginas são IIFEs desacopladas — dá para compor os renderers existentes como abas sem reescrever a lógica. O maior ganho de rotina é o Fechamento absorver Saldos, porque hoje o usuário digita à mão em Saldos um número (saldo_disponivel) que já está no PDF do balancete que ele acabou de importar na mesma competência.
+
+---
+Automação (visão para depois)
+
+O objetivo que você descreveu — "a pessoa entra e os saldos do mês já estão lá, pendentes só de aprovação" — tem um caminho incremental barato porque as peças já existem:
+
+1. Quick win (sem infra nova): o handler de balancete já extrai saldo_disponivel, rendimento_liquido e data_referencia. Ao salvar o balancete, oferecer no mesmo modal um checkbox "registrar como saldo do mês" que chama upsert_project_balance — o comentário da migração 017 já previa exatamente essa automação. Isso sozinho elimina a digitação da tela Saldos para todo projeto com balancete.
+2. Ingestão automática: os arquivos chegam por e-mail da FUNAPE. O n8n (que já é usado para o keep-alive) pode monitorar a caixa via IMAP e depositar os anexos num bucket inbox/ + tabela import_inbox (status='pending_review'). O Fechamento então mostra "N arquivos recebidos aguardando revisão" e o clique abre a mesma ImportQueue de hoje, com o arquivo já baixado — o human-in-the-loop vira só a aprovação, que é exatamente o que você quer.
+3. A revisão/aprovação continua usando upsert_balancete/apply_reconciliation/upsert_project_balance — trilha de auditoria (migração 023) e RLS já cobrem.
+
+Pré-requisito antes do passo 2: o checklist de docs/seguranca-publicacao.md (signup fechado etc.), pois a ingestão via n8n vai precisar de uma credencial de serviço, não da anon key.
+
+Sugestão de prioridade imediata: corrigir os itens 1–4 dos bugs (Desembolsos é o único fluxo totalmente quebrado hoje) e o foco da busca do CrudPage — são todos pequenos e independentes do refactor 032 em andamento. Quer que eu aplique essas correções?

@@ -14,6 +14,22 @@ const App = (() => {
 
     initialized = true;
 
+    // Esconde links administrativos para professores e bloqueia o acesso
+    // direto à rota admin (URL #usuarios). Fechamento Mensal e Gestão de
+    // Projetos agora são professor-acessíveis (escopados no banco pela mig.
+    // 034); só Usuários & Centros de Custo segue admin-only. O RLS no banco
+    // é a barreira real de segurança; isto é apenas UX.
+    if (typeof Auth !== 'undefined' && !Auth.isAdmin()) {
+      document.querySelectorAll('li[data-admin]').forEach(li => { li.style.display = 'none'; });
+    }
+    Router.registerGuard(async (_from, to) => {
+      if (to === 'usuarios' && !Auth.isAdmin()) {
+        showToast('Acesso restrito a administradores.', 'error');
+        return false;
+      }
+      return true;
+    });
+
     // Sidebar navigation
     document.querySelectorAll('.sidebar__link').forEach(link => {
       link.addEventListener('click', () => {

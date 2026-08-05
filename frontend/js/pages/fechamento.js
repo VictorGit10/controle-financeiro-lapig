@@ -33,8 +33,7 @@ const FechamentoPage = (() => {
 
   let containerEl  = null;
   let competencia  = null;   // 'YYYY-MM'
-  let projects     = [];     // projetos FUNAPE ativos
-  let outrosCount  = 0;      // projetos ativos não-FUNAPE (informativo)
+  let projects     = [];     // projetos ativos
   let balSet       = new Set();   // project_ids com balancete na competência
   let reconSet     = new Set();   // project_ids com reconciliação na competência
   let planoSet     = new Set();   // project_ids com plano de trabalho ativo
@@ -66,7 +65,7 @@ const FechamentoPage = (() => {
     const { start, end } = monthBounds(competencia);
 
     const [projRes, balRes, planoRes, reconRes] = await Promise.all([
-      supabaseClient.from('projects').select('id, name, code, funape_managed, active').order('name'),
+      supabaseClient.from('projects').select('id, name, code, active').order('name'),
       supabaseClient.from('balancetes').select('project_id, data_referencia')
         .gte('data_referencia', start).lte('data_referencia', end),
       supabaseClient.from('planos_trabalho').select('project_id').eq('ativo', true),
@@ -78,8 +77,7 @@ const FechamentoPage = (() => {
     if (planoRes.error) { showToast('Erro ao carregar planos: ' + planoRes.error.message, 'error'); return; }
 
     const all    = projRes.data || [];
-    projects     = all.filter(p => p.funape_managed && p.active !== false);
-    outrosCount  = all.filter(p => !p.funape_managed && p.active !== false).length;
+    projects     = all.filter(p => p.active !== false);
     balSet       = new Set((balRes.data || []).map(r => r.project_id));
     planoSet     = new Set((planoRes.data || []).map(r => r.project_id));
 
@@ -140,8 +138,8 @@ const FechamentoPage = (() => {
     const tableHTML = total === 0
       ? `<div class="empty-state" style="padding:var(--sp-6);">
            <i data-lucide="folder-x" class="empty-state__icon"></i>
-           <h3 class="empty-state__title">Nenhum projeto FUNAPE ativo</h3>
-           <p class="empty-state__text">Marque os projetos como "gerenciado pela FUNAPE" em Gestão de Projetos para acompanhá-los aqui.</p>
+           <h3 class="empty-state__title">Nenhum projeto ativo</h3>
+           <p class="empty-state__text">Cadastre ou ative projetos em Gestão de Projetos para acompanhá-los aqui.</p>
          </div>`
       : `<div class="data-table-wrapper">
            <table class="data-table">
@@ -219,7 +217,6 @@ const FechamentoPage = (() => {
             <p class="card__subtitle">
               Arraste os PDFs (balancetes), DOCX (planos/remanejamentos) e XLSX (bolsas FUNAPE) de uma vez —
               cada arquivo é identificado pelo tipo e revisado antes de entrar no sistema.
-              ${outrosCount ? `${outrosCount} projeto(s) ativo(s) fora da gestão FUNAPE não aparecem aqui.` : ''}
             </p>
           </div>
         </div>

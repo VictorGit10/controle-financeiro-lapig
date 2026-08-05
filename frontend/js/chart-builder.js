@@ -7,7 +7,6 @@ const ChartBuilder = (() => {
   const COLORS = {
     funding:  'rgba(42,157,143,0.78)',
     bolsas:   'rgba(196,147,63,0.78)',
-    gastos:   'rgba(217,67,67,0.68)',
     saldo:    '#429B4D',
     saldoNeg: '#D94343',
   };
@@ -22,13 +21,11 @@ const ChartBuilder = (() => {
     const saldos      = data.map(m => m.net_balance);
     const funding     = data.map(m => m.funding_income);
     const bolsas      = data.map(m => m.scholarship_expense);
-    const gastos      = data.map(m => m.other_expense);
     const pointColors = saldos.map(v => v < 0 ? COLORS.saldoNeg : COLORS.saldo);
 
     const datasets = [
       { label: 'Desembolsos',   data: funding, backgroundColor: COLORS.funding, borderRadius: 4, order: 2 },
       { label: 'Bolsas',        data: bolsas,  backgroundColor: COLORS.bolsas,  borderRadius: 4, order: 2 },
-      { label: 'Outros Gastos', data: gastos,  backgroundColor: COLORS.gastos,  borderRadius: 4, order: 2 },
       {
         label: 'Saldo', data: saldos, type: 'line',
         borderColor: COLORS.saldo,

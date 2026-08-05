@@ -3,6 +3,13 @@
    ============================================================
    Suporta login por usuário simples (ex: "Laerte") que é
    convertido internamente para email Supabase.
+
+   Multi-tenancy: após o login, carrega o perfil do usuário em
+   `app_users` (papel: admin/professor) e os centros de custo
+   permitidos em `user_projects`. O papel precisa estar pronto
+   ANTES de App.init() (que esconde links admin e registra o
+   guard de rota). A segurança real fica no banco (RLS + guards
+   nas RPCs); o papel no frontend só controla a UI.
    ============================================================ */
 
 const Auth = (() => {
@@ -20,12 +27,19 @@ const Auth = (() => {
   const userAvatarEl= document.getElementById('user-avatar');
 
   let currentUser = null;
+  let userRole = null;           // 'admin' | 'professor'
+  let allowedProjectIds = [];    // centros de custo permitidos (vazio p/ admin)
 
   // Mapeamento de usuários (login simplificado -> email real no Supabase)
   const USER_MAPPING = {
     'laerte': '[e-mail removido]',
     'victor': '[e-mail removido]'
   };
+  // E-mails que viram admin por padrão (fallback quando não há linha em
+  // app_users — ex.: migração 033 ainda não aplicada, ou usuário criado
+  // antes do trigger on_auth_user_created). Pós-migração, app_users é a
+  // fonte da verdade; isto é só rede de segurança.
+  const ADMIN_EMAILS = new Set(Object.values(USER_MAPPING));
 
   /**
    * Convert a username to Supabase email.
@@ -33,15 +47,15 @@ const Auth = (() => {
    */
   function toEmail(input) {
     const trimmed = (input || '').trim().toLowerCase();
-    
+
     // Se já contiver @, é o email direto
     if (trimmed.includes('@')) return trimmed;
-    
+
     // Procura no mapeamento (usando chave em minúsculo)
     if (USER_MAPPING[trimmed]) {
       return USER_MAPPING[trimmed];
     }
-    
+
     // Se não encontrar, retorna o que foi digitado (provavelmente falhará no Supabase, o que é o esperado)
     return trimmed;
   }
@@ -76,15 +90,59 @@ const Auth = (() => {
     loginError.hidden = true;
   }
 
+  // Carrega o perfil (papel + centros de custo) do usuário autenticado.
+  // RLS permite ler a própria linha de app_users e user_projects.
+  // Fallback: sem linha (ou tabela ausente pré-migração) → admin por email
+  // conhecido, senão professor sem projetos.
+  async function loadProfile(user) {
+    userRole = 'professor';
+    allowedProjectIds = [];
+    if (!user?.id) return;
+
+    const email = (user.email || '').toLowerCase();
+    const fallbackRole = ADMIN_EMAILS.has(email) ? 'admin' : 'professor';
+
+    try {
+      const [profileRes, projRes] = await Promise.all([
+        supabaseClient
+          .from('app_users')
+          .select('role, display_name, email')
+          .eq('user_id', user.id)
+          .maybeSingle(),
+        supabaseClient
+          .from('user_projects')
+          .select('project_id')
+          .eq('user_id', user.id),
+      ]);
+
+      if (profileRes.data) {
+        userRole = profileRes.data.role || fallbackRole;
+        if (profileRes.data.display_name) {
+          user._displayName = profileRes.data.display_name;
+        }
+      } else {
+        userRole = fallbackRole;
+      }
+
+      if (projRes.data) {
+        allowedProjectIds = projRes.data.map(r => r.project_id);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar perfil (app_users/user_projects):', e);
+      userRole = fallbackRole;
+    }
+  }
+
   // Switch screens
-  function showApp(user) {
+  async function showApp(user) {
     currentUser = user;
+    await loadProfile(user);   // papel pronto antes de App.init()
     loginScreen.hidden = true;
     appScreen.hidden = false;
 
     // Update user info in sidebar
     const email = user.email || '';
-    const name = displayName(email);
+    const name = user._displayName || displayName(email);
     userEmailEl.textContent = name || email;
     userAvatarEl.textContent = (name || email).charAt(0).toUpperCase();
 
@@ -96,6 +154,8 @@ const Auth = (() => {
 
   function showLogin() {
     currentUser = null;
+    userRole = null;
+    allowedProjectIds = [];
     loginScreen.hidden = false;
     appScreen.hidden = true;
     loginPass.value = '';
@@ -139,7 +199,7 @@ const Auth = (() => {
         return;
       }
 
-      showApp(data.user);
+      await showApp(data.user);
     } catch (err) {
       console.error("ERRO DE LOGIN COMPLETO:", err);
       showError(`Erro interno: ${err.message || err.toString()}`);
@@ -168,7 +228,7 @@ const Auth = (() => {
       }
 
       if (data?.session?.user) {
-        showApp(data.session.user);
+        await showApp(data.session.user);
       } else {
         showLogin();
       }
@@ -188,5 +248,8 @@ const Auth = (() => {
   return {
     checkSession,
     getUser: () => currentUser,
+    isAdmin: () => userRole === 'admin',
+    getRole: () => userRole,
+    getAllowedProjectIds: () => allowedProjectIds.slice(),
   };
 })();

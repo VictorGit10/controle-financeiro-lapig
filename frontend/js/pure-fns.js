@@ -61,7 +61,9 @@ export function inferBalanceStatus(balanceDate) {
   if (!balanceDate) return 'unpaid_current';
   const bd = new Date(balanceDate + 'T00:00:00');
   const now = new Date();
-  if (now.getDate() > 7) return 'paid_current';
+  // paid_current só quando o saldo foi registrado no mês corrente e
+  // depois do dia 7 (dia em que as bolsas do mês são debitadas): um
+  // saldo de mês anterior não reflete o pagamento do mês atual.
   if (bd.getFullYear() === now.getFullYear() &&
       bd.getMonth() === now.getMonth() &&
       bd.getDate() > 7) {
@@ -91,7 +93,7 @@ export function generateMonthSeries(startDate, endDate) {
   return months;
 }
 
-export function calcProjectMonthly(project, scholarships, fundingReleases, expenses, options = {}) {
+export function calcProjectMonthly(project, scholarships, fundingReleases, options = {}) {
   const { startDateParam = null, balanceStatus = 'unpaid_current' } = options;
 
   const now = new Date();
@@ -148,15 +150,8 @@ export function calcProjectMonthly(project, scholarships, fundingReleases, expen
       return sum;
     }, 0);
 
-    const otherExp = expenses.reduce((sum, e) => {
-      if (e.expense_date >= m.month_start && e.expense_date <= m.month_end) {
-        return sum + Number(e.amount);
-      }
-      return sum;
-    }, 0);
-
     const initialBalance = runningBalance;
-    runningBalance = runningBalance + fundingInc - scholarshipExp - otherExp;
+    runningBalance = runningBalance + fundingInc - scholarshipExp;
 
     result.push({
       month_label: m.month_label,
@@ -164,7 +159,6 @@ export function calcProjectMonthly(project, scholarships, fundingReleases, expen
       initial_balance: initialBalance,
       scholarship_expense: scholarshipExp,
       funding_income: fundingInc,
-      other_expense: otherExp,
       net_balance: runningBalance,
     });
   });

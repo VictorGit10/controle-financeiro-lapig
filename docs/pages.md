@@ -26,11 +26,11 @@ Project detail with monthly chart, holders panel, and Editor Mode for what-if si
 
 ## GestaoPage (`gestao-projetos.js`)
 
-Project management CRUD built on `CrudPage` with custom `onSave` (delegates to `save_project` RPC for transactional project + dashboard_settings upsert) and **`allowDelete: false`** — a exclusão de projetos é intencionalmente desabilitada na UI porque um projeto carrega histórico financeiro (bolsas, desembolsos, gastos, balancetes); projetos são encerrados via status, nunca removidos. O `onDelete` foi removido em favor do `allowDelete`. Usa `loadExtra` (com try/catch) para buscar `dashboard_settings.include_in_general`.
+Project management CRUD built on `CrudPage` with custom `onSave` (delegates to `save_project` RPC for transactional project + dashboard_settings upsert) and **`allowDelete: false`** — a exclusão de projetos é intencionalmente desabilitada na UI porque um projeto carrega histórico financeiro (bolsas, desembolsos, gastos, balancetes); projetos são encerrados via status, nunca removidos. O `onDelete` foi removido em favor do `allowDelete`. Usa `loadExtra` (com try/catch) para buscar `dashboard_settings.include_in_general`. **Desde a mig. 034 é professor-acessível**: o professor cria projetos (auto-atribuídos a si em `user_projects`) e edita só os seus — o RLS faz a lista mostrar só os centros de custo dele e o guard da `save_project` impede editar alheios. A exclusão segue desabilitada para todos.
 
 ## HoldersPage (`holders.js`)
 
-Custom CRUD for scholarship holders (not using CrudPage) because of unique features: scholarship management sub-modals, timeline chart, alert banner. Agora organizada em **2 abas** (persistidas em `cf_holders_tab`): **Bolsistas** e **Reconciliação**.
+Custom CRUD for scholarship holders (not using CrudPage) because of unique features: scholarship management sub-modals, timeline chart, alert banner. Agora organizada em **2 abas** (persistidas em `cf_holders_tab`): **Bolsistas** e **Reconciliação**. **Desde a mig. 034 a aba Reconciliação é professor-acessível** (`apply_reconciliation` escopado por `assert_project_allowed`); a ferramenta de **merge de duplicados** segue **admin-only** (RPC `merge_holders`, global) — o botão "Mesclar duplicados" da toolbar e o banner de duplicados são ocultados para professores (`Auth.isAdmin()`).
 
 ### Aba "Bolsistas"
 
@@ -122,7 +122,7 @@ Cruzamento do plano ativo com o balancete mais recente (RPC `get_previsto_vs_rea
 
 ## FechamentoPage (`fechamento.js`)
 
-Rotina de conciliação mensal — a porta de entrada única dos 3 artefatos que todo projeto FUNAPE recebe por mês.
+Rotina de conciliação mensal — a porta de entrada única dos 3 artefatos que todo projeto FUNAPE recebe por mês. **Desde a mig. 034 é professor-acessível**: o checklist e os imports são escopados pelo RLS (professor vê só os projetos dele); a reconciliação de bolsas roda via `apply_reconciliation` escopado e o registro em `reconciliacoes` é permitido pela policy de INSERT escopada.
 
 - **Seletor de competência** — `<input type="month">`, default mês anterior (o fechamento cuida do mês que passou).
 - **4 stat cards** — Projetos fechados (balancete + bolsas ok), Balancetes, Planilhas de bolsas, Planos ativos (X / total).
@@ -140,4 +140,15 @@ Página **experimental** (somente leitura) que agrega numa tela só os 4 KPIs-ch
 - **Seletor de projeto** — compartilha `cf_selected_project_id` com a aba Projetos de propósito (ideia de "projeto atual" único). Botões "Abrir" propagam o projeto para a tela de destino.
 - **4 KPI cards** — Saldo Atual (+ rendimento), Execução do Orçamento (% previsto×realizado, colorido), Bolsas/Mês (custo mensal + nº encerrando em 90d), Saldo Projetado (último mês da projeção).
 - **Blocos por área** — Orçamento, Bolsistas, Execução (Balancete FUNAPE para `funape_managed` ou Gastos para projetos não-FUNAPE), Vigência & Saldo — cada um com botão "Abrir ..." que navega via `Router`.
-- **Fontes** — `projects`, `scholarships`, `calc_project_monthly`, `get_previsto_vs_realizado`, `expenses` (carregadas em paralelo com `Promise.all`).
+- **Fontes** — `projects`, `scholarships`, `calc_project_monthly`, `get_previsto_vs_realizado`, `monitoramento` (carregadas em paralelo com `Promise.all`).
+
+## UsuariosPage (`usuarios.js`) — admin-only
+
+Gerencia o **papel** (admin/professor) e os **centros de custo** permitidos por usuário. Rota `usuarios`, bloqueada pelo guard em `app.js` e oculta no sidebar (`data-admin`) para professores.
+
+- **Tabela de usuários** — lista `app_users` (admin vê todos via RLS): nome, e-mail, badge de papel, nº de centros de custo (— para admins), data de criação, botão Editar.
+- **Modal de edição** — `<select>` de papel (admin/professor) + checkboxes de todos os projetos (`from('projects')`, admin vê todos). Botões "Marcar todos"/"Limpar". Salvar → RPC `save_user_assignments(p_user_id, p_role, p_project_ids[])` (admin-only no banco).
+- **Anti-lockout** — o admin não pode rebaixar a si mesmo (validação client-side que lança erro e mantém o modal aberto).
+- **Criação de logins** — não é feita aqui; continua no painel do Supabase (Authentication → Users → Add user). O trigger `on_auth_user_created` (mig. 033) cria a linha em `app_users` automaticamente (papel `professor`, sem projetos), e ela aparece nesta página.
+
+**Globais usadas:** `escapeAttr`, `formatDate`, `showToast`, `createModal`, `supabaseClient`, `Auth.getUser()`.

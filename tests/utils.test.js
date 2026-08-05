@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { formatBRL, parseBRL, escapeAttr, formatDate, toInputDate, localISODate, inferBalanceStatus } from '../frontend/js/pure-fns.js';
 
 describe('formatBRL', () => {
@@ -158,6 +158,10 @@ describe('localISODate', () => {
 });
 
 describe('inferBalanceStatus', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('retorna unpaid_current para null', () => {
     expect(inferBalanceStatus(null)).toBe('unpaid_current');
   });
@@ -170,10 +174,21 @@ describe('inferBalanceStatus', () => {
     expect(inferBalanceStatus('')).toBe('unpaid_current');
   });
 
-  it('retorna paid_current quando dia atual > 7', () => {
-    const now = new Date();
-    if (now.getDate() > 7) {
-      expect(inferBalanceStatus('2026-01-01')).toBe('paid_current');
-    }
+  it('retorna paid_current para saldo do mês corrente registrado após o dia 7', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    expect(inferBalanceStatus('2026-07-15')).toBe('paid_current');
+  });
+
+  it('retorna unpaid_current para saldo do mês corrente registrado até o dia 7', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    expect(inferBalanceStatus('2026-07-05')).toBe('unpaid_current');
+  });
+
+  it('retorna unpaid_current para saldo de mês anterior, mesmo com dia atual > 7', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    expect(inferBalanceStatus('2026-01-01')).toBe('unpaid_current');
   });
 });

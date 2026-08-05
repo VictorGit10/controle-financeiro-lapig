@@ -121,7 +121,7 @@ const SaldosPage = (() => {
             <i data-lucide="landmark"></i>
           </div>
           <div class="stat-card__content">
-            <div class="stat-card__label">Total FUNAPE</div>
+            <div class="stat-card__label">Total</div>
             <div class="stat-card__value currency">${formatBRL(totalBalance)}</div>
           </div>
         </div>
@@ -150,7 +150,7 @@ const SaldosPage = (() => {
         <div class="card__header">
           <div>
             <h3 class="card__title">Saldos — ${MONTH_NAMES[currentMonth - 1]}/${currentYear}</h3>
-            <p class="card__subtitle">Informe o saldo FUNAPE e rendimentos de cada projeto para este mês</p>
+            <p class="card__subtitle">Informe o saldo e rendimentos de cada projeto para este mês</p>
           </div>
         </div>
 
@@ -161,7 +161,7 @@ const SaldosPage = (() => {
                 <tr>
                   <th>Projeto</th>
                   <th>Status</th>
-                  <th style="min-width:140px;">Saldo FUNAPE (R$)</th>
+                  <th style="min-width:140px;">Saldo (R$)</th>
                   <th style="min-width:130px;">Rendimentos (R$)</th>
                   <th style="min-width:140px;">Data do Saldo</th>
                 </tr>

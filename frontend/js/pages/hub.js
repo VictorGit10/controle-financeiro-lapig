@@ -49,11 +49,14 @@ const HubPage = (() => {
     allProjects = projects || [];
 
     if (allProjects.length === 0) {
+      const isAdminUser = typeof Auth !== 'undefined' && Auth.isAdmin();
       containerEl.innerHTML = `
         <div class="empty-state">
           <i data-lucide="folder-plus" class="empty-state__icon"></i>
-          <h3 class="empty-state__title">Nenhum projeto ainda</h3>
-          <p class="empty-state__text">Cadastre projetos na aba <strong>Gestão de Projetos</strong>.</p>
+          <h3 class="empty-state__title">${isAdminUser ? 'Nenhum projeto ainda' : 'Nenhum centro de custo vinculado'}</h3>
+          <p class="empty-state__text">${isAdminUser
+            ? 'Cadastre projetos na aba <strong>Gestão de Projetos</strong>.'
+            : 'Crie um novo na aba <strong>Gestão de Projetos</strong>, ou peça ao administrador para atribuir um existente.'}</p>
         </div>`;
       lucide.createIcons();
       return;
@@ -100,7 +103,7 @@ const HubPage = (() => {
 
     const todayStartStr = localISODate().slice(0, 8) + '01';
 
-    const [projectRes, scholarshipsRes, monthlyRes, prevRealRes, expensesRes] = await Promise.all([
+    const [projectRes, scholarshipsRes, monthlyRes, prevRealRes, obsRes] = await Promise.all([
       supabaseClient.from('projects').select('*').eq('id', selectedProjectId).single(),
       supabaseClient.from('scholarships')
         .select('amount, start_date, end_date, status, holder:holder_id(full_name)')
@@ -111,7 +114,7 @@ const HubPage = (() => {
         p_balance_status: 'unpaid_current',
       }),
       supabaseClient.rpc('get_previsto_vs_realizado', { p_project_id: selectedProjectId }),
-      supabaseClient.from('expenses').select('amount').eq('project_id', selectedProjectId),
+      supabaseClient.from('monitoramento').select('id', { count: 'exact', head: true }).eq('project_id', selectedProjectId),
     ]);
 
     if (projectRes.error) {
@@ -123,16 +126,16 @@ const HubPage = (() => {
     const scholarships  = scholarshipsRes.data || [];
     const monthlyData   = monthlyRes.data || [];
     const prevReal      = prevRealRes.data || null;
-    const expenses      = expensesRes.data || [];
+    if (obsRes.error) showToast('Erro ao contar observações: ' + obsRes.error.message, 'error');
+    const obsCount      = obsRes.count ?? 0;
 
-    renderView(project, scholarships, monthlyData, prevReal, expenses);
+    renderView(project, scholarships, monthlyData, prevReal, obsCount);
   }
 
   /* ── Render view ─────────────────────────────────────────── */
 
-  function renderView(project, scholarships, monthlyData, prevReal, expenses) {
+  function renderView(project, scholarships, monthlyData, prevReal, obsCount) {
     const today    = localISODate();
-    const isFunape = project.funape_managed === true;
 
     // KPI 1 — Saldo atual + rendimento (mesma conta da aba Projetos)
     const saldoAtual = Number(project.initial_balance) + Number(project.yield_amount || 0);
@@ -154,9 +157,6 @@ const HubPage = (() => {
     // KPI 4 — Saldo projetado (último mês da projeção)
     const lastMonth = monthlyData.length > 0 ? monthlyData[monthlyData.length - 1] : null;
     const saldoProjetado = lastMonth ? Number(lastMonth.net_balance) : null;
-
-    // Execução: balancete (FUNAPE) ou gastos lançados (não-FUNAPE)
-    const totalGastos = expenses.reduce((s, e) => s + Number(e.amount), 0);
 
     containerEl.innerHTML = `
 
@@ -187,7 +187,6 @@ const HubPage = (() => {
           <span class="badge badge--${project.active ? 'active' : 'ended'}" style="flex-shrink:0;">
             ${project.active ? 'Ativo' : 'Inativo'}
           </span>
-          ${isFunape ? '<span class="badge badge--info" style="flex-shrink:0;">FUNAPE</span>' : ''}
         </div>
       </div>
 
@@ -262,21 +261,21 @@ const HubPage = (() => {
           page: 'holders', btnLabel: 'Abrir Bolsistas',
         })}
 
-        ${isFunape
-          ? sectionCard({
-              icon: 'file-stack', title: 'Execução (Balancete FUNAPE)',
-              body: prevReal && prevReal.has_balancete
-                ? `<div class="hub-section__metric">${formatBRL(prevReal.rendimento_liquido)}<span>rend. líq.</span></div>
-                   <p class="hub-section__text">Último balancete em <strong>${formatDate(prevReal.data_referencia)}</strong>. Gastos por rubrica vêm do PDF da FUNAPE.</p>`
-                : `<p class="hub-section__text">Nenhum balancete importado ainda. Importe o PDF da FUNAPE para ver a execução.</p>`,
-              page: 'plano-trabalho', btnLabel: 'Abrir Balancetes',
-            })
-          : sectionCard({
-              icon: 'receipt', title: 'Gastos',
-              body: `<div class="hub-section__metric">${formatBRL(totalGastos)}<span>total</span></div>
-                     <p class="hub-section__text">${expenses.length} lançamento(s) de gasto registrado(s) neste projeto.</p>`,
-              page: 'expenses', btnLabel: 'Abrir Gastos',
-            })}
+        ${sectionCard({
+          icon: 'file-stack', title: 'Execução (Balancete FUNAPE)',
+          body: prevReal && prevReal.has_balancete
+            ? `<div class="hub-section__metric">${formatBRL(prevReal.rendimento_liquido)}<span>rend. líq.</span></div>
+               <p class="hub-section__text">Último balancete em <strong>${formatDate(prevReal.data_referencia)}</strong>. Gastos por rubrica vêm do PDF da FUNAPE.</p>`
+            : `<p class="hub-section__text">Nenhum balancete importado ainda. Importe o PDF da FUNAPE para ver a execução.</p>`,
+          page: 'plano-trabalho', btnLabel: 'Abrir Balancetes',
+        })}
+
+        ${sectionCard({
+          icon: 'clipboard-list', title: 'Observações',
+          body: `<div class="hub-section__metric">${obsCount}<span>registros</span></div>
+                 <p class="hub-section__text">Acompanhamento pontual do projeto (discrimina acontecimentos entre saldos). Apague quando não for mais relevante.</p>`,
+          page: 'monitoramento', btnLabel: 'Abrir Observações',
+        })}
 
         ${sectionCard({
           icon: 'calendar-range', title: 'Vigência & Saldo',
