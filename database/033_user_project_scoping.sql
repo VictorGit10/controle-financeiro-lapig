@@ -156,19 +156,26 @@ create trigger on_auth_user_created
 -- ============================================================
 -- 4. BACKFILL dos usuários existentes
 -- ============================================================
--- Laerte e Victor viram admin; qualquer outro auth user existente
--- vira professor (sem centros de custo — o admin atribui depois).
-
-insert into public.app_users (user_id, role, email)
-select id, 'admin', email from auth.users
- where email in ('[e-mail removido]','[e-mail removido]')
- on conflict (user_id) do nothing;
+-- Todo auth user existente vira professor (sem centros de custo — o
+-- admin atribui depois). Os e-mails dos admins NÃO ficam hardcoded
+-- aqui: este repositório é público, e listar as contas privilegiadas
+-- entregaria a um atacante exatamente onde tentar senha.
 
 insert into public.app_users (user_id, role, email)
 select a.id, 'professor', a.email
   from auth.users a
  where not exists (select 1 from public.app_users u where u.user_id = a.id)
  on conflict (user_id) do nothing;
+
+-- PASSO MANUAL — obrigatório numa instalação nova. Sem ao menos um
+-- admin ninguém gerencia usuários nem enxerga todos os centros de
+-- custo. Rode uma vez, com o seu e-mail:
+--
+--   update public.app_users
+--      set role = 'admin'
+--    where email = 'seu-email@exemplo.br';
+--
+-- Daí em diante a tela "Usuários & Centros de Custo" cuida do resto.
 
 
 -- ============================================================

@@ -30,6 +30,13 @@ config.local.*
 # Credenciais Supabase (se extraídas para arquivo separado)
 supabase-credentials.json
 
+# ── Fixtures de teste com dados reais ─────────────────────────
+# Os planos de trabalho convertidos para HTML trazem nome, telefone,
+# e-mail do coordenador e CPFs da equipe. NUNCA versionar: o repo é
+# público. Os testes que dependem deles são pulados quando ausentes
+# (tests/pt-parser.test.js).
+tests/fixtures/pt-html/
+
 # ── Planilhas Excel (dados brutos — grandes e binários) ───────
 # A planilha legada não precisa de versionamento de código.
 # Se quiser versionar, remova a linha abaixo.

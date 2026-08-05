@@ -1,8 +1,8 @@
 /* ============================================================
    Auth — Login, Logout, Session Management
    ============================================================
-   Suporta login por usuário simples (ex: "Laerte") que é
-   convertido internamente para email Supabase.
+   O login é o e-mail cadastrado no Supabase Auth. Não há atalho
+   por nome curto — ver toEmail().
 
    Multi-tenancy: após o login, carrega o perfil do usuário em
    `app_users` (papel: admin/professor) e os centros de custo
@@ -30,39 +30,22 @@ const Auth = (() => {
   let userRole = null;           // 'admin' | 'professor'
   let allowedProjectIds = [];    // centros de custo permitidos (vazio p/ admin)
 
-  // Mapeamento de usuários (login simplificado -> email real no Supabase)
-  const USER_MAPPING = {
-    'laerte': '[e-mail removido]',
-    'victor': '[e-mail removido]'
-  };
-  // E-mails que viram admin por padrão (fallback quando não há linha em
-  // app_users — ex.: migração 033 ainda não aplicada, ou usuário criado
-  // antes do trigger on_auth_user_created). Pós-migração, app_users é a
-  // fonte da verdade; isto é só rede de segurança.
-  const ADMIN_EMAILS = new Set(Object.values(USER_MAPPING));
-
   /**
-   * Convert a username to Supabase email.
-   * If it already contains @, use as-is. Otherwise, look up the mapping.
+   * Normaliza o que foi digitado no campo de login.
+   *
+   * O login é sempre o e-mail cadastrado no Supabase Auth. Não existe
+   * atalho por nome curto: mapear apelido → e-mail exigiria embutir os
+   * e-mails reais neste arquivo, que vai inteiro para o bundle público
+   * do GitHub Pages. Isso entregaria a um atacante os nomes exatos das
+   * contas para tentativa de senha.
    */
   function toEmail(input) {
-    const trimmed = (input || '').trim().toLowerCase();
-
-    // Se já contiver @, é o email direto
-    if (trimmed.includes('@')) return trimmed;
-
-    // Procura no mapeamento (usando chave em minúsculo)
-    if (USER_MAPPING[trimmed]) {
-      return USER_MAPPING[trimmed];
-    }
-
-    // Se não encontrar, retorna o que foi digitado (provavelmente falhará no Supabase, o que é o esperado)
-    return trimmed;
+    return (input || '').trim().toLowerCase();
   }
 
   /**
    * Extract display name from email.
-   * "[e-mail removido]" -> "Laerte"
+   * "fulano.silva@exemplo.br" -> "Fulano Silva"
    */
   function displayName(email) {
     if (!email) return '';
@@ -99,8 +82,10 @@ const Auth = (() => {
     allowedProjectIds = [];
     if (!user?.id) return;
 
-    const email = (user.email || '').toLowerCase();
-    const fallbackRole = ADMIN_EMAILS.has(email) ? 'admin' : 'professor';
+    // Fail-closed: sem linha em app_users (ou erro de leitura), o usuário
+    // cai como professor. A UI esconde o que é admin; o RLS no banco é a
+    // barreira real, então um degrade aqui nunca abre acesso.
+    const fallbackRole = 'professor';
 
     try {
       const [profileRes, projRes] = await Promise.all([

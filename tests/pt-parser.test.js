@@ -2,12 +2,21 @@
  * @vitest-environment happy-dom
  */
 import { describe, it, expect } from 'vitest';
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parsePtFromHtml, PtFormatError } from '../frontend/js/parsers/pt-parser.js';
 import { lookupRubrica, normalizeForLookup } from '../frontend/js/parsers/pt-rubrica-lookup.js';
 
 const FIX_DIR = resolve(process.cwd(), 'tests', 'fixtures', 'pt-html');
+
+// As fixtures são planos de trabalho REAIS: trazem nome, telefone, e-mail
+// do coordenador e CPFs da equipe. Por isso não são versionadas (ver
+// .gitignore) — ficam só na máquina de quem desenvolve, e no CI o bloco
+// que depende delas é pulado em vez de falhar.
+//
+// Para rodar esses testes localmente, converta os .docx para HTML com
+// mammoth e salve em tests/fixtures/pt-html/ com os nomes usados abaixo.
+const hasFixtures = existsSync(FIX_DIR);
 
 async function loadFixture(name) {
   return fs.readFile(resolve(FIX_DIR, name), 'utf8');
@@ -53,7 +62,7 @@ describe('lookupRubrica — aliases canônicos', () => {
   });
 });
 
-describe('parsePtFromHtml — DOCX reais', () => {
+describe.skipIf(!hasFixtures)('parsePtFromHtml — DOCX reais', () => {
   it('extrai rubricas do Plano Acelen', async () => {
     const html = await loadFixture('Plano de Trabalho Acelen.html');
     const { data, warnings } = parsePtFromHtml(html);

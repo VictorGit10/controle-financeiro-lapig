@@ -93,8 +93,17 @@ git log -S sb_secret --oneline
       deprecated) — não aparece no repo.
 - [ ] Cientes de que ficam públicos (aceitável por design): URL do projeto
       Supabase, anon/publishable key, DSN do Sentry (se configurado).
-- [ ] `frontend/js/auth.js` tem o `USER_MAPPING` com e-mails reais dos
-      usuários — avaliar se aceita expô-los ou remover o atalho de login.
+- [x] Nenhum e-mail real de usuário no código. O `USER_MAPPING` (atalho de
+      login por nome curto) foi **removido** do `auth.js` e o backfill da
+      migração 033 deixou de listar os admins — os dois embutiam e-mails
+      reais no bundle público. O login agora é sempre o e-mail completo.
+- [ ] Commits futuros **não** podem usar e-mail pessoal no autor: o GitHub
+      expõe `git log`. Usar o endereço `@users.noreply.github.com`
+      (`git config user.email`), verificável com:
+
+```bash
+git log --format='%ae %ce' | sort -u
+```
 
 ### 5. Hardening opcional (recomendado)
 
