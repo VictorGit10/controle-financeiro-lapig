@@ -38,6 +38,7 @@ export default [
         formatDate: "readonly",
         toInputDate: "readonly",
         escapeAttr: "readonly",
+        escapeAttrJs: "readonly",
         localISODate: "readonly",
         inferBalanceStatus: "readonly",
         generateMonthSeries: "readonly",

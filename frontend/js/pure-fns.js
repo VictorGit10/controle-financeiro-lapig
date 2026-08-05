@@ -38,6 +38,30 @@ export function escapeAttr(str) {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * Escapa um valor que vai DENTRO de uma string JS entre aspas simples
+ * que por sua vez vive num atributo HTML — o caso de onclick="f('...')".
+ *
+ * escapeAttr sozinho NÃO resolve aqui. Ele troca ' por &#39;, mas o parser
+ * HTML decodifica a entidade ANTES de o JavaScript ser interpretado: o
+ * apóstrofo volta e fecha a string. Um nome de bolsista como
+ *     x'); alert(document.cookie); //
+ * viraria código executável no navegador de quem abrisse a lista.
+ *
+ * A ordem correta é escapar para JS primeiro e para atributo depois, que é
+ * o que esta função faz — por isso ela existe em vez de compor as duas na
+ * mão em cada chamada.
+ */
+export function escapeAttrJs(str) {
+  if (str == null) return '';
+  const js = String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+  return escapeAttr(js);
+}
+
 export function formatDate(dateStr) {
   if (!dateStr) return '—';
   const d = new Date(dateStr + 'T00:00:00');
@@ -189,7 +213,7 @@ export function diffProjections(original, simulated) {
 // simulation, pages/*) que não são módulos ES.
 if (typeof window !== 'undefined') {
   Object.assign(window, {
-    formatBRL, parseBRL, escapeAttr, formatDate, toInputDate, localISODate,
+    formatBRL, parseBRL, escapeAttr, escapeAttrJs, formatDate, toInputDate, localISODate,
     inferBalanceStatus, generateMonthSeries, calcProjectMonthly,
     diffProjections,
   });

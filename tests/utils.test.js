@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { formatBRL, parseBRL, escapeAttr, formatDate, toInputDate, localISODate, inferBalanceStatus } from '../frontend/js/pure-fns.js';
+import { formatBRL, parseBRL, escapeAttr, escapeAttrJs, formatDate, toInputDate, localISODate, inferBalanceStatus } from '../frontend/js/pure-fns.js';
 
 describe('formatBRL', () => {
   it('formata valor positivo', () => {
@@ -64,6 +64,49 @@ describe('parseBRL', () => {
 
   it('respeita sinal negativo', () => {
     expect(parseBRL('-200,50')).toBeCloseTo(-200.5, 2);
+  });
+});
+
+describe('escapeAttrJs — XSS em onclick', () => {
+  // Simula o que o navegador faz: decodifica as entidades HTML do atributo
+  // ANTES de o JavaScript ser interpretado.
+  const decodeHtml = (s) => s
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
+  // Reproduz o caminho real: monta o onclick, deixa o navegador decodificar
+  // as entidades e executa o resultado. Devolve o argumento que chegou na
+  // função — ou lança, se o payload quebrou a sintaxe da string.
+  function runOnclick(escaped) {
+    let captured = null;
+    const f = (v) => { captured = v; };
+    // eslint-disable-next-line no-eval
+    eval(decodeHtml(`f('${escaped}')`));
+    return captured;
+  }
+
+  const PAYLOAD = "x'); alert(document.cookie); //";
+
+  it('escapeAttr sozinho quebra o contexto JS (regressao do bug corrigido)', () => {
+    // O apostrofo volta no decode e fecha a string: o que sobra vira codigo.
+    // Aqui isso estoura em ReferenceError (alert nao existe no Node) — prova
+    // de que deixou de ser texto e passou a ser instrucao.
+    expect(() => runOnclick(escapeAttr(PAYLOAD))).toThrow();
+  });
+
+  it('escapeAttrJs entrega o texto literal, sem executar nada', () => {
+    expect(runOnclick(escapeAttrJs(PAYLOAD))).toBe(PAYLOAD);
+  });
+
+  it('sobrevive a barra invertida, aspas e quebra de linha', () => {
+    const tricky = 'a\\b \'c\' "d"\ne';
+    expect(runOnclick(escapeAttrJs(tricky))).toBe(tricky);
+  });
+
+  it('trata null/undefined', () => {
+    expect(escapeAttrJs(null)).toBe('');
+    expect(escapeAttrJs(undefined)).toBe('');
   });
 });
 

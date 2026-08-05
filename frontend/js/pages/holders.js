@@ -481,7 +481,7 @@ const HoldersPage = (() => {
                   return `<div style="font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;" title="${escapeAttr(pName)}">${escapeAttr(pName)} <span style="color:var(--success);font-weight:600;">${formatBRL(Number(s.amount))}</span></div>`;
                 }).join('');
                 const otherLink = otherCount > 0
-                  ? `<a href="#" onclick="event.preventDefault();HoldersPage.manageScholarships('${escapeAttr(h.id)}','${escapeAttr(h.full_name)}')" style="font-size:0.75rem;color:var(--text-muted);text-decoration:underline;cursor:pointer;">+ ${otherCount} bolsa${otherCount > 1 ? 's' : ''}</a>`
+                  ? `<a href="#" onclick="event.preventDefault();HoldersPage.manageScholarships('${escapeAttr(h.id)}','${escapeAttrJs(h.full_name)}')" style="font-size:0.75rem;color:var(--text-muted);text-decoration:underline;cursor:pointer;">+ ${otherCount} bolsa${otherCount > 1 ? 's' : ''}</a>`
                   : '';
 
                 return `
@@ -500,16 +500,16 @@ const HoldersPage = (() => {
                     </td>
                     <td>
                       <div style="display: flex; gap: 4px;">
-                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.viewTimeline('${escapeAttr(h.id)}', '${escapeAttr(h.full_name)}')" title="Ver Rendimentos Mensais">
+                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.viewTimeline('${escapeAttr(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Ver Rendimentos Mensais">
                           <i data-lucide="bar-chart" style="width:16px;height:16px;color:var(--info);"></i>
                         </button>
-                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.manageScholarships('${escapeAttr(h.id)}', '${escapeAttr(h.full_name)}')" title="Gerenciar Bolsas">
+                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.manageScholarships('${escapeAttr(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Gerenciar Bolsas">
                           <i data-lucide="graduation-cap" style="width:16px;height:16px;color:var(--accent);"></i>
                         </button>
                         <button class="btn btn--ghost btn--sm" onclick="HoldersPage.openForm('${escapeAttr(h.id)}')" title="Editar">
                           <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                         </button>
-                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.remove('${escapeAttr(h.id)}', '${escapeAttr(h.full_name)}')" title="Excluir">
+                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.remove('${escapeAttr(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Excluir">
                           <i data-lucide="trash-2" style="width:16px;height:16px;color:var(--danger);"></i>
                         </button>
                       </div>
@@ -942,8 +942,8 @@ const HoldersPage = (() => {
           <tbody>
             ${timelineData.map(d => `
               <tr>
-                <td style="font-weight: 500;">${d.label}</td>
-                <td style="color: var(--text-secondary); font-size: 0.875rem;">${d.projects || '—'}</td>
+                <td style="font-weight: 500;">${escapeAttr(d.label)}</td>
+                <td style="color: var(--text-secondary); font-size: 0.875rem;">${escapeAttr(d.projects) || '—'}</td>
                 <td style="text-align: right; color: ${d.amount > 0 ? 'var(--success)' : 'inherit'};">
                   ${formatBRL(d.amount)}
                 </td>
@@ -1565,7 +1565,7 @@ const HoldersPage = (() => {
                     <td><input type="checkbox" class="recon-item-check" data-section="novos" checked style="width:16px;height:16px;accent-color:var(--success);"></td>
                     <td style="font-weight:500;">${escapeAttr(n.nome)}</td>
                     <td>${situacao}</td>
-                    <td>${n.cpf_display || '—'}</td>
+                    <td>${escapeAttr(n.cpf_display) || '—'}</td>
                     <td><span style="font-size:0.85rem;">${escapeAttr(n.tipo)}</span></td>
                     <td class="currency">${formatBRL(n.valor)}</td>
                     <td>${formatDate(n.duracao_inicio)}</td>
@@ -1611,7 +1611,7 @@ const HoldersPage = (() => {
                   <tr class="recon-row" data-section="removidos" data-index="${i}">
                     <td><input type="checkbox" class="recon-item-check" data-section="removidos" style="width:16px;height:16px;accent-color:var(--danger);"></td>
                     <td style="font-weight:500;">${escapeAttr(r.holder_name)}</td>
-                    <td>${r.holder_cpf || '—'}</td>
+                    <td>${escapeAttr(r.holder_cpf) || '—'}</td>
                     <td class="currency">${formatBRL(r.amount)}</td>
                     <td>${formatDate(r.start_date)}</td>
                     <td>${formatDate(r.end_date)}</td>
@@ -1858,7 +1858,7 @@ const HoldersPage = (() => {
             </td>
             <td style="font-weight:500;">${escapeAttr(h.full_name)}${!h.active ? ' <span class="badge badge--ended" style="font-size:0.6rem;">Inativo</span>' : ''}</td>
             <td>${h.cpf ? formatCPFDisplay(h.cpf) : '<span style="color:var(--text-muted);">—</span>'}</td>
-            <td style="font-size:0.8rem;color:var(--text-secondary);">${h.email || '—'}</td>
+            <td style="font-size:0.8rem;color:var(--text-secondary);">${escapeAttr(h.email) || '—'}</td>
             <td style="text-align:center;">${bolsaCount}</td>
             <td style="font-size:0.8rem;color:var(--text-secondary);">${projetos.length ? escapeAttr(projetos.join(', ')) : '—'}</td>
           </tr>

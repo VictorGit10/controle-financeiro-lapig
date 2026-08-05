@@ -74,6 +74,28 @@ select p.proname
 > A própria migração 035 já faz essa asserção e aborta se falhar — dá para
 > reexecutá-la a qualquer momento como reauditoria.
 
+### 2c. XSS: escape correto por contexto
+
+Aqui a ameaça não é o visitante anônimo — é **um usuário logado atacando
+outro**. Um professor (ou uma planilha FUNAPE preparada) grava o payload
+num nome de bolsista; ele executa no navegador de quem abrir a lista,
+inclusive o admin, e leva a sessão junto. A CSP **não** segura isso: ela
+tem `'unsafe-inline'` no `script-src`, obrigatório porque a UI usa
+`onclick=` inline. O escape no código é a única defesa.
+
+- [x] `escapeAttr` em todo dado do banco interpolado em HTML.
+- [x] `escapeAttrJs` (não `escapeAttr`) quando o valor cai **dentro de uma
+      string JS num atributo** — `onclick="f('${...}')"`. `escapeAttr`
+      sozinho não basta: ele vira `'` em `&#39;`, mas o parser HTML
+      decodifica a entidade **antes** de o JS ser interpretado, o
+      apóstrofo volta e fecha a string. Coberto por teste de regressão em
+      `tests/utils.test.js`.
+
+```bash
+# Interpolação crua de propriedade (deve vir só com label/id internos):
+grep -rnoE '\$\{[a-zA-Z_]+\.[a-zA-Z_]+' frontend/js/ | grep -v escape | grep -v format
+```
+
 ### 3. Storage privado
 
 - [ ] Buckets `plano-trabalho-docs`, `balancete-pdfs` e `bolsa-planilhas`

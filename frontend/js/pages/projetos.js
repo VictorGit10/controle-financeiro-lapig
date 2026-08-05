@@ -577,7 +577,7 @@ const ProjetosPage = (() => {
           <label class="form-label">Bolsista *</label>
           <select class="form-input" id="fld-draft-holder" required>
             <option value="">Selecione...</option>
-            ${holders.map(h => `<option value="${h.id}">${h.full_name}</option>`).join('')}
+            ${holders.map(h => `<option value="${escapeAttr(h.id)}">${escapeAttr(h.full_name)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
