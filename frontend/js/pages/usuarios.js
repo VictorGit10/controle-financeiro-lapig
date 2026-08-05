@@ -95,7 +95,7 @@ const UsuariosPage = (() => {
           <td style="text-align:center;">${u.role === 'admin' ? '<span style="color:var(--text-muted);">—</span>' : projCount}</td>
           <td style="font-size:0.8rem;color:var(--text-secondary);">${u.created_at ? formatDate(u.created_at.substring(0, 10)) : '—'}</td>
           <td>
-            <button class="btn btn--ghost btn--sm" onclick="UsuariosPage.openEdit('${u.user_id}')" title="Editar atribuições">
+            <button class="btn btn--ghost btn--sm" onclick="UsuariosPage.openEdit('${escapeAttrJs(u.user_id)}')" title="Editar atribuições">
               <i data-lucide="pencil" style="width:16px;height:16px;"></i>
             </button>
           </td>

@@ -216,7 +216,7 @@ const SaldosPage = (() => {
             placeholder="0,00"
             data-field="initial_balance"
             data-project-id="${row.project_id}"
-            onchange="SaldosPage.markDirty('${row.project_id}', this)"
+            onchange="SaldosPage.markDirty('${escapeAttrJs(row.project_id)}', this)"
             style="width:130px;">
         </td>
         <td>
@@ -225,7 +225,7 @@ const SaldosPage = (() => {
             placeholder="0,00"
             data-field="yield_amount"
             data-project-id="${row.project_id}"
-            onchange="SaldosPage.markDirty('${row.project_id}', this)"
+            onchange="SaldosPage.markDirty('${escapeAttrJs(row.project_id)}', this)"
             style="width:120px;">
         </td>
         <td>
@@ -233,7 +233,7 @@ const SaldosPage = (() => {
             value="${hasBalance && row.balance_date ? toInputDate(row.balance_date) : ''}"
             data-field="balance_date"
             data-project-id="${row.project_id}"
-            onchange="SaldosPage.markDirty('${row.project_id}', this)"
+            onchange="SaldosPage.markDirty('${escapeAttrJs(row.project_id)}', this)"
             style="width:150px;">
         </td>
       </tr>

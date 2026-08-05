@@ -149,11 +149,11 @@ function CrudPage(config) {
                   ${columns.map(c => `<td class="${c.className || ''}">${c.render(r)}</td>`).join('')}
                   <td>
                     <div style="display: flex; gap: 4px;">
-                      <button class="btn btn--ghost btn--sm" onclick="${globalName}.openForm('${escapeAttr(r.id)}')" title="Editar">
+                      <button class="btn btn--ghost btn--sm" onclick="${globalName}.openForm('${escapeAttrJs(r.id)}')" title="Editar">
                         <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                       </button>
                       ${allowDelete ? `
-                      <button class="btn btn--ghost btn--sm" onclick="${globalName}.remove('${escapeAttr(r.id)}')" title="Excluir">
+                      <button class="btn btn--ghost btn--sm" onclick="${globalName}.remove('${escapeAttrJs(r.id)}')" title="Excluir">
                         <i data-lucide="trash-2" style="width:16px;height:16px;color:var(--danger);"></i>
                       </button>` : ''}
                     </div>

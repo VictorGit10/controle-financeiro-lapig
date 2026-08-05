@@ -361,14 +361,14 @@ const PlanoTrabalhoPage = (() => {
         <td style="text-align:right;" class="currency">${formatBRL(b.total_debitos)}</td>
         <td>
           <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.verBalancete('${b.id}')" title="Detalhes">
+            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.verBalancete('${escapeAttrJs(b.id)}')" title="Detalhes">
               <i data-lucide="eye"></i>
             </button>
             ${b.arquivo_nome ? `
-              <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.baixarBalancete('${b.id}')" title="Baixar PDF original">
+              <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.baixarBalancete('${escapeAttrJs(b.id)}')" title="Baixar PDF original">
                 <i data-lucide="download"></i>
               </button>` : ''}
-            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.excluirBalancete('${b.id}')" title="Excluir" style="color:var(--danger);">
+            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.excluirBalancete('${escapeAttrJs(b.id)}')" title="Excluir" style="color:var(--danger);">
               <i data-lucide="trash-2"></i>
             </button>
           </div>
@@ -663,18 +663,18 @@ const PlanoTrabalhoPage = (() => {
             ${h.valor_total_plano != null ? formatBRL(h.valor_total_plano) : '—'}
           </div>
           <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.visualizar('${h.id}')" ${isViewing ? 'disabled' : ''}>
+            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.visualizar('${escapeAttrJs(h.id)}')" ${isViewing ? 'disabled' : ''}>
               <i data-lucide="eye"></i> ${isViewing ? 'Vendo' : 'Ver'}
             </button>
             ${!h.ativo ? `
-              <button class="btn btn--secondary btn--sm" onclick="PlanoTrabalhoPage.ativar('${h.id}')">
+              <button class="btn btn--secondary btn--sm" onclick="PlanoTrabalhoPage.ativar('${escapeAttrJs(h.id)}')">
                 <i data-lucide="check"></i> Ativar
               </button>` : ''}
             ${h.arquivo_nome ? `
-              <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.baixar('${h.id}')" title="Baixar arquivo original">
+              <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.baixar('${escapeAttrJs(h.id)}')" title="Baixar arquivo original">
                 <i data-lucide="download"></i>
               </button>` : ''}
-            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.excluir('${h.id}')" title="Excluir versão" style="color:var(--danger);">
+            <button class="btn btn--ghost btn--sm" onclick="PlanoTrabalhoPage.excluir('${escapeAttrJs(h.id)}')" title="Excluir versão" style="color:var(--danger);">
               <i data-lucide="trash-2"></i>
             </button>
           </div>

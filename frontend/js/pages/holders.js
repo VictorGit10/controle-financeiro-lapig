@@ -481,7 +481,7 @@ const HoldersPage = (() => {
                   return `<div style="font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;" title="${escapeAttr(pName)}">${escapeAttr(pName)} <span style="color:var(--success);font-weight:600;">${formatBRL(Number(s.amount))}</span></div>`;
                 }).join('');
                 const otherLink = otherCount > 0
-                  ? `<a href="#" onclick="event.preventDefault();HoldersPage.manageScholarships('${escapeAttr(h.id)}','${escapeAttrJs(h.full_name)}')" style="font-size:0.75rem;color:var(--text-muted);text-decoration:underline;cursor:pointer;">+ ${otherCount} bolsa${otherCount > 1 ? 's' : ''}</a>`
+                  ? `<a href="#" onclick="event.preventDefault();HoldersPage.manageScholarships('${escapeAttrJs(h.id)}','${escapeAttrJs(h.full_name)}')" style="font-size:0.75rem;color:var(--text-muted);text-decoration:underline;cursor:pointer;">+ ${otherCount} bolsa${otherCount > 1 ? 's' : ''}</a>`
                   : '';
 
                 return `
@@ -500,16 +500,16 @@ const HoldersPage = (() => {
                     </td>
                     <td>
                       <div style="display: flex; gap: 4px;">
-                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.viewTimeline('${escapeAttr(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Ver Rendimentos Mensais">
+                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.viewTimeline('${escapeAttrJs(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Ver Rendimentos Mensais">
                           <i data-lucide="bar-chart" style="width:16px;height:16px;color:var(--info);"></i>
                         </button>
-                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.manageScholarships('${escapeAttr(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Gerenciar Bolsas">
+                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.manageScholarships('${escapeAttrJs(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Gerenciar Bolsas">
                           <i data-lucide="graduation-cap" style="width:16px;height:16px;color:var(--accent);"></i>
                         </button>
-                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.openForm('${escapeAttr(h.id)}')" title="Editar">
+                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.openForm('${escapeAttrJs(h.id)}')" title="Editar">
                           <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                         </button>
-                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.remove('${escapeAttr(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Excluir">
+                        <button class="btn btn--ghost btn--sm" onclick="HoldersPage.remove('${escapeAttrJs(h.id)}', '${escapeAttrJs(h.full_name)}')" title="Excluir">
                           <i data-lucide="trash-2" style="width:16px;height:16px;color:var(--danger);"></i>
                         </button>
                       </div>
@@ -704,7 +704,7 @@ const HoldersPage = (() => {
                   </td>
                   <td>
                     <div style="display: flex; gap: 4px;">
-                      <button class="btn btn--ghost btn--sm" onclick="HoldersPage.openScholarshipForm('${escapeAttr(s.id)}', '${escapeAttr(holderId)}')" title="Editar bolsa">
+                      <button class="btn btn--ghost btn--sm" onclick="HoldersPage.openScholarshipForm('${escapeAttrJs(s.id)}', '${escapeAttrJs(holderId)}')" title="Editar bolsa">
                         <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                       </button>
                     </div>
@@ -719,7 +719,7 @@ const HoldersPage = (() => {
 
     const modalHTML = `
       ${listHTML}
-      <button class="btn btn--primary" onclick="HoldersPage.openScholarshipForm(null, '${escapeAttr(holderId)}')">
+      <button class="btn btn--primary" onclick="HoldersPage.openScholarshipForm(null, '${escapeAttrJs(holderId)}')">
         <i data-lucide="plus"></i> Adicionar Nova Bolsa
       </button>
     `;
@@ -1770,7 +1770,7 @@ const HoldersPage = (() => {
           <td>${h.cpf ? formatCPFDisplay(h.cpf) : '<span style="color:var(--text-muted);">—</span>'}</td>
           <td style="text-align:center;">${(h.scholarships || []).length}</td>
           <td style="font-size:0.8rem;color:var(--text-secondary);">${projetos.length ? escapeAttr(projetos.join(', ')) : '—'}</td>
-          <td style="text-align:center;"><button class="btn btn--ghost btn--sm" onclick="HoldersPage.mergeRemoveSelected('${escapeAttr(h.id)}')" title="Remover da seleção"><i data-lucide="x" style="width:14px;height:14px;color:var(--danger);"></i></button></td>
+          <td style="text-align:center;"><button class="btn btn--ghost btn--sm" onclick="HoldersPage.mergeRemoveSelected('${escapeAttrJs(h.id)}')" title="Remover da seleção"><i data-lucide="x" style="width:14px;height:14px;color:var(--danger);"></i></button></td>
         </tr>`;
     }).join('');
 

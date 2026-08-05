@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Controle Financeiro — Dashboard</title>
   <meta name="description" content="Sistema de controle financeiro para gestão de projetos, bolsas e desembolsos.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://js.sentry-cdn.com; worker-src 'self' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://skxiivmkhpegefafdlty.supabase.co https://o450*.ingest.sentry.io https://cdn.jsdelivr.net;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://js.sentry-cdn.com; worker-src 'self' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://skxiivmkhpegefafdlty.supabase.co https://o450*.ingest.sentry.io https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';">
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -25,15 +25,15 @@
   <script>if(typeof Chart==="undefined")document.write('<script src="vendor/chart.umd.js"><\/script>');</script>
 
   <!-- Mammoth (DOCX → texto, usado pela página Plano de Trabalho) -->
-  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js" integrity="sha384-/cXAMbzovUIKbBERjPmR3SnPTh8siWr5lsvFYj1Uq4XP0yaJUZJmsh0YXyGv5P0y" crossorigin="anonymous"></script>
   <script>if(typeof mammoth==="undefined")document.write('<script src="vendor/mammoth.browser.min.js"><\/script>');</script>
 
   <!-- SheetJS (XLSX parser, usado pela Reconciliação de Bolsas) -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
   <script>if(typeof XLSX==="undefined")document.write('<script src="vendor/xlsx.full.min.js"><\/script>');</script>
 
   <!-- PDF.js (PDF → texto, usado pela importação de balancete) -->
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous"></script>
   <script>if(typeof pdfjsLib==="undefined")document.write('<script src="vendor/pdf.min.js"><\/script>');</script>
   <script>
     if (typeof pdfjsLib !== 'undefined') {

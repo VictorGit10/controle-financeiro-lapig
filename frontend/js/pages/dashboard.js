@@ -238,7 +238,7 @@ const DashboardPage = (() => {
             <label class="dash-filter__item ${!p.active ? 'dash-filter__item--inactive' : ''}" for="df-${p.id}">
               <input type="checkbox" id="df-${p.id}" class="dash-filter__check"
                 ${selectedIds.has(p.id) ? 'checked' : ''}
-                onchange="DashboardPage.onFilterChange('${p.id}', this.checked)">
+                onchange="DashboardPage.onFilterChange('${escapeAttrJs(p.id)}', this.checked)">
               <div class="dash-filter__info">
                 <span class="dash-filter__name">${escapeAttr(p.name)}</span>
                 <span class="dash-filter__meta">${formatBRL(p.initial_balance)} · ${p.active ? 'Ativo' : 'Inativo'}</span>
