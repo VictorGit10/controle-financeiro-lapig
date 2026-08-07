@@ -1208,7 +1208,7 @@ const HoldersPage = (() => {
   // planilha pelos CPFs).
   async function loadBolsaContext() {
     const [projRes, holdRes] = await Promise.all([
-      supabaseClient.from('projects').select('id, name').order('name'),
+      supabaseClient.from('projects').select('id, name, code').order('name'),
       supabaseClient
         .from('scholarship_holders')
         .select('id, full_name, cpf, email, education_level, scholarships(project_id, status)'),
@@ -1244,6 +1244,72 @@ const HoldersPage = (() => {
     let best = '', bestN = 0;
     score.forEach((n, pid) => { if (n > bestN) { best = pid; bestN = n; } });
     return best;
+  }
+
+  // A planilha do Conecta (FUNAPE) não traz identificador nenhum por dentro:
+  // nome genérico, aba "Sheet1", docProps vazio. O código do centro de custo
+  // (XX.XXX) entra no nome do arquivo no momento do download, pelo userscript
+  // em tools/funape-nomear-planilha-bolsas.user.js.
+  //
+  // Busca no nome inteiro em vez de exigir um formato fixo: o navegador
+  // versiona downloads repetidos ("bolsas-30.068 (1).xlsx") e a planilha é
+  // baixada todo mês. Se houver mais de um código distinto no nome, não
+  // arrisca — devolve null e o usuário escolhe.
+  function codigoFunapeDoNome(fileName) {
+    const achados = [...new Set(String(fileName || '').match(/\b\d{2}\.\d{3}\b/g) || [])];
+    return achados.length === 1 ? achados[0] : null;
+  }
+
+  function projetoPorCodigo(codigo) {
+    if (!codigo) return null;
+    return (_bolsaCtx?.projects || []).find(p => String(p.code || '').trim() === codigo) || null;
+  }
+
+  // Callout no topo da revisão explicando de onde veio o projeto pré-selecionado.
+  // Mesma linguagem visual da detecção do balancete (plano-trabalho.js).
+  function deteccaoCalloutHTML(extracted) {
+    const cod = extracted.codigoArquivo;
+
+    // O contexto é recarregado entre arquivos da fila (save → loadBolsaContext),
+    // então o projeto resolvido no parse pode ter sumido da lista.
+    const proj = extracted.deteccao === 'codigo' ? projetoPorCodigo(cod) : null;
+
+    if (proj) {
+      return `
+        <div class="callout callout--success" style="margin-bottom:12px;">
+          <i data-lucide="check-circle"></i>
+          <div>Centro de custo detectado pelo nome do arquivo:
+            <code>${escapeAttr(cod)}</code> → <strong>${escapeAttr(proj.name)}</strong>.</div>
+        </div>`;
+    }
+
+    if (extracted.deteccao === 'codigo-desconhecido') {
+      return `
+        <div class="callout callout--warning" style="margin-bottom:12px;">
+          <i data-lucide="alert-triangle"></i>
+          <div>Código <code>${escapeAttr(cod)}</code> detectado no nome do arquivo, mas
+            nenhum centro de custo cadastrado usa esse código. Preencha o campo
+            <strong>Código</strong> em Gestão de Projetos, ou selecione manualmente abaixo.</div>
+        </div>`;
+    }
+
+    if (extracted.deteccao === 'cpf') {
+      return `
+        <div class="callout callout--warning" style="margin-bottom:12px;">
+          <i data-lucide="alert-triangle"></i>
+          <div>O nome do arquivo não traz o código do centro de custo (formato <code>XX.XXX</code>).
+            O projeto abaixo foi sugerido pelos CPFs já cadastrados — <strong>confira antes de salvar</strong>.</div>
+        </div>`;
+    }
+
+    return `
+      <div class="callout callout--warning" style="margin-bottom:12px;">
+        <i data-lucide="alert-triangle"></i>
+        <div>Não foi possível identificar o centro de custo desta planilha —
+          <strong>selecione manualmente abaixo</strong>. Para que a detecção funcione nas próximas
+          importações, baixe a planilha com o renomeador instalado (o arquivo passa a chegar como
+          <code>bolsas-30.068.xlsx</code>).</div>
+      </div>`;
   }
 
   async function computeBolsaDiff(host, extracted) {
@@ -1340,14 +1406,36 @@ const HoldersPage = (() => {
         const buf = await file.arrayBuffer();
         const { data: rows, warnings } = parseBolsaSpreadsheet(buf);
         if (!rows.length) throw new Error('Nenhuma bolsa ativa encontrada na planilha.');
-        return { rows, warnings, diff: null, projectId: suggestProjectForRows(rows) };
+
+        // Identificação do centro de custo, em ordem de confiabilidade:
+        // 1) código FUNAPE no nome do arquivo (exato, vem do próprio portal);
+        // 2) maioria dos CPFs já cadastrados (heurístico, falha em base nova).
+        const codigoArquivo = codigoFunapeDoNome(file.name);
+        const porCodigo = projetoPorCodigo(codigoArquivo);
+
+        let projectId = '';
+        let deteccao;
+        if (porCodigo) {
+          projectId = porCodigo.id;
+          deteccao = 'codigo';
+        } else if (codigoArquivo) {
+          // Código presente mas não cadastrado: não cai no palpite por CPF —
+          // a correção é preencher o Código do projeto, e o aviso diz isso.
+          deteccao = 'codigo-desconhecido';
+        } else {
+          projectId = suggestProjectForRows(rows);
+          deteccao = projectId ? 'cpf' : 'nenhuma';
+        }
+
+        return { rows, warnings, diff: null, projectId, codigoArquivo, deteccao };
       },
 
       async renderReview(host, extracted, file) {
         const projOpts = _bolsaCtx.projects.map(p =>
-          `<option value="${p.id}" ${p.id === extracted.projectId ? 'selected' : ''}>${escapeAttr(p.name)}</option>`
+          `<option value="${p.id}" ${p.id === extracted.projectId ? 'selected' : ''}>${escapeAttr(p.name)}${p.code ? ' — ' + escapeAttr(p.code) : ''}</option>`
         ).join('');
         host.innerHTML = `
+          ${deteccaoCalloutHTML(extracted)}
           <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:12px;padding:12px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-elevated);">
             <div class="form-group" style="margin:0;">
               <label class="form-label" style="font-size:12px;">Projeto *</label>
@@ -1362,6 +1450,7 @@ const HoldersPage = (() => {
             </div>
           </div>
           <div id="bolsa-diff-area"></div>`;
+        lucide.createIcons({ nodes: [host] });
         const sel = host.querySelector('#bolsa-project-sel');
         sel.addEventListener('change', () => computeBolsaDiff(host, extracted));
         await computeBolsaDiff(host, extracted);
