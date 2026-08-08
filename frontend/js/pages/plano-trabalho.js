@@ -160,15 +160,21 @@ const PlanoTrabalhoPage = (() => {
     return openQueue(PLANO_HANDLER);
   }
 
-  // Abre a fila genérica (ImportQueue) com um handler desta página.
-  function openQueue(handler) {
+  // Abre a fila genérica (ImportQueue) com os dois handlers da página, o da
+  // aba atual primeiro. Ambos precisam estar na fila para o roteamento por
+  // conteúdo funcionar: um PDF que é plano (e não balancete) só consegue ser
+  // reentregue ao PLANO_HANDLER se ele estiver presente.
+  function openQueue(preferred) {
     if (allProjects.length === 0) {
       showToast('Cadastre um projeto antes de importar.', 'error');
       return;
     }
+    const handlers = preferred === BALANCETE_HANDLER
+      ? [BALANCETE_HANDLER, PLANO_HANDLER]
+      : [PLANO_HANDLER, BALANCETE_HANDLER];
     ImportQueue.open({
-      title: handler.title,
-      handlers: [handler],
+      title: preferred.title,
+      handlers,
       onFinished: async (summary) => {
         if (!summary.saved) return;
         if (summary.newMappings > 0) await loadContaRubricaMap();
@@ -858,13 +864,42 @@ const PlanoTrabalhoPage = (() => {
     type: 'plano',
     badge: 'Plano',
     title: 'Importar planos / remanejamentos (DOCX)',
-    accept: '.docx',
+    // Além do DOCX (único com leitor automático), aceita os formatos em que
+    // os planos fora do padrão costumam chegar — eles caem no preenchimento
+    // manual, mas ficam anexados ao plano como comprovante.
+    accept: '.docx,.doc,.odt,.xlsx,.xls,.ods',
     extLabel: 'DOCX',
     checkDeps() {
       if (typeof mammoth === 'undefined') throw new Error('Biblioteca mammoth não carregada — verifique conexão.');
     },
     validExt(name) { return name.toLowerCase().endsWith('.docx'); },
+    // Só reivindicado quando ninguém mais quer o arquivo — em especial o
+    // XLSX, que é do handler de bolsas quando ele está na fila (Fechamento).
+    fallbackExt(name) { return /\.(doc|odt|xls|xlsx|ods)$/i.test(name); },
     async parse(file) {
+      // PDF chega aqui reroteado pelo handler de balancete (validExt só
+      // reivindica DOCX, senão roubaria todo PDF do balancete).
+      if (/\.pdf$/i.test(file.name)) {
+        if (typeof parsePtFromPdfText !== 'function') {
+          throw new Error('pt-pdf-parser.js não carregado — preencha manualmente.');
+        }
+        try {
+          return parsePtFromPdfText(await extractPdfText(file));
+        } catch (err) {
+          if (err instanceof PtFormatError) throw new Error(err.message);
+          throw err;
+        }
+      }
+      if (!this.validExt(file.name)) {
+        // Sem leitor automático para este formato: nomeia o modelo (quando
+        // dá para farejar o texto) e manda para o preenchimento manual.
+        const ext = (file.name.match(/\.([^.]+)$/)?.[1] || '').toUpperCase();
+        const modelo = safeDetectPtModel(await sniffDocText(file));
+        const prefixo = modelo.id === 'desconhecido'
+          ? `Não há leitor automático para arquivos ${ext} — só o DOCX no padrão PROAD/UFG é lido sozinho.`
+          : `${modelo.label} (${ext}).`;
+        throw new Error(`${prefixo} ${modelo.message}`.trim());
+      }
       const buf = await file.arrayBuffer();
       const mres = await mammoth.convertToHtml({ arrayBuffer: buf });
       const html = mres?.value || '';
@@ -878,22 +913,49 @@ const PlanoTrabalhoPage = (() => {
       extracted._html = html;   // reaproveitado pelo split-view
       return extracted;
     },
+    // Esqueleto vazio para digitação: as rubricas que os modelos fora do
+    // padrão usam, já na ordem. Linhas deixadas em branco são descartadas
+    // por collectReviewForm (filtra valor_previsto > 0).
+    manualFallback() {
+      return {
+        data: {
+          rubricas: ['a.bolsas', 'b', 'c', 'd', 'e', 'f', 'dao']
+            .map(code => ({ rubrica_code: code, descricao_livre: null, valor_previsto: null })),
+          desembolsos: [],
+        },
+        warnings: [
+          'Preenchimento manual — nada foi extraído do arquivo. Digite os valores ' +
+          'conforme o documento ao lado e apague as rubricas que não se aplicam ' +
+          '(linhas sem valor são ignoradas ao salvar).',
+        ],
+        _manual: true,
+      };
+    },
     async renderReview(hostEl, extracted, file) {
       const rightHTML = `<div id="pt-review-form">${planoBatchSelectorsHTML()}${renderReviewForm(extracted, file.name)}</div>`;
-      hostEl.innerHTML = `<div id="pt-splitview"></div>`;
-      try {
-        return await mountDocxSplitView(hostEl.querySelector('#pt-splitview'), {
-          file,
-          html: extracted._html,
-          rightHTML,
-          onMount: (rightEl) => { lucide.createIcons({ nodes: [rightEl] }); },
-        });
-      } catch (e) {
-        // Split-view opcional: se falhar, mostra só o form.
-        console.warn('Falha ao montar DOCX split-view:', e.message);
+      const onMount = (rightEl) => { lucide.createIcons({ nodes: [rightEl] }); };
+      const formOnly = () => {
         hostEl.innerHTML = rightHTML;
         lucide.createIcons({ nodes: [hostEl] });
         return null;
+      };
+
+      // PDF (típico do plano assinado) ganha o visualizador de PDF; DOCX, o
+      // HTML já convertido. XLSX/DOC/ODT não têm visualizador — o usuário
+      // digita com o arquivo aberto por fora.
+      const isPdf = /\.pdf$/i.test(file.name);
+      if (!isPdf && !extracted._html) return formOnly();
+
+      hostEl.innerHTML = `<div id="pt-splitview"></div>`;
+      const splitHost = hostEl.querySelector('#pt-splitview');
+      try {
+        return isPdf
+          ? await mountPdfSplitView(splitHost, { pdfData: await file.arrayBuffer(), rightHTML, onMount })
+          : await mountDocxSplitView(splitHost, { file, html: extracted._html, rightHTML, onMount });
+      } catch (e) {
+        // Split-view é opcional: sem ele o formulário ainda salva.
+        console.warn('Falha ao montar split-view do plano:', e.message);
+        return formOnly();
       }
     },
     async save(hostEl, extracted, file) {
@@ -905,7 +967,11 @@ const PlanoTrabalhoPage = (() => {
       payload.project_id     = targetProjectId;
       payload.tipo           = tipo;
       payload.arquivo_nome   = file.name;
-      payload.raw_extraction = extracted.raw_extraction || extracted.data;
+      // No preenchimento manual nada foi extraído — gravar o esqueleto em
+      // branco como raw_extraction mentiria sobre a origem dos números.
+      payload.raw_extraction = extracted._manual
+        ? null
+        : (extracted.raw_extraction || extracted.data);
 
       const safeName = file.name.replace(/[^\w.-]/g, '_');
       const path = `${targetProjectId}/${Date.now()}_${safeName}`;
@@ -940,6 +1006,16 @@ const PlanoTrabalhoPage = (() => {
     validExt(name) { return name.toLowerCase().endsWith('.pdf'); },
     async parse(file) {
       const text = await extractPdfText(file);
+      // Plano e balancete chegam ambos em .pdf — só o conteúdo distingue.
+      // O teste é positivo e específico (o balancete da FUNAPE não fala em
+      // "Plano de Aplicação dos Recursos Financeiros" nem em Termo de
+      // Fomento), então um balancete de verdade nunca é reroteado.
+      const modelo = safeDetectPtModel(text);
+      if (modelo.isPlano) {
+        const err = new Error(`Este PDF é um Plano de Trabalho (${modelo.label}), não um balancete.`);
+        err.rerouteTo = 'plano';
+        throw err;
+      }
       return extractBalanceteFromText(text);   // { data, warnings } — detecta projeto pelo código
     },
     async renderReview(hostEl, extracted, file) {
@@ -1004,7 +1080,12 @@ const PlanoTrabalhoPage = (() => {
 
   /* ── Extração PDF → texto e Edge Function de balancete ───── */
 
+  // Um PDF reroteado de balancete para plano seria lido duas vezes; o cache
+  // por File evita repetir a extração (que percorre todas as páginas).
+  const pdfTextCache = new WeakMap();
+
   async function extractPdfText(file) {
+    if (pdfTextCache.has(file)) return pdfTextCache.get(file);
     if (typeof pdfjsLib === 'undefined') {
       throw new Error('Biblioteca pdf.js não carregada — verifique conexão.');
     }
@@ -1027,7 +1108,44 @@ const PlanoTrabalhoPage = (() => {
     }
     full = full.trim();
     if (full.length < 100) throw new Error('Texto extraído do PDF muito curto.');
+    pdfTextCache.set(file, full);
     return full;
+  }
+
+  /**
+   * detectPtModel vem de um <script type="module"> (window-bridged). Se ele
+   * não carregar, degrada para o comportamento antigo — sem nome de modelo e
+   * sem roteamento por conteúdo — em vez de derrubar a importação inteira.
+   */
+  function safeDetectPtModel(text) {
+    if (typeof detectPtModel !== 'function') {
+      return { id: 'desconhecido', label: 'Modelo não reconhecido', isPlano: false, message: '' };
+    }
+    return detectPtModel(text);
+  }
+
+  /**
+   * Texto bruto de um arquivo, só o suficiente para o detectPtModel dizer
+   * qual modelo é. Best-effort: se a lib não estiver lá ou o arquivo for
+   * ilegível, devolve '' e o detector responde "desconhecido".
+   */
+  async function sniffDocText(file) {
+    const name = file.name.toLowerCase();
+    try {
+      if (name.endsWith('.pdf')) return await extractPdfText(file);
+      if (/\.(xlsx|xls|ods)$/.test(name)) {
+        if (typeof XLSX === 'undefined') return '';
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        // Nome das abas já entrega o modelo FAPEG ("5_Custeio FOR 005");
+        // as duas primeiras dão o cabeçalho sem custar leitura do arquivo todo.
+        const heads = wb.SheetNames.slice(0, 2)
+          .map(n => XLSX.utils.sheet_to_csv(wb.Sheets[n]).slice(0, 4000));
+        return [wb.SheetNames.join(' '), ...heads].join('\n');
+      }
+    } catch (e) {
+      console.warn('Falha ao farejar o modelo do documento:', e.message);
+    }
+    return '';
   }
 
   /**

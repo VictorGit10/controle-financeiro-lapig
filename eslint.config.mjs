@@ -49,6 +49,8 @@ export default [
         parseBalanceteText: "readonly",
         parsePtFromHtml: "readonly",
         PtFormatError: "readonly",
+        detectPtModel: "readonly",
+        parsePtFromPdfText: "readonly",
         mountPdfSplitView: "readonly",
         mountDocxSplitView: "readonly",
         parseBolsaSpreadsheet: "readonly",

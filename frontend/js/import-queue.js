@@ -17,7 +17,22 @@
      extLabel    string  — rótulo das extensões aceitas
      checkDeps() — lança Error se alguma lib não carregou
      validExt(name) → bool
+     fallbackExt(name)? → bool  — opcional; só consultado se NENHUM
+                 handler reivindicou o arquivo por validExt. Serve para
+                 aceitar formatos sem leitor automático (que caem no
+                 preenchimento manual) sem roubar o arquivo de quem sabe
+                 lê-lo — ex.: XLSX é do handler de bolsas por validExt e
+                 só sobra para o de plano quando bolsas não está na fila.
      parse(file) → extracted            (lança Error se ilegível)
+                 Se o erro tiver `.rerouteTo = '<type>'`, a fila entrega
+                 o arquivo a esse handler e tenta de novo (uma vez). É o
+                 roteamento por conteúdo: PDF de plano e PDF de balancete
+                 têm a mesma extensão, só o conteúdo distingue.
+     manualFallback(file)? → extracted  — opcional; quando existe, a tela
+                 de erro de parse oferece "Preencher manualmente" em vez
+                 de só "Pular". Devolve um `extracted` vazio/esqueleto que
+                 vai para o mesmo renderReview + save (o arquivo original
+                 continua sendo anexado como comprovante).
      renderReview(host, extracted, file) → view opcional c/ destroy()
      save(host, extracted, file) → { label?, newMappings? }
      afterAllSaved()? — chamado 1x se o handler salvou ≥1 arquivo
@@ -76,8 +91,12 @@ const ImportQueue = (() => {
 
     renderSelection();
 
+    // Duas passadas: quem sabe ler o formato tem prioridade sobre quem
+    // só o aceita para preenchimento manual.
     function handlerFor(name) {
-      return handlers.find(h => h.validExt(name)) || null;
+      return handlers.find(h => h.validExt(name))
+          || handlers.find(h => typeof h.fallbackExt === 'function' && h.fallbackExt(name))
+          || null;
     }
 
     function badgeHTML(handler) {
@@ -203,8 +222,7 @@ const ImportQueue = (() => {
       destroyView();
       if (index >= files.length) { finish(); return; }
 
-      const file    = files[index];
-      const handler = fileHandlers[index];
+      const file = files[index];
 
       bodyEl.innerHTML = `
         ${progressHeaderHTML(false)}
@@ -218,7 +236,7 @@ const ImportQueue = (() => {
       let extracted = parsedCache[index];
       if (!extracted) {
         try {
-          extracted = await handler.parse(file);
+          extracted = await parseWithReroute(file);
           parsedCache[index] = extracted;
         } catch (err) {
           renderParseError(file, err);
@@ -226,12 +244,35 @@ const ImportQueue = (() => {
         }
       }
 
+      await renderReviewPhase(extracted);
+    }
+
+    // Um parse pode descobrir que o arquivo é de outro tipo (PDF de plano
+    // roteado para balancete). Nesse caso o handler lança com `.rerouteTo`
+    // e a fila reentrega o arquivo — uma vez só, para não ping-pongar.
+    async function parseWithReroute(file) {
+      const handler = fileHandlers[index];
+      try {
+        return await handler.parse(file);
+      } catch (err) {
+        const target = err?.rerouteTo
+          ? handlers.find(h => h.type === err.rerouteTo)
+          : null;
+        if (!target || target === handler) throw err;
+        fileHandlers[index] = target;
+        return await target.parse(file);
+      }
+    }
+
+    async function renderReviewPhase(extracted) {
+      destroyView();
+      const file = files[index];
       bodyEl.innerHTML = progressHeaderHTML(true);
       const host = document.createElement('div');
       host.id = 'iq-review-host';
       bodyEl.appendChild(host);
       try {
-        currentView = await handler.renderReview(host, extracted, file);
+        currentView = await fileHandlers[index].renderReview(host, extracted, file);
       } catch (err) {
         renderParseError(file, err);
         return;
@@ -245,22 +286,53 @@ const ImportQueue = (() => {
     }
 
     function renderParseError(file, err) {
-      results[index] = { name: file.name, status: 'error', error: err.message, type: fileHandlers[index]?.type };
+      destroyView();
+      const handler   = fileHandlers[index];
+      const canManual = typeof handler?.manualFallback === 'function';
+      results[index] = { name: file.name, status: 'error', error: err.message, type: handler?.type };
+
       bodyEl.innerHTML = progressHeaderHTML(true);
       const box = document.createElement('div');
       box.innerHTML = `
         <div class="callout callout--warning" style="margin:12px 0;">
           <i data-lucide="alert-triangle"></i>
           <div>
-            <strong>Não foi possível processar ${escapeAttr(file.name)}</strong>
+            <strong>Não foi possível ler ${escapeAttr(file.name)} automaticamente</strong>
             <p style="margin:4px 0 0;">${escapeAttr(err.message || 'Erro desconhecido.')}</p>
           </div>
         </div>
-        <p style="color:var(--text-secondary);font-size:13px;">Pule este arquivo para continuar com os demais.</p>`;
+        ${canManual ? `
+          <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px;">
+            Você ainda pode cadastrar este documento preenchendo os dados à mão — o arquivo
+            original fica anexado como comprovante.
+          </p>
+          <button class="btn btn--primary btn--sm" id="iq-manual">
+            <i data-lucide="pencil"></i> Preencher manualmente
+          </button>
+          <p style="color:var(--text-secondary);font-size:13px;margin-top:12px;">Ou pule este arquivo para continuar com os demais.</p>
+        ` : `
+          <p style="color:var(--text-secondary);font-size:13px;">Pule este arquivo para continuar com os demais.</p>
+        `}`;
       bodyEl.appendChild(box);
       lucide.createIcons({ nodes: [bodyEl] });
       wireSkip();
-      saveBtn.setAttribute('hidden', '');   // só o "Pular" avança
+      saveBtn.setAttribute('hidden', '');   // só o "Pular" (ou o manual) avança
+
+      const manualBtn = bodyEl.querySelector('#iq-manual');
+      if (manualBtn) {
+        manualBtn.addEventListener('click', async () => {
+          let extracted;
+          try {
+            extracted = await handler.manualFallback(file);
+          } catch (e) {
+            showToast(e.message || 'Falha ao abrir o preenchimento manual.', 'error');
+            return;
+          }
+          parsedCache[index] = extracted;
+          results[index] = null;   // deixa de contar como erro: vira salvo ou pulado
+          await renderReviewPhase(extracted);
+        });
+      }
     }
 
     async function saveCurrent() {

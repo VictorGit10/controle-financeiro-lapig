@@ -37,6 +37,12 @@ supabase-credentials.json
 # (tests/pt-parser.test.js).
 tests/fixtures/pt-html/
 
+# ── Anexos reais para análise (planos, balancetes, planilhas) ─
+# Pasta de trabalho local para documentos originais recebidos da
+# FUNAPE/FAPEG/PROAD. Trazem CPF, e-mail e telefone de coordenador
+# e bolsistas. NUNCA versionar: o repo é público.
+NãoColocarNoGit/
+
 # ── Planilhas Excel (dados brutos — grandes e binários) ───────
 # A planilha legada não precisa de versionamento de código.
 # Se quiser versionar, remova a linha abaixo.

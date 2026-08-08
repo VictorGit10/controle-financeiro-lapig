@@ -22,11 +22,14 @@
 
 import { parseBRL } from '../pure-fns.js';
 import { lookupRubrica, normalizeForLookup } from './pt-rubrica-lookup.js';
+import { detectPtModel } from './pt-model-detect.js';
 
 export class PtFormatError extends Error {
-  constructor(message) {
+  /** @param {string} message @param {string} [modelo] id devolvido por detectPtModel */
+  constructor(message, modelo) {
     super(message);
     this.name = 'PtFormatError';
+    this.modelo = modelo || 'desconhecido';
   }
 }
 
@@ -226,10 +229,10 @@ export function parsePtFromHtml(html) {
   const doc = htmlToDom(html);
   const tabela = findTabelaCanonica(doc);
   if (!tabela) {
-    throw new PtFormatError(
-      'Tabela "Plano de Aplicação dos Recursos Financeiros" não encontrada. ' +
-      'Use o modelo padrão UFG/FUNAPE.'
-    );
+    // Sem a tabela canônica não há o que ler. Nomear o modelo transforma
+    // "não encontrei" em "é este outro modelo, faça assim" — ver pt-model-detect.js.
+    const modelo = detectPtModel(textOf(doc.body || doc.documentElement));
+    throw new PtFormatError(modelo.message, modelo.id);
   }
 
   const rubricas = parseLinhas(tabela);
