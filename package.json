@@ -17,6 +17,7 @@
     "globals": "^17.5.0",
     "happy-dom": "^20.9.0",
     "mammoth": "^1.12.0",
+    "supabase": "^2.113.0",
     "vitest": "^4.1.5"
   }
 }

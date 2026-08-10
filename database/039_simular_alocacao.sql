@@ -287,7 +287,9 @@ declare
   v_itens        jsonb := '[]'::jsonb;
   v_projetos     jsonb;
   v_resumo       jsonb;
-  v_obs          text;
+  v_obs          text[] := '{}';
+  v_n_sem_bal    integer;
+  v_nomes_sem_bal text;
   v_n            integer := 0;
 begin
   -- ---------- validação dos parâmetros ----------
@@ -779,7 +781,15 @@ begin
         'saldo_em_risco',           v_saldo_realoc,
         'meses_restantes',          v_meses_rest,
         'fim_vigencia',             r_proj.end_date,
-        'burn_mensal_necessario',   v_prioridade
+        'burn_mensal_necessario',   v_prioridade,
+        -- Sem balancete, realizado = 0 e saldo_em_risco vira o previsto
+        -- INTEGRAL do plano — o que empurra o projeto para o topo do
+        -- ranking justamente por falta de informação. Medido em dados
+        -- reais: os dois primeiros colocados eram os dois únicos sem
+        -- balancete. O aviso já existia dentro do item, mas a ORDEM não
+        -- sinalizava nada, e é para a ordem que se olha primeiro.
+        'base', case when (v_sl->>'has_balancete')::boolean
+                     then 'balancete' else 'apenas_plano' end
       ),
       'orcamento', jsonb_build_object(
         'grupo_alvo',              v_grupo_alvo,
@@ -854,12 +864,28 @@ begin
   -- ser parcial. Dizer isso em voz alta evita que quem lê só a
   -- posição 1 conclua que a alocação inteira está resolvida.
   if (v_projetos->0->>'veredito') = 'cabe_parcial' then
-    v_obs := format(
+    v_obs := array_append(v_obs, format(
       'O mais urgente (%s) é o de maior risco de devolução, mas comporta %s de %s %s: o restante precisa de outra fonte — veja as posições seguintes para dividir a alocação.',
       v_projetos->0->>'project_name',
       v_projetos->0->>'meses_cabiveis',
       v_meses,
-      case when v_tipo = 'bolsa' then 'meses' else 'unidade(s)' end);
+      case when v_tipo = 'bolsa' then 'meses' else 'unidade(s)' end));
+  end if;
+
+  -- Alerta de ordem, não de item: quando o topo é ocupado por centros
+  -- de custo sem balancete, a própria posição está sendo produzida por
+  -- falta de dado, e quem lê precisa saber disso ANTES de agir sobre a
+  -- ordem.
+  select count(*), string_agg(e.obj->>'project_name', ', ' order by (e.obj->>'posicao')::int)
+    into v_n_sem_bal, v_nomes_sem_bal
+    from jsonb_array_elements(v_projetos) e(obj)
+   where (e.obj->>'posicao')::int <= 3
+     and e.obj->'risco_devolucao'->>'base' = 'apenas_plano';
+
+  if v_n_sem_bal > 0 then
+    v_obs := array_append(v_obs, format(
+      'ATENÇÃO À ORDEM: %s dos 3 primeiros (%s) não têm balancete importado. Para eles o realizado é zero por ausência de dado, não por execução — o saldo mostrado é o previsto integral do plano e pode estar muito acima do real, o que os empurra para o topo. Importe o balancete desses centros de custo e refaça a simulação antes de decidir pela ordem.',
+      v_n_sem_bal, v_nomes_sem_bal));
   end if;
 
   select jsonb_build_object(
@@ -874,7 +900,7 @@ begin
            -- afirmarem uma recomendação que o dado não sustenta.
            'mais_urgente', (v_projetos->0->>'project_name'),
            'mais_urgente_veredito', (v_projetos->0->>'veredito'),
-           'observacao',   v_obs
+           'observacao',   nullif(array_to_string(v_obs, ' '), '')
          )
     into v_resumo
     from jsonb_array_elements(v_itens) e(obj);
