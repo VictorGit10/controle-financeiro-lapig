@@ -162,6 +162,27 @@
 -- estimável: `prioridade` fica nula e ele cai para o fim da lista, com
 -- aviso. É ausência de dado, não prioridade zero.
 --
+-- O QUE O RANQUEAMENTO NÃO É — ler antes de consumir a posição 1.
+-- A lista é uma SHORTLIST COM JUSTIFICATIVA, não uma decisão. Ela
+-- ordena por urgência de gasto (qual recurso está mais perto de ser
+-- devolvido), e urgência não é mérito: boa parte da decisão real é
+-- julgar se AQUELE bolsista se justifica dentro do objeto DAQUELE
+-- projeto — vínculo temático, plano de trabalho da pessoa, defesa
+-- perante o financiador. Nada disso existe em tabela nenhuma, e
+-- portanto nada disso entra aqui.
+--
+-- Consequência prática para quem valida e para quem consome (pessoa ou
+-- IA): a posição 1 NÃO é "onde colocar". É "onde o dinheiro some
+-- primeiro se ninguém gastar". Escolher a posição 3 por razão temática
+-- é uso correto da ferramenta, não divergência dela. O erro que
+-- importa é outro — uma opção viável ficar de fora da lista ou ser
+-- marcada `nao_cabe` sem ser. É por isso que os campos que descrevem
+-- POR QUE (motivos, motivo_codigo, orcamento/caixa/prazo) valem mais
+-- que a ordem: eles é que sustentam a conversa com quem decide.
+--
+-- Por isso o resumo diz `mais_urgente`, não "melhor": a função não tem
+-- base para a segunda palavra.
+--
 -- `cabe` e `cabe_parcial` COMPARTILHAM o mesmo balde, e isso é
 -- deliberado. A tentação é ranquear "cabe integralmente" acima de
 -- "cabe parcial", mas isso inverte a regra acima justamente no caso
@@ -834,7 +855,7 @@ begin
   -- posição 1 conclua que a alocação inteira está resolvida.
   if (v_projetos->0->>'veredito') = 'cabe_parcial' then
     v_obs := format(
-      'O primeiro colocado (%s) é o de maior risco de devolução, mas comporta %s de %s %s: o restante precisa de outra fonte — veja as posições seguintes para dividir a alocação.',
+      'O mais urgente (%s) é o de maior risco de devolução, mas comporta %s de %s %s: o restante precisa de outra fonte — veja as posições seguintes para dividir a alocação.',
       v_projetos->0->>'project_name',
       v_projetos->0->>'meses_cabiveis',
       v_meses,
@@ -846,8 +867,13 @@ begin
            'cabe_parcial', count(*) filter (where e.obj->>'veredito' = 'cabe_parcial'),
            'nao_cabe',     count(*) filter (where e.obj->>'veredito' = 'nao_cabe'),
            'sem_plano',    count(*) filter (where e.obj->>'veredito' = 'sem_plano'),
-           'melhor',       (v_projetos->0->>'project_name'),
-           'melhor_veredito', (v_projetos->0->>'veredito'),
+           'elegiveis',    count(*) filter (where e.obj->>'veredito' in ('cabe', 'cabe_parcial')),
+           -- 'mais_urgente', NÃO 'melhor': a função ordena por risco de
+           -- devolução e não julga se o bolsista se justifica no objeto
+           -- do projeto. Nomear de "melhor" faria a tela e a IA
+           -- afirmarem uma recomendação que o dado não sustenta.
+           'mais_urgente', (v_projetos->0->>'project_name'),
+           'mais_urgente_veredito', (v_projetos->0->>'veredito'),
            'observacao',   v_obs
          )
     into v_resumo
@@ -868,7 +894,7 @@ begin
     'resumo',              v_resumo,
     'projetos',            v_projetos,
     'nota',
-      'Ranqueado por risco de devolução (saldo livre remanejável ÷ meses restantes de vigência): recurso prestes a voltar ao financiador vale mais ser gasto que recurso com anos pela frente. Três restrições independentes formam o veredito — orçamento (previsto − realizado − compromissos, ver mig. 038), caixa (saldo em conta projetado mês a mês) e prazo (vigência). ATENÇÃO ÀS DIREÇÕES DE ERRO OPOSTAS: o orçamento é conservador (compromissos de bolsa descontados até o fim da vigência), enquanto o caixa é otimista — a única saída que o banco sabe PREVER é bolsa; diária, equipamento e contrato não têm previsão em tabela. Isso não é buraco permanente: o ponto de partida da projeção é o saldo real da conta no balancete, que já embute esses gastos até a data de referência, então a cegueira do caixa vale só de lá até hoje e está quantificada em caixa.janela_cega_meses (caixa.cobertura = ''atualizada'' quando é no máximo 1 mês, ''defasada'' acima disso, ''nenhuma'' sem balancete). Importar o balancete todo mês mantém a janela em um mês; o que a rotina mensal NÃO fecha é a previsão de gastos não-bolsa futuros — para esses ela dá detecção, não previsão: refaça a simulação quando o balancete novo chegar. Toda implementação de bolsa exige remanejamento, com ou sem saldo na letra de pessoal, porque é o ato que nomeia o bolsista: por isso remanejamento é reportado como atrito de processo, não como veredito. O único impedimento que remanejar não contorna é o plano não ter nenhuma rubrica do grupo "a" (Pessoal). Pool remanejável exclui cip_ufg, cip_ua e dao (fatia institucional) e grupos com saldo negativo.'
+      'ESTA LISTA É UMA SHORTLIST COM JUSTIFICATIVA, NÃO UMA DECISÃO. Ela ordena por urgência de gasto, e urgência não é mérito: julgar se determinado bolsista se justifica dentro do objeto de determinado projeto (vínculo temático, plano de trabalho da pessoa, defesa perante o financiador) não é dado que exista em tabela alguma e não entra neste cálculo. A posição 1 significa "onde o recurso some primeiro se ninguém gastar", não "onde colocar" — escolher uma posição mais abaixo por razão temática é uso correto da ferramenta. Ao apresentar este resultado, exponha as OPÇÕES e o porquê de cada uma (motivos, motivo_codigo, orcamento/caixa/prazo); não afirme uma recomendação. Ranqueado por risco de devolução (saldo livre remanejável ÷ meses restantes de vigência): recurso prestes a voltar ao financiador vale mais ser gasto que recurso com anos pela frente. Três restrições independentes formam o veredito — orçamento (previsto − realizado − compromissos, ver mig. 038), caixa (saldo em conta projetado mês a mês) e prazo (vigência). ATENÇÃO ÀS DIREÇÕES DE ERRO OPOSTAS: o orçamento é conservador (compromissos de bolsa descontados até o fim da vigência), enquanto o caixa é otimista — a única saída que o banco sabe PREVER é bolsa; diária, equipamento e contrato não têm previsão em tabela. Isso não é buraco permanente: o ponto de partida da projeção é o saldo real da conta no balancete, que já embute esses gastos até a data de referência, então a cegueira do caixa vale só de lá até hoje e está quantificada em caixa.janela_cega_meses (caixa.cobertura = ''atualizada'' quando é no máximo 1 mês, ''defasada'' acima disso, ''nenhuma'' sem balancete). Importar o balancete todo mês mantém a janela em um mês; o que a rotina mensal NÃO fecha é a previsão de gastos não-bolsa futuros — para esses ela dá detecção, não previsão: refaça a simulação quando o balancete novo chegar. Toda implementação de bolsa exige remanejamento, com ou sem saldo na letra de pessoal, porque é o ato que nomeia o bolsista: por isso remanejamento é reportado como atrito de processo, não como veredito. O único impedimento que remanejar não contorna é o plano não ter nenhuma rubrica do grupo "a" (Pessoal). Pool remanejável exclui cip_ufg, cip_ua e dao (fatia institucional) e grupos com saldo negativo.'
   );
 end;
 $$;

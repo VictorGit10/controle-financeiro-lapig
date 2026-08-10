@@ -14,11 +14,24 @@
 --     institucional e não tem como ser verificada pelo código.
 --
 -- A pergunta a responder aqui NÃO é "a função roda?" — a 039 já foi
--- executada contra um cenário sintético antes de ser commitada. É:
--- **o ranking coloca em primeiro o centro de custo onde você e o
--- Laerte de fato colocariam a bolsa?** Se não coloca, é a semântica
--- que está errada, e é agora que isso precisa aparecer — antes de
--- virar MCP ou aba no site.
+-- executada contra um cenário sintético antes de ser commitada.
+--
+-- E também NÃO é "o ranking acertou onde colocar a bolsa". A RPC
+-- devolve uma SHORTLIST COM JUSTIFICATIVA, não uma decisão: ela ordena
+-- por urgência de gasto (qual recurso some primeiro se ninguém gastar)
+-- e não julga se aquele bolsista se justifica dentro do objeto daquele
+-- projeto — vínculo temático, plano de trabalho da pessoa, defesa
+-- perante o financiador. Isso não existe em tabela nenhuma. Escolher a
+-- posição 3 por razão temática é uso CORRETO da ferramenta.
+--
+-- A pergunta é:
+--   **a lista contém todas as possibilidades reais, com o porquê certo
+--   em cada uma, e o sinal de urgência aponta para o lugar certo?**
+--
+-- Daí o erro que importa ser o FALSO NEGATIVO: uma opção viável que
+-- ficou de fora ou apareceu como `nao_cabe` sem ser. Esse é bug e
+-- precisa aparecer agora, antes de virar MCP ou aba no site. Ordem
+-- "errada" quase nunca é bug.
 --
 -- ------------------------------------------------------------
 -- COMO USAR (importante — leia antes)
@@ -82,14 +95,20 @@ select (p->>'posicao')::int                      as pos,
  order by pos;
 commit;
 -- CONFIRA, nesta ordem:
---   1. A posição 1 é onde você colocaria a bolsa? Se não, POR QUÊ não?
---      A resposta é a regra que falta no modelo.
+--   1. **FALSO NEGATIVO — é o único erro grave.** Algum centro de custo
+--      onde a bolsa caberia ficou de fora da lista, ou apareceu como
+--      `nao_cabe`? Aí sim há bug, e o campo `restricao_que_limita` diz
+--      onde procurar. Que a posição 1 não seja a sua escolha NÃO é
+--      defeito: a RPC ordena por urgência, não por mérito, e a
+--      justificativa do bolsista no projeto é sua, não dela.
 --   2. `burn_mensal` = saldo_em_risco / meses_vigencia. É o critério de
---      ranking: quanto o projeto precisa gastar por mês para não
+--      ordenação: quanto o projeto precisa gastar por mês para não
 --      devolver recurso. Faz sentido para os centros de custo do topo?
+--      É este número que sustenta a frase "esse aqui é o recurso
+--      urgente" numa reunião.
 --   3. `veredito = cabe_parcial` na posição 1 é ESPERADO e não é
---      defeito: um projeto que vence em 4 meses lidera por risco de
---      devolução mesmo cobrindo só 4 dos 24. Ver `resumo.observacao`.
+--      defeito: um projeto que vence em 4 meses lidera por urgência
+--      mesmo cobrindo só 4 dos 24. Ver `resumo.observacao`.
 --   4. `restricao_que_limita` diz o que resolver: 'prazo' (não se
 --      negocia), 'caixa' (é calendário — veja `caixa_normaliza`, adiar
 --      o início pode bastar) ou 'orcamento' (remanejamento alcança).
