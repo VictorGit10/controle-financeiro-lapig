@@ -1,0 +1,20 @@
+{
+  "name": "controle-financeiro-mcp",
+  "version": "0.1.0",
+  "description": "Servidor MCP sobre as RPCs de decisão do ControleFinanceiro (LAPIG/UFG)",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "controle-financeiro-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@supabase/supabase-js": "^2.112.3",
+    "zod": "^4.4.3"
+  }
+}

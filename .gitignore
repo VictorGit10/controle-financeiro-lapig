@@ -60,3 +60,13 @@ dist/
 *.tmp
 *.bak
 *.swp
+
+# ── Réplica local do banco (tools/replica-local) ──────────────
+# Os dumps trazem valores financeiros reais de projetos
+# identificaveis, mesmo sem a tabela de bolsistas. O repo e publico:
+# versiona-se o script que REMOVE dado, nunca o que o carrega.
+tools/replica-local/dump/
+
+# ── Supabase CLI local (config.toml e' versionado; estado local nao) ──
+supabase/.branches/
+supabase/.temp/
