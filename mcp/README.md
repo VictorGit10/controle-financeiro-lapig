@@ -90,19 +90,41 @@ iria junto. Servidor recém-adicionado só aparece depois de reiniciar a sessão
 | Tool | Para quê |
 |---|---|
 | `listar_centros_de_custo` | Descobrir os nomes aceitos pelas outras tools; já vem escopada |
+| `panorama` | Como estão **todos** os centros de custo: saldo livre, caixa, bolsas, vigência e alertas |
 | `saldo_livre` | Quanto sobra num centro de custo, por grupo de rubrica, descontados os compromissos |
 | `simular_alocacao` | Onde cabe uma bolsa ou uma compra, ranqueado por risco de devolução |
-| `consultar_bolsas` | Valor, início e fim das bolsas de um centro de custo ou de um bolsista |
+| `consultar_bolsas` | Valor, início e fim das bolsas; com `encerrando_em_meses`, o que vence |
+| `previsto_vs_realizado` | Execução por rubrica: quanto foi orçado × quanto saiu |
+| `projecao_de_caixa` | Saldo mês a mês até o fim da vigência |
+| `plano_de_trabalho` | O que foi aprovado: rubricas orçadas e cronograma de desembolso |
 | `quem_sou_eu` | Com qual login e papel a sessão está rodando |
+
+As três primeiras respondem em ordem de zoom: `panorama` (todos), `saldo_livre`
+(um) e `simular_alocacao` (onde colocar). `panorama` é o ponto de partida
+natural — inclusive porque `resumo.sem_balancete` e `resumo.balancete_defasado`
+dizem quais centros estão com o dado atrasado, o que nenhuma outra consulta
+mostrava.
+
+Uma divisão que as descrições insistem: **`panorama` descreve, `simular_alocacao`
+ranqueia.** A ordem do panorama é alfabética e não significa prioridade. Dois
+rankings com critérios diferentes produziriam listas que discordam, e quem
+lesse as duas não teria como saber qual vale.
 
 As descrições das tools carregam o enquadramento das migrações, porque é o que o
 modelo lê: `simular_alocacao` devolve **shortlist com justificativa, não
 recomendação** (ordena por urgência de gasto, e urgência não é mérito), e
 `saldo_livre` exige declarar o que o número cobre antes de afirmar qualquer
-coisa. O modelo conversa; **cálculo nunca** — todo número sai de RPC.
+coisa. As de leitura declaram o que **não** cobrem: `previsto_vs_realizado` só
+olha para trás, `projecao_de_caixa` só sabe prever bolsa, `plano_de_trabalho` é
+o orçado e não o executado. O modelo conversa; **cálculo nunca** — todo número
+sai de RPC.
 
 CPF e e-mail de bolsista não saem daqui: as consultas selecionam colunas
-explícitas.
+explícitas. Nome de bolsista sai — aparece nas bolsas e dentro das mensagens de
+alerta do panorama, que é o conteúdo do alerta.
+
+`panorama` exige a **migração 040**; as demais, as 038/039. Se ela responder
+erro de função inexistente, falta rodar `database/040_panorama.sql`.
 
 ## Conferência
 

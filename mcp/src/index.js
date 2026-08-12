@@ -11,7 +11,16 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 import { quemSouEu } from './client.js';
-import { listarCentrosDeCusto, saldoLivre, simularAlocacao, consultarBolsas } from './tools.js';
+import {
+  listarCentrosDeCusto,
+  saldoLivre,
+  simularAlocacao,
+  consultarBolsas,
+  panorama,
+  previstoVsRealizado,
+  projecaoDeCaixa,
+  planoDeTrabalho,
+} from './tools.js';
 
 const servidor = new McpServer({ name: 'controle-financeiro-lapig', version: '0.1.0' });
 
@@ -38,6 +47,41 @@ tool(
     inputSchema: {},
   },
   listarCentrosDeCusto
+);
+
+tool(
+  'panorama',
+  {
+    title: 'Panorama de todos os centros de custo',
+    description:
+      'Visão consolidada de todos os centros de custo visíveis: saldo livre, ' +
+      'saldo em conta e defasagem do balancete, bolsas ativas e custo mensal, ' +
+      'vigência restante e alertas. É a resposta para "como estão os projetos?" ' +
+      'e o ponto de partida natural antes de qualquer pergunta específica.\n\n' +
+      'DESCREVE, NÃO RANQUEIA: a ordem é alfabética e não significa prioridade. ' +
+      'Para ordenar por urgência use simular_alocacao — apresentar esta ordem ' +
+      'como se fosse prioridade inventa um significado que o dado não tem.\n\n' +
+      'Leia `situacao_dado` antes de comparar centros entre si. Um centro ' +
+      '"sem_balancete" tem realizado zero por AUSÊNCIA DE DADO, então seu saldo ' +
+      'é o previsto integral do plano e não é comparável com o de quem tem ' +
+      'balancete; "sem_plano" não tem saldo (null, não zero). Balancete ' +
+      'defasado SUBESTIMA o saldo livre, balancete ausente o SUPERESTIMA — as ' +
+      'direções são opostas e não se cancelam. Repasse `resumo.observacao` ' +
+      'quando existir: ela diz o que o total consolidado está escondendo.\n\n' +
+      '`resumo.sem_balancete` e `resumo.balancete_defasado` são a leitura de ' +
+      'saúde do Fechamento Mensal — quais centros estão com o dado atrasado.',
+    inputSchema: {
+      centros_de_custo: z
+        .array(z.string())
+        .optional()
+        .describe('Restringe a estes centros. Se omitido, traz todos os visíveis.'),
+      incluir_inativos: z
+        .boolean()
+        .optional()
+        .describe('Inclui projetos inativos. Padrão: false.'),
+    },
+  },
+  panorama
 );
 
 tool(
@@ -106,8 +150,12 @@ tool(
     title: 'Consultar bolsas',
     description:
       'Bolsas de um centro de custo e/ou de um bolsista: valor mensal, início, fim e ' +
-      'situação. Responde "quanto fulano recebe e até quando?". Por padrão só as ' +
-      'ativas. Não devolve CPF nem e-mail.',
+      'situação. Responde "quanto fulano recebe e até quando?" e, com ' +
+      '`encerrando_em_meses`, "quais bolsas vencem nos próximos N meses?". Sem ' +
+      'filtro nenhum devolve todas as bolsas visíveis a este login. Por padrão ' +
+      'só as ativas. Não devolve CPF nem e-mail.\n\n' +
+      'Se `truncado` vier true, a lista foi cortada no teto e NÃO é o conjunto ' +
+      'completo — refine o filtro antes de contar ou somar.',
     inputSchema: {
       centro_de_custo: z.string().optional().describe('Nome, código ou id do centro de custo.'),
       bolsista: z.string().optional().describe('Nome ou parte do nome do bolsista.'),
@@ -115,9 +163,87 @@ tool(
         .boolean()
         .optional()
         .describe('Inclui bolsas não-ativas no resultado. Padrão: false.'),
+      encerrando_em_meses: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Traz só as bolsas que terminam de hoje até N meses à frente. Use para ' +
+            'a pergunta "o que vence?" — bolsas já encerradas ficam de fora.'
+        ),
     },
   },
   consultarBolsas
+);
+
+tool(
+  'previsto_vs_realizado',
+  {
+    title: 'Previsto × realizado por rubrica',
+    description:
+      'Execução do centro de custo rubrica a rubrica: quanto o plano de trabalho ' +
+      'orçou, quanto o balancete mais recente mostra que saiu, o saldo e o ' +
+      'percentual executado. Responde "onde o dinheiro está sendo gasto?" e ' +
+      '"que rubrica está estourando ou parada?".\n\n' +
+      'Olha só para TRÁS: não desconta compromissos futuros já assumidos (bolsas ' +
+      'que continuarão a ser pagas). Para decidir se cabe um gasto novo, use ' +
+      'saldo_livre, que desconta. `nao_mapeados` são lançamentos do balancete ' +
+      'sem rubrica correspondente — em geral despesas tributárias — e não entram ' +
+      'em nenhuma linha de rubrica.',
+    inputSchema: {
+      centro_de_custo: z.string().describe('Nome, código ou id do centro de custo.'),
+    },
+  },
+  previstoVsRealizado
+);
+
+tool(
+  'projecao_de_caixa',
+  {
+    title: 'Projeção de caixa mês a mês',
+    description:
+      'Saldo projetado mês a mês até o fim da vigência, com as saídas de bolsas e ' +
+      'as entradas de desembolsos já registrados. Responde "até quando o dinheiro ' +
+      'dura?" e "em que mês o saldo fica negativo?".\n\n' +
+      'A única saída projetada é BOLSA — diária, equipamento e contrato futuros ' +
+      'não existem em tabela nenhuma, então o saldo é otimista. O ponto de ' +
+      'partida é o saldo inicial cadastrado no projeto, NÃO o saldo real da conta ' +
+      'no balancete: para a projeção ancorada no extrato, use simular_alocacao, ' +
+      'que parte do balancete e quantifica a janela cega.',
+    inputSchema: {
+      centro_de_custo: z.string().describe('Nome, código ou id do centro de custo.'),
+      inicio: z.string().optional().describe('Início da projeção, AAAA-MM-DD. Padrão: mês corrente.'),
+      fim: z.string().optional().describe('Fim da projeção, AAAA-MM-DD. Padrão: fim da vigência.'),
+    },
+  },
+  projecaoDeCaixa
+);
+
+tool(
+  'plano_de_trabalho',
+  {
+    title: 'Plano de trabalho do centro de custo',
+    description:
+      'O plano de trabalho ATIVO: rubricas com o valor orçado em cada uma, ' +
+      'cronograma de desembolso previsto, título, tipo e valor total. Responde ' +
+      '"o que foi aprovado neste projeto?" e "quanto tem previsto em ' +
+      'equipamento?".\n\n' +
+      'É o ORÇADO, não o executado — nada aqui diz o que já foi gasto. Para o ' +
+      'executado use previsto_vs_realizado; para o que ainda está livre, ' +
+      'saldo_livre. Um centro sem plano ativo não tem previsto por rubrica, e ' +
+      'por isso fica de fora de saldo_livre e simular_alocacao: quando a resposta ' +
+      'vier com has_plano false, é essa a explicação para ele não aparecer nas ' +
+      'outras.',
+    inputSchema: {
+      centro_de_custo: z.string().describe('Nome, código ou id do centro de custo.'),
+      incluir_historico: z
+        .boolean()
+        .optional()
+        .describe('Inclui a lista de versões anteriores do plano. Padrão: false.'),
+    },
+  },
+  planoDeTrabalho
 );
 
 tool(
