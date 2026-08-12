@@ -11,18 +11,29 @@ deveria ganhar nenhuma: a aba do site vai consumir as mesmas funções, e
 inteligência duplicada no adaptador viraria duas versões divergentes da mesma
 conta. Se um número está errado, o conserto é na migração.
 
-As duas RPCs estão aplicadas na produção desde 2026-08-11 (`get_saldo_livre` da
-038 e `simular_alocacao` da 039), então apontar este servidor ao Supabase real
-funciona. Para conferir em qualquer banco antes de apontar:
+As RPCs estão aplicadas na produção: `get_saldo_livre` (038) e
+`simular_alocacao` (039) desde 2026-08-11, `get_panorama` (040) desde
+2026-08-12. Para conferir em qualquer banco antes de apontar:
 
 ```sql
 select proname, prosecdef as definer
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public'
-   and proname in ('get_saldo_livre', 'simular_alocacao');
+   and proname in ('get_saldo_livre', 'simular_alocacao', 'get_panorama');
 ```
 
-Duas linhas = pronto. Uma só = falta rodar `database/039_simular_alocacao.sql`.
+Três linhas = pronto (`get_saldo_livre` é a única com `definer = true`). Se
+faltar alguma, rode a migração correspondente em `database/`.
+
+A 040 também reparou `get_project_alerts`, que estava quebrada em runtime
+desde a 032 e é chamada pelo `panorama`. Se a tool responder erro de tabela
+inexistente, é isso — confira com:
+
+```sql
+select prosrc ~ 'expense_no_description' as quebrada
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and proname = 'get_project_alerts';
+```
 
 ## Autenticação: por usuário
 

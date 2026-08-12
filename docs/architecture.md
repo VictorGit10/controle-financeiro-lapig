@@ -52,6 +52,34 @@ Edge Functions Deno/TypeScript ficam em `supabase/functions/<name>/`. Deploy via
 
 **`extract-balancete`** — análogo, mas para PDF do Balancete Contábil Analítico da FUNAPE. Recebe texto extraído pelo **pdf.js** no browser (com preservação de quebras de linha via coordenada Y), devolve `{ data: { project_code, data_referencia, saldo_disponivel, rendimento_liquido, total_debitos, total_creditos, lancamentos: [...] }, warnings, raw_extraction }`. O `project_code` (ex.: "30.099") é detectado pela linha da conta bancária dentro do PDF.
 
+## Camada de decisão e IA
+
+Três fases, com uma regra que decide o desenho de todas: **a lógica financeira mora no Postgres; os consumidores são adaptadores finos.** A fase 3 vai consumir exatamente as mesmas RPCs que a fase 2, e duas implementações da mesma conta divergiriam — por isso o servidor MCP não tem uma linha de cálculo. Se um número está errado, o conserto é na migração.
+
+```
+                    ┌── fase 2 ──┐   ┌── fase 3 (não começada) ──┐
+                    │  mcp/      │   │  aba no site              │
+                    │  (stdio)   │   │  Edge Function + LLM      │
+                    └─────┬──────┘   └────────────┬──────────────┘
+                          │  supabase-js (JWT do usuário)
+                          └───────────┬───────────┘
+                            ┌─────────▼─────────┐
+                            │  RPCs de decisão  │  fase 1
+                            │  038 / 039 / 040  │
+                            └─────────┬─────────┘
+                            ┌─────────▼─────────┐
+                            │  Postgres + RLS   │  mig. 033/034
+                            └───────────────────┘
+```
+
+**Fase 1 — RPCs** (`docs/database.md` tem o contrato de cada uma): `get_saldo_livre` (038) responde "quanto está livre neste centro de custo?", `simular_alocacao` (039) "onde colocar este gasto?" e `get_panorama` (040) "como estão os projetos?". As três carregam um campo `nota` em prosa, que **não é decoração**: é o enquadramento que o modelo lê e repete ao usuário — que a simulação é shortlist e não recomendação, que balancete ausente superestima o saldo e defasado o subestima, que a ordem do panorama é alfabética e não prioridade.
+
+**Fase 2 — servidor MCP** (`mcp/`, ver `mcp/README.md`): pacote Node próprio, transporte stdio, 9 tools. Autentica **por usuário** (`CF_EMAIL`/`CF_PASSWORD`), faz login real no GoTrue e viaja com o JWT daquele usuário — então o RLS é a barreira e o servidor não tem lógica de permissão própria. Duas pessoas com logins diferentes veem coisas diferentes, como deve ser.
+
+**Fase 3 — aba no site**: uma Edge Function guardando a chave do provedor de LLM (que não pode ir no browser) e repassando o JWT do chamador às mesmas RPCs. Note que **MCP não é o que se usa aqui**: MCP existe para conectar clientes de IA de terceiros; no próprio site usa-se *tool calling* no formato nativo do provedor. O que porta da fase 2 é `mcp/src/tools.js` (resolve nome → id, chama RPC, devolve o JSON) e as descrições das tools, que são a parte cara de escrever.
+
+**Conversa é generativa; cálculo nunca.** Todo número sai de RPC — o modelo não soma nem projeta. É a mesma lição que aposentou as Edge Functions do Ollama em favor dos parsers determinísticos.
+
 ## SimulationEngine
 
 `simulation.js` is a thin delegation layer that calls `window.calcProjectMonthly`, `window.diffProjections`, and `window.generateMonthSeries` — all set by the `pure-fns.js` browser bridge. The actual implementation lives in `pure-fns.js` and mirrors the PostgreSQL `calc_project_monthly()` function client-side for the what-if Editor Mode on the Projects page. Changes are local-only until explicitly saved. Both the server RPC and client engine accept a `balance_status` parameter (`paid_current` / `unpaid_current` / `unpaid_previous`) that adjusts whether the current month's scholarships are counted as paid.

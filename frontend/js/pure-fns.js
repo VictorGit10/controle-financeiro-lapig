@@ -11,6 +11,24 @@ export function formatBRL(value) {
   }).format(value || 0);
 }
 
+/**
+ * Converte texto monetário em número.
+ *
+ * AMBIGUIDADE DELIBERADA: um ponto único sem vírgula é lido como DECIMAL,
+ * não como separador de milhar. Ou seja, `'1500.75'` → 1500.75 e, como
+ * consequência inevitável, `'R$ 1.500'` → 1.5.
+ *
+ * As duas leituras de `1.500` (mil e quinhentos, à brasileira; um e meio, à
+ * americana) são mutuamente exclusivas — nenhuma heurística acerta as duas —
+ * e o projeto escolheu a decimal. Texto digitado à mão em pt-BR usa vírgula
+ * (`'1.500,00'`), que cai no primeiro ramo e resolve certo; e mais de um
+ * ponto (`'1.234.567'`) só pode ser milhar, o que o segundo ramo trata.
+ * Sobra o caso de ponto único, que fica intocado e vira decimal.
+ *
+ * Fixado por `tests/utils.test.js:44`. Foi relatado como Crítico #4 no
+ * bug-hunt de 2026-07-16 e reclassificado como trade-off em 2026-08-12 —
+ * mudar o comportamento exige mudar aquele teste, de propósito.
+ */
 export function parseBRL(value) {
   if (value == null) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;

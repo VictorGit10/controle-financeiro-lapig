@@ -22,6 +22,32 @@
 
 ---
 
+## Situação dos críticos (revisado em 2026-08-12)
+
+| # | Achado | Situação |
+| --- | --- | --- |
+| 1 | `isAtivoFunape` tratava "Inativo" como ativo | ✅ **corrigido** — `bolsa-parser.js:109` usa `ACTIVE_STATUSES.includes(s)` (match exato), com comentário explicando a armadilha da substring |
+| 2 | `get_project_alerts()` lê a tabela `expenses` removida | ✅ **corrigido na migração 040** (2026-08-12) — ver abaixo |
+| 3 | `inferBalanceStatus` ignorava a data do saldo | ✅ **corrigido** — `pure-fns.js:91` checa ano e mês antes da regra do dia 7 |
+| 4 | `parseBRL` interpreta ponto único como decimal | ⚖️ **não é bug em aberto: é trade-off deliberado e testado.** `tests/utils.test.js:44` fixa `parseBRL('1500.75') === 1500.75`. As duas leituras de `1.500` (mil e quinhentos vs. um e meio) são mutuamente exclusivas e o projeto escolheu a decimal. A consequência (`R$ 1.500` → `1.5`) é real, mas é o preço da escolha, não um descuido. Falta um comentário no código dizendo isso. |
+
+**Sobre o #2 — por que levou um mês.** O diagnóstico deste relatório estava
+correto e completo desde 2026-07-16, e ainda assim o bug sobreviveu à
+publicação. O que finalmente o pegou não foi releitura: foi **execução**. A
+migração 040 acrescentou `get_panorama`, que chama `get_project_alerts` em
+laço; na primeira rodada contra a réplica do banco real ela explodiu com
+`relation "public.expenses" does not exist`, e daí não havia como não
+consertar.
+
+A lição é sobre a natureza do bug, não sobre disciplina: plpgsql resolve nome
+de tabela apenas em **tempo de execução**, então a função continuou existindo,
+respondendo ao linter e passando em qualquer inspeção estática — só quebrava
+quando alguém pedia um alerta. Achado que só aparece rodando precisa de um
+teste que rode, e é por isso que o roteiro `tests/sql/test_panorama.sql` abre
+com um bloco de diagnóstico de uma linha em vez de uma descrição em prosa.
+
+---
+
 ## 🚨 Críticos
 
 ### 1. Status "Inativo" tratado como ativo no parser de bolsas
@@ -30,11 +56,18 @@
 - **Repro:** Planilha FUNAPE com Status `Inativo` → incluída como ativa.
 - **Sugestão:** comparar status de forma exata ou prefixada e rejeitar negativos (`inativo`, `cancelado`, `encerrado`).
 
-### 2. `get_project_alerts()` consulta tabela `expenses` já removida
+### 2. `get_project_alerts()` consulta tabela `expenses` já removida — ✅ CORRIGIDO (mig. 040, 2026-08-12)
 - **Arquivo:** `database/003_views_functions.sql:321`
 - **Descrição:** A função possui o alerta `expense_no_description` fazendo `FROM public.expenses`. A migração 032 dropa `expenses`, então a função quebra em runtime. Também afeta `get_alerts_for_projects()` (`013_portuguese_months_batch_alerts_stats.sql:248`) e as páginas Projetos/Dashboard.
 - **Repro:** Rodar migração 032 e chamar `get_project_alerts('<uuid>')`.
 - **Sugestão:** atualizar/recadastrar `get_project_alerts()` na migração 032 (ou 033), removendo ou convertendo a consulta para `monitoramento.observacao`.
+- **Correção:** a migração 032 **já continha** a recriação correta (seção 4.5, sem o alerta 4) — ela simplesmente não chegou ao banco, provavelmente por o script ter sido rodado em pedaços no SQL Editor. Varredura do schema em 2026-08-12 confirmou que essa foi a **única** seção da 032 que ficou para trás: `monitoramento` existe, `expenses` está dropada, `v_project_summary` está sem `total_expenses`, `save_project` está sem `p_funape_managed` e `projects` sem a coluna `funape_managed`. A 040 reaplica a versão da 032 textualmente e fecha com asserção reexecutável (`prosrc ~ 'expense_no_description'` tem que ser false), para a regressão não passar despercebida de novo.
+- **Diagnóstico em uma linha**, em qualquer banco:
+  ```sql
+  select prosrc ~ 'expense_no_description' as quebrada
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'get_project_alerts';
+  ```
 
 ### 3. `inferBalanceStatus` ignora a data do saldo
 - **Arquivo:** `frontend/js/pure-fns.js:64`
