@@ -191,6 +191,56 @@ export async function projecaoDeCaixa({ centro_de_custo, inicio, fim }) {
   };
 }
 
+// O que sai do plano. `get_plano_ativo` devolve `to_jsonb(pt.*)` — a linha
+// inteira de planos_trabalho —, e boa parte não serve a quem lê: `raw_extraction`
+// é o objeto que o parser tirou do documento, ou seja uma SEGUNDA CÓPIA das
+// mesmas rubricas e desembolsos que já vêm estruturados logo abaixo, e
+// arquivo_storage_path / created_by / timestamps são encanamento interno.
+//
+// Escolher coluna é trabalho de adaptador — é o mesmo que consultar_bolsas já
+// faz — e não toca em número nenhum. A poda fica aqui e não na RPC de propósito:
+// get_plano_ativo é contrato compartilhado com o frontend.
+const CAMPOS_PLANO = [
+  'versao',
+  'tipo',
+  'data_documento',
+  'titulo',
+  'coordenador',
+  'prazo_inicio',
+  'prazo_fim',
+  'valor_total_plano',
+  'valor_despesas_projeto',
+  'valor_cip',
+  'valor_dao',
+  'receita_origem',
+  'observacoes',
+  'arquivo_nome',
+];
+
+function enxugarPlano(plano) {
+  const enxuto = {};
+  for (const campo of CAMPOS_PLANO) {
+    if (plano[campo] !== undefined) enxuto[campo] = plano[campo];
+  }
+  // Os ids de linha também caem: não há tool de escrita aqui, então nada os usa
+  // de volta.
+  enxuto.rubricas = (plano.rubricas ?? []).map((r) => ({
+    rubrica_code: r.rubrica_code,
+    rubrica_name: r.rubrica_name,
+    parent_code: r.parent_code,
+    valor_previsto: r.valor_previsto,
+    descricao_livre: r.descricao_livre,
+  }));
+  enxuto.desembolsos = (plano.desembolsos ?? []).map((d) => ({
+    parcela: d.parcela,
+    data_prevista: d.data_prevista,
+    data_texto: d.data_texto,
+    valor: d.valor,
+    valor_texto: d.valor_texto,
+  }));
+  return enxuto;
+}
+
 export async function planoDeTrabalho({ centro_de_custo, incluir_historico }) {
   const centro = await resolverCentro(centro_de_custo);
   const plano = await rpc('get_plano_ativo', { p_project_id: centro.id });
@@ -213,7 +263,7 @@ export async function planoDeTrabalho({ centro_de_custo, incluir_historico }) {
   return {
     centro_de_custo: centro.name,
     has_plano: true,
-    plano,
+    plano: enxugarPlano(plano),
     ...(historico ? { historico } : {}),
     nota:
       'O plano é o ORÇADO, não o executado: `valor_previsto` de cada rubrica é ' +

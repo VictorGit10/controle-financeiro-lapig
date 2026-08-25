@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Servidor MCP do ControleFinanceiro (LAPIG/UFG).
 //
-// Adaptador fino sobre as RPCs de decisão do Postgres (migrações 038/039).
+// Adaptador fino sobre as RPCs de decisão do Postgres (migrações 038/039/040).
 // Autentica como um usuário Supabase real: cada pessoa configura o próprio
 // e-mail e senha, e o RLS decide o que ela vê. Não há papel, permissão ou regra
 // de negócio codificada aqui.
@@ -22,11 +22,59 @@ import {
   planoDeTrabalho,
 } from './tools.js';
 
-const servidor = new McpServer({ name: 'controle-financeiro-lapig', version: '0.1.0' });
+// Enquadramento que vale para TODAS as tools. Fica aqui, e não repetido dentro
+// de cada descrição, por dois motivos: o cliente lê isto uma vez no handshake —
+// antes de escolher a tool, que é quando as regras 2 e 4 ainda podem mudar a
+// escolha — e a descrição de cada tool volta a falar só do que é dela.
+//
+// O que sobrou nas descrições é a versão curta da regra, não a explicação: um
+// cliente que ignore `instructions` ainda não pode ler o panorama como ranking.
+const INSTRUCOES = `
+Controle financeiro do LAPIG/UFG. Responde sobre centros de custo (projetos):
+quanto sobra, onde cabe um gasto, o que foi orçado, o que já saiu e quais bolsas
+vencem.
+
+Escopo: a sessão está logada como uma pessoa e o banco filtra tudo por ela — um
+professor enxerga só os centros de custo dele. Lista curta ou resultado vazio
+pode ser escopo, não ausência; "quem_sou_eu" diz com qual login e papel.
+
+Quatro regras valem para todas as tools:
+
+1. Não calcule. Todo número sai das RPCs. Somar, projetar ou reordenar por conta
+   própria produz um segundo resultado, que vai discordar do site.
+
+2. Não recomende — apresente. As tools de decisão devolvem shortlist com
+   justificativa. A ordem mede urgência de gasto, e urgência não é mérito: se um
+   bolsista se justifica dentro do objeto daquele projeto é decisão humana e não
+   está em tabela nenhuma. Exponha as opções com o porquê de cada uma; escolher
+   é de quem coordena.
+
+3. Diga o que o número cobre quando isso muda a leitura. Os campos existem para
+   isso: compromissos_cobertura, situacao_dado, caixa.cobertura,
+   risco_devolucao.base, truncado. Saldo alto sem balancete é previsto integral
+   com realizado zero por falta de dado — não é dinheiro sobrando.
+
+4. "panorama" descreve, "simular_alocacao" ranqueia. A ordem do panorama é
+   alfabética e não significa prioridade.
+
+Como responder: o número pedido e a ressalva que muda a leitura dele. Não
+devolva o JSON inteiro, não enumere campo por campo e não repita as notas da
+tool palavra por palavra. Ressalva que não muda a decisão não precisa aparecer.
+`.trim();
+
+const servidor = new McpServer(
+  { name: 'controle-financeiro-lapig', version: '0.1.0' },
+  { instructions: INSTRUCOES }
+);
+
+// As nove tools são de leitura: nenhuma escreve no banco. `readOnlyHint` é dica
+// para o cliente (pode dispensar confirmação), não barreira — a barreira é o
+// RLS. `openWorldHint` porque consultam um sistema externo, o Supabase.
+const SO_LEITURA = { readOnlyHint: true, openWorldHint: true };
 
 /** Envelopa o handler: erro vira texto legível em vez de estourar a sessão. */
 function tool(nome, config, handler) {
-  servidor.registerTool(nome, config, async (args) => {
+  servidor.registerTool(nome, { ...config, annotations: SO_LEITURA }, async (args) => {
     try {
       const resultado = await handler(args ?? {});
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
@@ -42,8 +90,8 @@ tool(
     title: 'Listar centros de custo',
     description:
       'Lista os centros de custo (projetos) visíveis para este login, com código, ' +
-      'vigência e se estão ativos. Use para descobrir os nomes aceitos pelas outras ' +
-      'tools. A lista já vem escopada: um professor vê só os dele.',
+      'vigência e se estão ativos. Use para descobrir os nomes aceitos pelas ' +
+      'outras tools.',
     inputSchema: {},
   },
   listarCentrosDeCusto
@@ -57,19 +105,15 @@ tool(
       'Visão consolidada de todos os centros de custo visíveis: saldo livre, ' +
       'saldo em conta e defasagem do balancete, bolsas ativas e custo mensal, ' +
       'vigência restante e alertas. É a resposta para "como estão os projetos?" ' +
-      'e o ponto de partida natural antes de qualquer pergunta específica.\n\n' +
-      'DESCREVE, NÃO RANQUEIA: a ordem é alfabética e não significa prioridade. ' +
-      'Para ordenar por urgência use simular_alocacao — apresentar esta ordem ' +
-      'como se fosse prioridade inventa um significado que o dado não tem.\n\n' +
-      'Leia `situacao_dado` antes de comparar centros entre si. Um centro ' +
-      '"sem_balancete" tem realizado zero por AUSÊNCIA DE DADO, então seu saldo ' +
-      'é o previsto integral do plano e não é comparável com o de quem tem ' +
-      'balancete; "sem_plano" não tem saldo (null, não zero). Balancete ' +
-      'defasado SUBESTIMA o saldo livre, balancete ausente o SUPERESTIMA — as ' +
-      'direções são opostas e não se cancelam. Repasse `resumo.observacao` ' +
-      'quando existir: ela diz o que o total consolidado está escondendo.\n\n' +
-      '`resumo.sem_balancete` e `resumo.balancete_defasado` são a leitura de ' +
-      'saúde do Fechamento Mensal — quais centros estão com o dado atrasado.',
+      'e o ponto de partida antes de qualquer pergunta específica. Ordem ' +
+      'alfabética, sem significado — ranking é com simular_alocacao.\n\n' +
+      '`situacao_dado` decide se dois centros são comparáveis entre si: ' +
+      '"sem_balancete" tem realizado zero por ausência de dado e SUPERESTIMA o ' +
+      'saldo; balancete defasado SUBESTIMA; "sem_plano" vem com saldo_livre ' +
+      'null, não zero. `resumo.sem_balancete` e `resumo.balancete_defasado` são ' +
+      'a leitura de saúde do Fechamento Mensal — quais centros estão com o dado ' +
+      'atrasado —, e `resumo.observacao`, quando existir, diz o que o total ' +
+      'consolidado está escondendo.',
     inputSchema: {
       centros_de_custo: z
         .array(z.string())
@@ -91,13 +135,11 @@ tool(
     description:
       'Quanto sobra de fato num centro de custo, por grupo de rubrica: previsto no ' +
       'plano, menos realizado no balancete, menos os compromissos já assumidos até o ' +
-      'fim da vigência (bolsas ativas). Responde "quanto sobrou?" descontando o que ' +
-      'já está prometido — o saldo do balancete sozinho parece maior do que é.\n\n' +
-      'Leia sempre `compromissos_cobertura` antes de afirmar qualquer coisa: ' +
-      '"bolsas" significa que só compromissos de bolsa foram descontados (contrato, ' +
-      'diária e equipamento futuros não são previstos por tabela nenhuma) e ' +
-      '"nenhuma" significa que nada foi descontado. Não trate o número como ' +
-      'verificado sem dizer o que ele cobre.',
+      'fim da vigência (bolsas ativas). O saldo do balancete sozinho parece maior ' +
+      'do que é.\n\n' +
+      '`compromissos_cobertura` diz o que foi descontado: "bolsas" = só ' +
+      'compromissos de bolsa (contrato, diária e equipamento futuros não são ' +
+      'previstos por tabela nenhuma); "nenhuma" = nada.',
     inputSchema: {
       centro_de_custo: z
         .string()
@@ -113,19 +155,15 @@ tool(
     title: 'Simular onde alocar um gasto',
     description:
       'Dada uma bolsa recorrente ou uma compra pontual, avalia todos os centros de ' +
-      'custo visíveis e devolve uma lista ranqueada por risco de devolução — qual ' +
-      'recurso some primeiro se ninguém gastar.\n\n' +
-      'É SHORTLIST COM JUSTIFICATIVA, NÃO RECOMENDAÇÃO. Exponha as opções com o ' +
-      'porquê de cada uma; não anuncie uma escolha. A ordem mede urgência, e ' +
-      'urgência não é mérito: se um bolsista se justifica dentro do objeto de um ' +
-      'projeto é decisão humana e não está em tabela nenhuma. Escolher uma posição ' +
-      'mais abaixo por razão temática é uso correto.\n\n' +
-      'Repasse o campo `resumo.observacao` quando existir, e não omita `avisos`: as ' +
-      'direções de erro são opostas e o usuário precisa saber. O orçamento é ' +
+      'custo visíveis e devolve lista ranqueada por risco de devolução — qual ' +
+      'recurso some primeiro se ninguém gastar. Shortlist com justificativa, não ' +
+      'recomendação.\n\n' +
+      'As direções de erro são opostas, e é o que `avisos` traz: o orçamento é ' +
       'conservador (compromissos descontados) e o caixa é otimista (a única saída ' +
-      'que o banco sabe prever é bolsa). Um centro de custo com ' +
-      '`risco_devolucao.base = "apenas_plano"` está no topo possivelmente por falta ' +
-      'de balancete importado, não por ter dinheiro sobrando.',
+      'que o banco sabe prever é bolsa). Um centro com ' +
+      '`risco_devolucao.base = "apenas_plano"` pode estar no topo por falta de ' +
+      'balancete importado, não por ter dinheiro sobrando. `motivo_codigo` diz ' +
+      'qual restrição amarrou cada "não".',
     inputSchema: {
       tipo: z.enum(['bolsa', 'compra']).describe('"bolsa" é recorrente (mensal); "compra" é pontual.'),
       valor: z.number().positive().describe('Valor mensal, para bolsa; valor total, para compra.'),
@@ -152,10 +190,10 @@ tool(
       'Bolsas de um centro de custo e/ou de um bolsista: valor mensal, início, fim e ' +
       'situação. Responde "quanto fulano recebe e até quando?" e, com ' +
       '`encerrando_em_meses`, "quais bolsas vencem nos próximos N meses?". Sem ' +
-      'filtro nenhum devolve todas as bolsas visíveis a este login. Por padrão ' +
-      'só as ativas. Não devolve CPF nem e-mail.\n\n' +
-      'Se `truncado` vier true, a lista foi cortada no teto e NÃO é o conjunto ' +
-      'completo — refine o filtro antes de contar ou somar.',
+      'filtro nenhum devolve todas as visíveis; por padrão, só as ativas. Não ' +
+      'devolve CPF nem e-mail.\n\n' +
+      '`truncado: true` significa lista cortada no teto — refine o filtro antes ' +
+      'de contar ou somar.',
     inputSchema: {
       centro_de_custo: z.string().optional().describe('Nome, código ou id do centro de custo.'),
       bolsista: z.string().optional().describe('Nome ou parte do nome do bolsista.'),
@@ -187,10 +225,9 @@ tool(
       'percentual executado. Responde "onde o dinheiro está sendo gasto?" e ' +
       '"que rubrica está estourando ou parada?".\n\n' +
       'Olha só para TRÁS: não desconta compromissos futuros já assumidos (bolsas ' +
-      'que continuarão a ser pagas). Para decidir se cabe um gasto novo, use ' +
-      'saldo_livre, que desconta. `nao_mapeados` são lançamentos do balancete ' +
-      'sem rubrica correspondente — em geral despesas tributárias — e não entram ' +
-      'em nenhuma linha de rubrica.',
+      'que continuarão a ser pagas) — para decidir se cabe um gasto novo, use ' +
+      'saldo_livre. `nao_mapeados` são lançamentos do balancete sem rubrica ' +
+      'correspondente, em geral tributários, e não entram em nenhuma linha.',
     inputSchema: {
       centro_de_custo: z.string().describe('Nome, código ou id do centro de custo.'),
     },
@@ -207,10 +244,10 @@ tool(
       'as entradas de desembolsos já registrados. Responde "até quando o dinheiro ' +
       'dura?" e "em que mês o saldo fica negativo?".\n\n' +
       'A única saída projetada é BOLSA — diária, equipamento e contrato futuros ' +
-      'não existem em tabela nenhuma, então o saldo é otimista. O ponto de ' +
-      'partida é o saldo inicial cadastrado no projeto, NÃO o saldo real da conta ' +
-      'no balancete: para a projeção ancorada no extrato, use simular_alocacao, ' +
-      'que parte do balancete e quantifica a janela cega.',
+      'não existem em tabela nenhuma, então o saldo é otimista. Parte do saldo ' +
+      'inicial cadastrado no projeto, NÃO do saldo real da conta no balancete: ' +
+      'para a projeção ancorada no extrato, use simular_alocacao, que quantifica ' +
+      'a janela cega.',
     inputSchema: {
       centro_de_custo: z.string().describe('Nome, código ou id do centro de custo.'),
       inicio: z.string().optional().describe('Início da projeção, AAAA-MM-DD. Padrão: mês corrente.'),
@@ -229,12 +266,11 @@ tool(
       'cronograma de desembolso previsto, título, tipo e valor total. Responde ' +
       '"o que foi aprovado neste projeto?" e "quanto tem previsto em ' +
       'equipamento?".\n\n' +
-      'É o ORÇADO, não o executado — nada aqui diz o que já foi gasto. Para o ' +
-      'executado use previsto_vs_realizado; para o que ainda está livre, ' +
-      'saldo_livre. Um centro sem plano ativo não tem previsto por rubrica, e ' +
-      'por isso fica de fora de saldo_livre e simular_alocacao: quando a resposta ' +
-      'vier com has_plano false, é essa a explicação para ele não aparecer nas ' +
-      'outras.',
+      'É o ORÇADO, não o executado. Para o executado use previsto_vs_realizado; ' +
+      'para o que ainda está livre, saldo_livre. `has_plano: false` é a ' +
+      'explicação de o centro não aparecer nessas duas: sem plano não há ' +
+      'previsto por rubrica. Parcelas com `valor` nulo têm só `valor_texto` ' +
+      'porque o plano as descreve sem número fechado.',
     inputSchema: {
       centro_de_custo: z.string().describe('Nome, código ou id do centro de custo.'),
       incluir_historico: z

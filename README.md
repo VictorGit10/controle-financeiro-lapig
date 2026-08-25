@@ -56,6 +56,16 @@ ControleFinanceiro/
 │   ├── 028_reconciliacao_bolsas.sql # cpf/education_level em holders, scholarship_type em scholarships, RPC apply_reconciliation
 │   ├── 029_holder_merge_reconciliacao_global.sql # apply_reconciliation global + RPC merge_holders
 │   ├── 030_delete_holder_cascade.sql # RPC delete_holder_cascade (exclusão consciente de bolsista com bolsas)
+│   ├── 031_reconciliacoes.sql      # Registro das reconciliações aplicadas + bucket bolsa-planilhas
+│   ├── 032_remove_funape_repurpose_expenses.sql # Remove funape_managed; expenses → monitoramento
+│   ├── 033_user_project_scoping.sql # Multi-tenancy: app_users, user_projects, RLS escopado
+│   ├── 034_professor_manage_projects_fechamento.sql # Professor gerencia projetos e roda o fechamento
+│   ├── 035_lockdown_anon.sql       # Fecha o role anon (EXECUTE em funções) + asserção de reauditoria
+│   ├── 036_search_path_hardening.sql # search_path fixo nas funções que ficaram sem
+│   ├── 037_linter_hardening.sql    # Warnings do Database Linter: policies e EXECUTE de triggers
+│   ├── 038_saldo_livre.sql         # RPC get_saldo_livre — previsto − realizado − compromissos
+│   ├── 039_simular_alocacao.sql    # RPC simular_alocacao — onde cabe um gasto, por risco de devolução
+│   ├── 040_panorama.sql            # RPC get_panorama + reparo de get_project_alerts
 │   └── utils/
 │       ├── generate_import_sql.py  # Gerador de SQL a partir do Excel
 │       └── check_dupes.py          # Verificador de duplicatas
@@ -169,9 +179,19 @@ CI via GitHub Actions: lint + testes em todo push/PR para main/master.
 ## Configuração
 
 1. Crie um projeto no [Supabase](https://supabase.com)
-2. Execute os scripts SQL em `/database/` na ordem numérica (001 → 030)
+2. Execute os scripts SQL em `/database/` na ordem numérica (001 → 040)
 3. Preencha as credenciais em `frontend/js/supabase-config.js`
 4. Abra `frontend/index.html` no navegador (ou sirva com qualquer servidor estático)
+
+A ordem importa e o alvo é a **última** migração, não uma parada intermediária: as
+RPCs da camada de decisão nascem nas 038/039/040, e o servidor MCP (`mcp/`) não
+sobe sem elas.
+
+### Servidor MCP (`mcp/`)
+
+Adaptador para clientes de IA sobre as RPCs de decisão (038/039/040). Autentica
+com o login de cada pessoa, então o RLS é quem decide o que aparece. Instalação,
+registro e conferência em [`mcp/README.md`](mcp/README.md).
 
 ### Edge Functions (deprecated)
 

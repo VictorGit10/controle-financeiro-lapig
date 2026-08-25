@@ -96,6 +96,31 @@ isso escreveria um `.mcp.json` dentro do repositório, que é público — a sen
 iria junto. Servidor recém-adicionado só aparece depois de reiniciar a sessão;
 `claude mcp get controle-financeiro` mostra se conectou.
 
+No **Codex** o arquivo é o `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.controle-financeiro]
+command = "node"
+args = ["C:/caminho/para/ControleFinanceiro/mcp/src/index.js"]
+
+[mcp_servers.controle-financeiro.env]
+CF_SUPABASE_URL = "https://SEU-PROJETO.supabase.co"
+CF_SUPABASE_ANON_KEY = "a anon key"
+CF_EMAIL = "voce@ufg.br"
+CF_PASSWORD = "sua senha"
+```
+
+Ou por linha de comando:
+
+```bash
+codex mcp add controle-financeiro   --env CF_SUPABASE_URL=... --env CF_EMAIL=...   -- node "<caminho absoluto>/mcp/src/index.js"
+```
+
+Vale a mesma regra do Claude Code, e pelo mesmo motivo: o Codex também aceita um
+`.codex/config.toml` **de projeto**, e é justamente esse que não serve aqui — ele
+ficaria versionado, com a senha dentro. Use o de usuário. O servidor só aparece
+depois de reiniciar o cliente.
+
 ## Tools
 
 | Tool | Para quê |
@@ -116,32 +141,94 @@ natural — inclusive porque `resumo.sem_balancete` e `resumo.balancete_defasado
 dizem quais centros estão com o dado atrasado, o que nenhuma outra consulta
 mostrava.
 
-Uma divisão que as descrições insistem: **`panorama` descreve, `simular_alocacao`
-ranqueia.** A ordem do panorama é alfabética e não significa prioridade. Dois
-rankings com critérios diferentes produziriam listas que discordam, e quem
-lesse as duas não teria como saber qual vale.
+### Onde mora o enquadramento
 
-As descrições das tools carregam o enquadramento das migrações, porque é o que o
-modelo lê: `simular_alocacao` devolve **shortlist com justificativa, não
-recomendação** (ordena por urgência de gasto, e urgência não é mérito), e
-`saldo_livre` exige declarar o que o número cobre antes de afirmar qualquer
-coisa. As de leitura declaram o que **não** cobrem: `previsto_vs_realizado` só
-olha para trás, `projecao_de_caixa` só sabe prever bolsa, `plano_de_trabalho` é
-o orçado e não o executado. O modelo conversa; **cálculo nunca** — todo número
-sai de RPC.
+O que o modelo lê está em dois lugares, e a divisão é proposital.
+
+O **`instructions` do handshake** (`INSTRUCOES`, em `src/index.js`) carrega as
+quatro regras que valem para todas as tools: não calcular (todo número sai de
+RPC), não recomendar (shortlist com justificativa — a ordem mede urgência, e
+urgência não é mérito), declarar o que o número cobre, e **`panorama` descreve /
+`simular_alocacao` ranqueia**. Ficam ali porque o cliente lê o handshake **uma
+vez, antes de escolher a tool** — que é quando essas regras ainda podem mudar a
+escolha — e porque repeti-las em nove descrições custava contexto em toda
+listagem.
+
+A **descrição de cada tool** ficou com o que é só dela: o que aquele número não
+cobre. `previsto_vs_realizado` só olha para trás; `projecao_de_caixa` só sabe
+prever bolsa e parte do saldo cadastrado, não do balancete; `plano_de_trabalho` é
+o orçado, não o executado; `compromissos_cobertura`, `situacao_dado` e
+`truncado` dizem quando o número não é o que parece. A versão curta da regra
+transversal sobrevive nas duas descrições em que a leitura errada é mais
+provável (`panorama` e `simular_alocacao`), para um cliente que ignore
+`instructions` ainda não ler descrição como ranking.
+
+As nove tools declaram `readOnlyHint` — nenhuma escreve. É dica para o cliente
+poder dispensar confirmação, **não** barreira: a barreira é o RLS.
 
 CPF e e-mail de bolsista não saem daqui: as consultas selecionam colunas
-explícitas. Nome de bolsista sai — aparece nas bolsas e dentro das mensagens de
-alerta do panorama, que é o conteúdo do alerta.
+explícitas, e `plano_de_trabalho` projeta os campos em vez de devolver a linha
+da tabela (o `to_jsonb(pt.*)` da RPC traz `raw_extraction`, que é uma segunda
+cópia das rubricas e desembolsos já estruturados). Nome de bolsista sai —
+aparece nas bolsas e dentro das mensagens de alerta do panorama, que é o
+conteúdo do alerta.
 
 `panorama` exige a **migração 040**; as demais, as 038/039. Se ela responder
 erro de função inexistente, falta rodar `database/040_panorama.sql`.
 
+### Segunda rodada: enxugar as respostas (pendente)
+
+Em uso real, as respostas do modelo saem **prolixas e carregadas** — despejam
+ressalva que não muda decisão nenhuma. Mover o enquadramento transversal para o
+`instructions` foi o primeiro corte (nove cópias viraram uma, lida antes da
+escolha da tool) e veio junto com um parágrafo "como responder": o número pedido
+e a ressalva que muda a leitura dele, não o JSON inteiro. Não é o suficiente, e
+vale registrar por que antes de a próxima pessoa mexer no lugar errado.
+
+**A pista é que o texto provavelmente não nasce aqui.** Toda RPC de decisão
+devolve `nota`, e a 039 devolve também `avisos` e `resumo.observacao` — campos
+escritos em tom de "repasse isto", que chegam ao modelo **em toda chamada**,
+dentro do payload, e não só quando ele escolhe a tool. É texto que compete com o
+próprio dado. Contá-los é o primeiro passo de qualquer medição.
+
+Onde isso complica: esses campos moram nas migrações **038/039/040**, não no
+adaptador. Enxugá-los é mexer na camada que a regra do "zero lógica financeira
+no adaptador" existe para proteger — e a mesma nota é o que vai chegar à aba do
+site na fase 3. Portanto:
+
+- **Não** resolva o problema podando o texto no `tools.js`. Isso faz o MCP e o
+  site passarem a dizer coisas diferentes sobre o mesmo número, que é exatamente
+  a divergência que a arquitetura evita.
+- O ajuste, se for feito, é **na migração**, com a consciência de que muda os
+  dois consumidores de uma vez. É decisão deliberada, não tweak.
+- Distinga as duas coisas que a nota faz hoje: **declarar cobertura** (o que o
+  número não cobre — isso precisa continuar chegando, é requisito das 038/039) e
+  **instruir o leitor** ("repasse", "não omita", "exponha as opções"). A segunda
+  metade é enquadramento e já vive no `instructions`; a primeira é dado.
+
+**Antes de mexer, fixe a medição.** Hoje não há como dizer se uma mudança
+ajudou: as respostas variam por pergunta. Comece por duas ou três perguntas de
+referência ("como estão os projetos?", "onde coloco uma bolsa de R$ 2.000?",
+"quanto sobra em X?"), guarde as respostas atuais, e compare depois. Sem isso a
+segunda rodada vira troca de opinião sobre redação.
+
 ## Conferência
 
+São duas, e a divisão é por precisar ou não de banco.
+
 ```bash
-npm run smoke
+npm test        # contrato, sem credencial nenhuma  (roda no CI)
+npm run smoke   # ponta a ponta, com login de verdade
 ```
+
+O `npm test` sobe o servidor como cliente MCP real e confere o que não depende de
+dado: as 9 tools, as regras transversais no `instructions` do handshake, o
+`readOnlyHint`, os campos obrigatórios do schema e a mensagem de erro de quem
+esquece as `CF_*`. Ele funciona sem segredo porque o login é **preguiçoso** —
+`config()` só é lida na primeira chamada de tool, então handshake e `listTools`
+não tocam no Supabase. É o que o CI roda (job `mcp` em `.github/workflows/ci.yml`).
+
+O `npm run smoke` é o que exige banco:
 
 Sobe o servidor como um cliente MCP de verdade (subprocesso via stdio) e
 exercita as tools pelo mesmo caminho do Claude Desktop: protocolo, login no
@@ -154,15 +241,34 @@ CF_EMAIL=professor@local.test CF_PASSWORD=local-dev-123456 \
 npm run smoke
 ```
 
-Vale rodar com os **dois** logins: como professor e como admin. Um resultado
-vazio pode ser correto e ainda assim esconder que a conferência passou a vazio —
-no ambiente local, por exemplo, os 7 centros de custo do professor não têm bolsa
-nenhuma, então só o login de admin exercita `consultar_bolsas` com dado real.
+Rode com os **dois** logins, professor e admin — não é zelo, é o desenho do
+teste: as conferências de escopo têm expectativas **opostas** conforme o papel, e
+é a rodada de professor que prova a barreira. A de admin é o controle (se ele
+fosse barrado, o erro estaria do outro lado).
 
-O escopo entre usuários se verifica passando o **uuid** de um centro de custo
-alheio (o resolvedor por nome nem enxerga o que está fora do escopo): o professor
-recebe `Acesso negado ao projeto …`, vindo do guard `assert_project_allowed`, e o
-admin passa.
+O escopo é conferido por dois caminhos, porque são dois mecanismos:
+
+- **RPC `security definer` com guard** (`saldo_livre`): o escopo aparece como
+  **erro** — o professor recebe `Acesso negado ao projeto …`, de
+  `assert_project_allowed`.
+- **RPC `security invoker`** (`panorama`): o escopo não levanta exceção, ele
+  **omite a linha**. Um vazamento aqui passaria despercebido pelo teste do guard.
+
+O uuid é passado direto porque o resolvedor por nome nem enxerga o que está fora
+do escopo — quem está sendo testado é o banco, não o adaptador. Sem configuração,
+o teste usa um uuid inexistente, que percorre o mesmo caminho (não-admin só passa
+pelo que está em `allowed_project_ids()`). Para a versão forte, aponte um centro
+de custo real de outra pessoa:
+
+```bash
+CF_SMOKE_PROJETO_ALHEIO=<uuid de um centro de custo fora deste login> npm run smoke
+```
+
+Conferência marcada **`ok~`** passou sem dado nenhum para exercitar — não é
+falha, pode ser o estado correto daquela base, mas também não é garantia: no
+ambiente local, por exemplo, os 7 centros de custo do professor não têm bolsa
+nenhuma, então "não devolve CPF" ali é verdade vazia e só a rodada de admin
+exercita `consultar_bolsas` com dado real. O rodapé lista quais foram.
 
 ## Nota sobre stdio
 

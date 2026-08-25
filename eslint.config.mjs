@@ -83,6 +83,24 @@ export default [
     },
   },
   {
+    // Servidor MCP: pacote Node próprio, ES modules, top-level await. Nada a ver
+    // com o frontend sem build — daí o bloco separado em vez de esticar o de cima.
+    files: ["mcp/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: { ...globals.node },
+    },
+    rules: {
+      "no-undef": "error",
+      "no-unused-vars": ["warn", { args: "none" }],
+      "no-dupe-keys": "error",
+      "no-unreachable": "error",
+      "no-async-promise-executor": "error",
+      eqeqeq: ["warn", "smart"],
+    },
+  },
+  {
     files: [
       "frontend/js/pure-fns.js",
       "frontend/js/parsers/**/*.js",

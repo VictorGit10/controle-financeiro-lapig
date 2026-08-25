@@ -4,7 +4,7 @@
   "description": "Sistema de controle financeiro para gestão de projetos e bolsas do Laboratório de Processamento de Imagens e Geoprocessamento (LAPIG / UFG).",
   "main": "index.js",
   "scripts": {
-    "lint": "eslint frontend/js/",
+    "lint": "eslint frontend/js/ mcp/",
     "test": "vitest run",
     "test:watch": "vitest"
   },

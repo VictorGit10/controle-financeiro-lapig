@@ -18,8 +18,33 @@ jobs:
 
       - run: npm ci
 
+      # Cobre frontend/js/ e mcp/ — o pacote do MCP tem bloco próprio no
+      # eslint.config.mjs (Node, ES modules) e não precisa das deps dele para
+      # ser lintado.
       - name: Lint
         run: npm run lint
 
       - name: Test
+        run: npm test
+
+  # O MCP é um pacote Node separado, com dependências próprias. O que roda aqui
+  # é a conferência de contrato: as 9 tools, o enquadramento do handshake, os
+  # hints e o schema de entrada — tudo sem tocar no banco, porque o login do
+  # servidor é preguiçoso. O `npm run smoke`, que exige credencial e dado real,
+  # continua sendo rodado à mão, com os dois logins.
+  mcp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Contrato MCP (offline)
         run: npm test

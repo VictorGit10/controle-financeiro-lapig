@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "test": "node scripts/offline.js",
     "smoke": "node scripts/smoke.js"
   },
   "license": "ISC",
