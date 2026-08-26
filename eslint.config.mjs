@@ -29,6 +29,7 @@ export default [
         ExpensesPage: "writable",
         PlanoTrabalhoPage: "writable",
         FechamentoPage: "writable",
+        AssistentePage: "writable",
         ImportQueue: "writable",
         CrudPage: "writable",
         ChartBuilder: "writable",
@@ -55,6 +56,10 @@ export default [
         mountDocxSplitView: "readonly",
         parseBolsaSpreadsheet: "readonly",
         compareBolsaData: "readonly",
+        // camada de IA (window-bridged via <script type="module">)
+        CFTools: "readonly",
+        CFAgent: "readonly",
+        CFMarkdown: "readonly",
         // supabase-config.js utilities (attached to window)
         showToast: "readonly",
         createModal: "readonly",
@@ -105,9 +110,12 @@ export default [
       "frontend/js/pure-fns.js",
       "frontend/js/parsers/**/*.js",
       "frontend/js/components/**/*.js",
+      "frontend/js/ai/**/*.js",
     ],
     languageOptions: {
-      ecmaVersion: 2021,
+      // 2022 pelo `catch {}` sem binding e pelo separador numérico (60_000),
+      // ambos usados em js/ai/.
+      ecmaVersion: 2022,
       sourceType: "module",
     },
   },

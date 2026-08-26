@@ -145,6 +145,12 @@
 
           <li class="sidebar__section">Acompanhamento</li>
           <li>
+            <button class="sidebar__link" data-page="assistente" id="nav-assistente">
+              <i data-lucide="sparkles"></i>
+              <span>Assistente</span>
+            </button>
+          </li>
+          <li>
             <button class="sidebar__link sidebar__link--active" data-page="projetos" id="nav-projetos">
               <i data-lucide="folder-kanban"></i>
               <span>Projetos</span>
@@ -261,6 +267,11 @@
   <script type="module" src="js/components/docx-split-view.js"></script>
   <script type="module" src="js/parsers/bolsa-parser.js"></script>
   <script type="module" src="js/parsers/bolsa-comparator.js"></script>
+  <!-- Camada de IA (fase 3): tools sobre as RPCs de decisão + laço de tool calling.
+       agent.js importa tools.js; os dois são listados por clareza. -->
+  <script type="module" src="js/ai/tools.js"></script>
+  <script type="module" src="js/ai/agent.js"></script>
+  <script type="module" src="js/ai/markdown.js"></script>
   <script src="js/supabase-config.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/simulation.js"></script>
@@ -278,6 +289,7 @@
   <script src="js/pages/plano-trabalho.js"></script>
   <script src="js/pages/fechamento.js"></script>
   <script src="js/pages/hub.js"></script>
+  <script src="js/pages/assistente.js"></script>
   <script src="js/pages/usuarios.js"></script>
   <script src="js/app.js"></script>
 </body>
