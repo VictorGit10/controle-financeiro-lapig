@@ -187,6 +187,12 @@ const HubPage = (() => {
           <span class="badge badge--${project.active ? 'active' : 'ended'}" style="flex-shrink:0;">
             ${project.active ? 'Ativo' : 'Inativo'}
           </span>
+          ${project.drive_folder_url ? `
+          <a class="hub-drive-link" href="${escapeAttr(project.drive_folder_url)}"
+             target="_blank" rel="noopener noreferrer"
+             title="Abrir pasta do projeto no Drive">
+            <i data-lucide="folder-open"></i> Drive
+          </a>` : ''}
         </div>
       </div>
 
