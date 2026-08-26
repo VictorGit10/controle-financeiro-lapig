@@ -5,11 +5,18 @@ num centro de custo, onde cabe uma bolsa nova, quanto um bolsista recebe e até
 quando.
 
 É a **fase 2** da camada de IA. A fase 1 são as RPCs de decisão no Postgres
-(migrações 038 e 039); a fase 3 será uma aba no próprio site. Este servidor é um
-adaptador fino sobre as mesmas RPCs — **não** tem lógica financeira, e não
-deveria ganhar nenhuma: a aba do site vai consumir as mesmas funções, e
-inteligência duplicada no adaptador viraria duas versões divergentes da mesma
-conta. Se um número está errado, o conserto é na migração.
+(migrações 038 e 039); a fase 3 é a aba **Assistente** no próprio site
+(`frontend/js/ai/`), já pronta. Este servidor é um adaptador fino sobre as
+mesmas RPCs — **não** tem lógica financeira, e não deveria ganhar nenhuma: a aba
+do site consome as mesmas funções, e inteligência duplicada no adaptador viraria
+duas versões divergentes da mesma conta. Se um número está errado, o conserto é
+na migração.
+
+Os dois adaptadores não podem derivar um do outro em silêncio, e o que impede
+isso é um teste: `tests/ai-tools.test.js` (na raiz do repo) lê **este** fonte
+como texto e trava contra o do site a lista de tools e o bloco das quatro regras
+transversais, palavra por palavra. Acrescentar tool aqui sem acrescentar lá — ou
+reescrever uma das regras num só lado — quebra o `npm test` da raiz.
 
 As RPCs estão aplicadas na produção: `get_saldo_livre` (038) e
 `simular_alocacao` (039) desde 2026-08-11, `get_panorama` (040) desde
@@ -193,8 +200,9 @@ próprio dado. Contá-los é o primeiro passo de qualquer medição.
 
 Onde isso complica: esses campos moram nas migrações **038/039/040**, não no
 adaptador. Enxugá-los é mexer na camada que a regra do "zero lógica financeira
-no adaptador" existe para proteger — e a mesma nota é o que vai chegar à aba do
-site na fase 3. Portanto:
+no adaptador" existe para proteger — e a aba do site (fase 3) já está de pé,
+recebendo a mesma nota pelo mesmo payload, de modo que agora qualquer corte
+muda **dois** consumidores de uma vez. Portanto:
 
 - **Não** resolva o problema podando o texto no `tools.js`. Isso faz o MCP e o
   site passarem a dizer coisas diferentes sobre o mesmo número, que é exatamente
@@ -210,7 +218,11 @@ site na fase 3. Portanto:
 ajudou: as respostas variam por pergunta. Comece por duas ou três perguntas de
 referência ("como estão os projetos?", "onde coloco uma bolsa de R$ 2.000?",
 "quanto sobra em X?"), guarde as respostas atuais, e compare depois. Sem isso a
-segunda rodada vira troca de opinião sobre redação.
+segunda rodada vira troca de opinião sobre redação. A aba Assistente do site já
+oferece essas mesmas três como sugestões na tela de boas-vindas, justamente para
+a comparação ficar barata o bastante para alguém de fato fazer — e ali há um
+seletor de modelo, então a mesma pergunta pode ser comparada entre modelos sem
+redeploy.
 
 ## Conferência
 

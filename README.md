@@ -100,8 +100,13 @@ ControleFinanceiro/
 │   │       ├── funding.js      # Desembolsos (CrudPage)
 │   │       ├── expenses.js     # Gastos gerais (CrudPage)
 │   │       ├── hub.js         # Visão do Projeto (experimental, somente leitura)
+│   │       ├── assistente.js  # Assistente: conversa sobre os dados (fase 3 da camada de IA)
 │   │       └── plano-trabalho.js  # Plano de Trabalho + Balancete (3 abas, import em lote)
 │   │
+│   │   ├── ai/
+│   │   │   ├── tools.js            # As 9 tools sobre as RPCs de decisão (irmão de mcp/src/tools.js)
+│   │   │   ├── agent.js            # Laço de tool calling + enquadramento (system prompt)
+│   │   │   └── markdown.js         # Markdown mínimo da resposta (escapa antes de formatar)
 │   │   ├── components/
 │   │   │   ├── docx-split-view.js  # Split-view de revisão de DOCX
 │   │   │   └── pdf-split-view.js   # Split-view de revisão de PDF
@@ -121,14 +126,18 @@ ControleFinanceiro/
 │
 ├── supabase/
 │   └── functions/
-│       ├── extract-plano-trabalho/ # Edge Function: DOCX → JSON (Ollama)
-│       └── extract-balancete/      # Edge Function: PDF → JSON (Ollama)
+│       ├── assistente/             # Edge Function: proxy do Ollama Cloud (guarda a chave)
+│       ├── extract-plano-trabalho/ # Edge Function: DOCX → JSON (Ollama) — deprecated
+│       └── extract-balancete/      # Edge Function: PDF → JSON (Ollama) — deprecated
 │
 ├── tests/
 │   ├── simulation.test.js      # Testes do SimulationEngine
 │   ├── utils.test.js            # Testes de funções utilitárias
 │   ├── pt-parser.test.js        # Testes do parser de Plano de Trabalho
 │   ├── balancete-parser.test.js # Testes do parser de Balancete
+│   ├── ai-tools.test.js         # Contrato das tools + trava anti-deriva contra o MCP
+│   ├── ai-agent.test.js         # Laço de tool calling (modelo e banco dublês)
+│   ├── ai-markdown.test.js      # Escape da resposta do modelo (XSS)
 │   ├── fixtures/                # HTMLs de exemplo de Planos de Trabalho reais
 │   └── sql/
 │       └── test_rpcs.sql        # Testes de integração das RPCs
@@ -193,14 +202,28 @@ Adaptador para clientes de IA sobre as RPCs de decisão (038/039/040). Autentica
 com o login de cada pessoa, então o RLS é quem decide o que aparece. Instalação,
 registro e conferência em [`mcp/README.md`](mcp/README.md).
 
-### Edge Functions (deprecated)
+### Assistente (`frontend/js/ai/` + Edge Function `assistente`)
+
+Aba de conversa sobre os dados do sistema — a fase 3 da camada de IA, sobre as
+mesmas RPCs de decisão que o MCP. O laço de tool calling roda **no browser**, e
+as tools consultam as RPCs pelo `supabaseClient` já logado: mesmo JWT, mesmo
+RLS, mesmo caminho das outras telas. A Edge Function
+[`assistente`](supabase/functions/assistente/README.md) ficou só com o que não
+pode ir no bundle público — a `OLLAMA_API_KEY` — e com a allowlist de modelos
+que alimenta o seletor da tela.
+
+A tela mostra **quais RPCs foram consultadas**, com o JSON cru dobrável embaixo
+de cada uma. Isso não é enfeite: a regra da camada é que todo número sai de RPC,
+e o passo visível é como se confere isso sem acreditar na palavra do modelo.
+
+### Edge Functions de extração (deprecated)
 
 As Edge Functions `extract-plano-trabalho` e `extract-balancete` eram proxies para o Ollama Cloud (`kimi-k2.6:cloud`) e estão **deprecated desde 2026-05**. O frontend não as chama mais — a extração é 100% determinística via parsers no browser:
 
 - **DOCX** → `mammoth.browser.min.js` (CDN) extrai HTML → `pt-parser.js` parseia tabelas de rubricas e desembolsos
 - **PDF** → `pdfjsLib` (CDN `pdfjs-dist@3.11.174` + worker) extrai texto com quebras preservadas pela coordenada Y → `balancete-parser.js` parseia lançamentos contábeis
 
-As funções permanecem em `supabase/functions/` como histórico. Se necessário, deploy manual via `supabase functions deploy <name>`. Secret `OLLAMA_API_KEY` continua configurado mas não é consumido em runtime.
+As funções permanecem em `supabase/functions/` como histórico. Se necessário, deploy manual via `supabase functions deploy <name>`. O secret `OLLAMA_API_KEY` que elas usavam voltou a ser consumido — agora pela Edge Function `assistente`, que é a única a chamar o Ollama em runtime.
 
 **Bibliotecas para fallback offline:**
 - `mammoth.browser.min.js` de `https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js`

@@ -152,3 +152,15 @@ Gerencia o **papel** (admin/professor) e os **centros de custo** permitidos por 
 - **Criação de logins** — não é feita aqui; continua no painel do Supabase (Authentication → Users → Add user). O trigger `on_auth_user_created` (mig. 033) cria a linha em `app_users` automaticamente (papel `professor`, sem projetos), e ela aparece nesta página.
 
 **Globais usadas:** `escapeAttr`, `formatDate`, `showToast`, `createModal`, `supabaseClient`, `Auth.getUser()`.
+## AssistentePage (`assistente.js`) — fase 3 da camada de IA
+
+Aba de conversa sobre os dados. A página é fina de propósito: junta o laço (`js/ai/agent.js`) com as tools (`js/ai/tools.js`) e mostra o passo a passo. Toda a lógica financeira mora nas RPCs 038/039/040 — a mesma regra do servidor MCP, e pelo mesmo motivo (duas implementações da mesma conta divergiriam).
+
+- **Passo a passo visível** — cada consulta vira uma linha (`chat-passo`) com o rótulo da tool, os argumentos, o tempo e um `<details>` com o **JSON cru** que a RPC devolveu. Não é enfeite: a regra da camada é que todo número sai de RPC, e o passo é como quem lê confere isso sem acreditar na palavra do modelo. Um número na resposta sem passo correspondente é invenção, e a tela deixa isso visível. O estado aberto/fechado dos `<details>` sobrevive ao redesenho (a tela se redesenha a cada evento do laço).
+- **Seletor de modelo** — nas `actions` da topbar, preenchido pela allowlist que a Edge Function devolve (`{ acao: 'modelos' }`), guardado em `cf_assistente_modelo`. A allowlist é do servidor porque o frontend não deve versionar nome de modelo.
+- **Perguntas de referência** — as três sugestões da tela de boas-vindas são as mesmas fixadas em `mcp/README.md` ("Segunda rodada") como régua para comparar respostas antes e depois de mexer no prompt. Deixá-las à mão é o que torna a comparação barata o bastante para alguém de fato fazer.
+- **Conversa** — vive na memória do módulo: sobrevive à navegação entre telas (o IIFE não recarrega) e morre com o refresh. Nada é gravado no banco. "Nova conversa" reinicia com o system prompt. Em erro no meio de uma rodada, o histórico volta inteiro ao ponto anterior — remover só a última pergunta deixaria um `assistant` com `tool_calls` sem as respostas `tool` correspondentes, e o par quebrado derruba a chamada seguinte.
+- **Resposta** — renderizada por `CFMarkdown.renderMarkdown` (negrito, código, listas, parágrafos). Escapa **antes** de formatar, e não trata `_` como itálico: os nomes de campo das RPCs são snake_case e seriam despedaçados justamente nos termos que a resposta mais cita.
+- **Banner de indisponível** — se a Edge Function não estiver publicada, a tela diz o comando do deploy em vez de falhar em silêncio, com botão "Tentar de novo".
+
+**Globais usadas:** `CFAgent`, `CFTools`, `CFMarkdown`, `escapeAttr`, `showToast`, `supabaseClient` (indiretamente, pelas tools), `Router`.
