@@ -34,6 +34,10 @@ const MonitoramentoPage = (() => {
     statsRpc: 'monitoramento_stats',
     searchField: 'observacao',
     searchPlaceholder: 'Buscar observações...',
+    // Chega já no projeto atual quando se vem do botão "Abrir Observações" da
+    // Visão do Projeto. "Todos os projetos" continua a um clique na toolbar.
+    projectFilter: true,
+    statsFromFilteredCount: true,
 
     columns: [
       { label: 'Data', render: r => formatDate(r.note_date), csvRender: r => r.note_date },

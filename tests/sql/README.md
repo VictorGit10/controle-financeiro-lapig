@@ -18,6 +18,7 @@ inspeção estática; só falhava quando alguém pedia um alerta. Ver
 | [`test_simular_alocacao.sql`](test_simular_alocacao.sql) | `simular_alocacao` — as três restrições e os vereditos | migrações 038 + 039 |
 | [`test_panorama.sql`](test_panorama.sql) | reparo de `get_project_alerts` + `get_panorama` | migração 040 |
 | [`test_041_drive_folder.sql`](test_041_drive_folder.sql) | `set_project_drive_folder`, `set_project_code`, auditoria estendida | migração 041 |
+| `test_042_*.sql` → `test_046_*.sql` | cadeia de saldo derivado do balancete, bloqueio da escrita manual, rendimento informativo e DELETE do último saldo | migrações 042–046 + stubs correspondentes |
 
 ## Como rodar
 
@@ -30,7 +31,8 @@ UUIDs reais de usuário e de projeto. Substitua os placeholders **no editor**,
 nunca no arquivo versionado: o repositório é público e esses identificadores não
 entram nele.
 
-> ⚠️ `test_041_drive_folder.sql` **escreve e apaga dados**. Rode só no container
+> ⚠️ `test_041_drive_folder.sql` e os roteiros `test_042_*.sql` →
+> `test_046_*.sql` **escrevem e apagam dados**. Rode-os só no container
 > descartável do nível sintético
 > ([`tools/replica-local/README.md`](../../tools/replica-local/README.md)),
 > nunca contra produção. Os demais são de leitura.

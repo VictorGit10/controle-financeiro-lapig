@@ -117,7 +117,7 @@ const FechamentoPage = (() => {
         <div class="alert-banner__body">
           <strong>Status das bolsas indisponível</strong>
           <div style="font-size:0.85rem;color:var(--text-secondary);">
-            Execute a migração <code>031_reconciliacoes.sql</code> no Supabase para registrar as reconciliações de bolsas por competência.
+            ${detalheTecnico('Execute a migração <code>031_reconciliacoes.sql</code> no Supabase para registrar as reconciliações de bolsas por competência.')}
           </div>
         </div>
       </div>` : '';

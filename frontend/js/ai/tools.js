@@ -56,9 +56,19 @@ function traduzir(error, contexto) {
     return new Error(`${msg}. A sessão não tem permissão de executar essa função.`);
   }
   if (error.code === 'PGRST202') {
+    // Este texto volta ao modelo como resultado da tool e costuma ser repetido
+    // na resposta. Nome de migração só ajuda quem administra o banco.
+    //
+    // A cópia do MCP (`mcp/src/tools.js`) mantém o texto técnico de propósito:
+    // lá não existe sessão de navegador com papel, e quem configurou o cliente
+    // MCP com as próprias credenciais é justamente quem consegue agir sobre a
+    // migração. A divergência é de público, não de regra.
+    const admin = typeof Auth !== 'undefined' && Auth.isAdmin?.();
     return new Error(
-      `${msg}. Essa RPC não existe neste banco — falta rodar a migração ` +
-        'correspondente (038/039/040) em database/.'
+      admin
+        ? `${msg}. Essa RPC não existe neste banco — falta rodar a migração ` +
+          'correspondente (038/039/040) em database/.'
+        : `${msg}. Esta consulta está indisponível neste sistema; avise o administrador.`
     );
   }
   return new Error(`${contexto}: ${msg}${error.hint ? ` (${error.hint})` : ''}`);

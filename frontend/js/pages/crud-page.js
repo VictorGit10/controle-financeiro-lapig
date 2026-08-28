@@ -26,7 +26,19 @@ function CrudPage(config) {
     onDelete = null,
     loadExtra = null,
     allowDelete = true,
+    // Opt-in: acrescenta um seletor de projeto à toolbar, ligado ao "projeto
+    // atual" do app (cf_selected_project_id). Existe porque as telas para as
+    // quais o hub oferece "Abrir" precisam chegar já no projeto certo — abrir
+    // a lista global depois de escolher um projeto é perder o contexto que o
+    // botão prometeu. Só páginas cuja tabela tem `project_id`.
+    projectFilter = false,
+    // Algumas RPCs de estatística são globais e não aceitam project_id. Para
+    // páginas cujo único card é a contagem, usa o count exato da própria query
+    // quando existe busca/filtro, mantendo card e lista no mesmo recorte.
+    statsFromFilteredCount = false,
   } = config;
+
+  const PROJECT_KEY = 'cf_selected_project_id';
 
   const art = gender === 'f' ? 'a' : 'o';
 
@@ -37,6 +49,7 @@ function CrudPage(config) {
   let totalCount = 0;
   let searchQuery = '';
   let _searchTimer = null;
+  let filterProjectId = '';
 
   async function loadProjects() {
     const result = await supabaseClient.from('projects').select('id, name').order('name');
@@ -48,6 +61,13 @@ function CrudPage(config) {
     await loadProjects();
     currentPage = 0;
     searchQuery = '';
+    // Relido a cada entrada na tela: o projeto atual pode ter mudado em outra
+    // aba desde a última visita. Projeto que sumiu do escopo volta a "todos",
+    // senão a lista viria vazia sem explicação.
+    filterProjectId = projectFilter ? (localStorage.getItem(PROJECT_KEY) || '') : '';
+    if (filterProjectId && !projectsCache.some(p => p.id === filterProjectId)) {
+      filterProjectId = '';
+    }
     await refresh();
   }
 
@@ -65,6 +85,10 @@ function CrudPage(config) {
       query = query.ilike(searchField, `%${searchQuery}%`);
     }
 
+    if (filterProjectId) {
+      query = query.eq('project_id', filterProjectId);
+    }
+
     const { data, error, count } = await query;
 
     if (error) {
@@ -77,12 +101,17 @@ function CrudPage(config) {
 
     // Stats via RPC (no unpaginated query)
     let statsData = null;
-    if (statsRpc) {
+    if (statsFromFilteredCount && (filterProjectId || searchQuery)) {
+      statsData = { count: totalCount };
+    } else if (statsRpc) {
       const { data: rpcResult } = await supabaseClient.rpc(statsRpc);
       statsData = rpcResult;
     }
 
-    if (!records.length && !searchQuery) {
+    // Com busca OU filtro de projeto ativo, o vazio é do recorte, não da
+    // tabela: cair no empty-state esconderia a toolbar e prenderia o usuário
+    // num filtro que ele não teria como desfazer.
+    if (!records.length && !searchQuery && !filterProjectId) {
       containerEl.innerHTML = `
         <div class="empty-state">
           <i data-lucide="${entityIcon}" class="empty-state__icon"></i>
@@ -104,11 +133,18 @@ function CrudPage(config) {
     if (!containerEl.querySelector('#crud-list-area')) {
       containerEl.innerHTML = `
         <div id="crud-stats-area"></div>
-        ${searchable ? `
+        ${searchable || projectFilter ? `
           <div class="holders-toolbar" style="margin-top: 16px;">
-            <input type="text" class="form-input holders-toolbar__search"
-              placeholder="${searchPlaceholder}" value="${escapeAttr(searchQuery)}"
-              oninput="${globalName}.onSearch(this.value)">
+            ${searchable ? `
+              <input type="text" class="form-input holders-toolbar__search"
+                placeholder="${searchPlaceholder}" value="${escapeAttr(searchQuery)}"
+                oninput="${globalName}.onSearch(this.value)">` : ''}
+            ${projectFilter ? `
+              <select class="form-input holders-toolbar__filter"
+                onchange="${globalName}.onProjectFilter(this.value)">
+                <option value="">Todos os projetos</option>
+                ${projectsCache.map(p => `<option value="${escapeAttr(p.id)}" ${filterProjectId === p.id ? 'selected' : ''}>${escapeAttr(p.name)}</option>`).join('')}
+              </select>` : ''}
             <button class="btn btn--secondary btn--sm" onclick="${globalName}.exportCSV()" title="Exportar CSV">
               <i data-lucide="download" style="width:16px;height:16px;"></i> Exportar
             </button>
@@ -196,6 +232,17 @@ function CrudPage(config) {
     _searchTimer = setTimeout(() => refresh(), 300);
   }
 
+  function onProjectFilter(value) {
+    filterProjectId = value;
+    currentPage = 0;
+    // "Todos os projetos" amplia esta lista sem esquecer o projeto atual do
+    // app — é o mesmo contrato da aba Bolsistas.
+    if (value) localStorage.setItem(PROJECT_KEY, value);
+    // O shell da toolbar é recriado só quando não existe; o <select> já está
+    // com o valor certo (foi o usuário quem mudou), então basta a lista.
+    refresh();
+  }
+
   function goToPage(page) {
     const totalPages = Math.ceil(totalCount / pageSize);
     if (page < 0 || page >= totalPages) return;
@@ -204,10 +251,15 @@ function CrudPage(config) {
   }
 
   async function exportCSV() {
-    const { data, error } = await supabaseClient
+    // Exporta o que está em tela, não a tabela inteira: um CSV que ignora o
+    // filtro visível é uma surpresa silenciosa.
+    let q = supabaseClient
       .from(tableName)
       .select(selectClause)
       .order(dateField, { ascending: false });
+    if (searchQuery) q = q.ilike(searchField, `%${searchQuery}%`);
+    if (filterProjectId) q = q.eq('project_id', filterProjectId);
+    const { data, error } = await q;
 
     // `error` e `!data` são casos diferentes: sem esta separação, uma
     // resposta sem erro e sem linhas caía no `error.message` e lançava
@@ -312,5 +364,5 @@ function CrudPage(config) {
     }
   }
 
-  return { load, openForm, remove, refresh, onSearch, goToPage, exportCSV };
+  return { load, openForm, remove, refresh, onSearch, onProjectFilter, goToPage, exportCSV };
 }

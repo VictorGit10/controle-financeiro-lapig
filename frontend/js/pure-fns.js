@@ -12,6 +12,50 @@ export function formatBRL(value) {
 }
 
 /**
+ * Legenda da composição do saldo: quanto dele é rendimento de aplicação.
+ *
+ * O rendimento tem regra de uso própria, então precisa aparecer — mas ele já
+ * está DENTRO do saldo disponível (ver o cabeçalho da migração 043). Esta
+ * função só descreve; quem somar `rendimento_informativo` ao saldo reintroduz
+ * a duplicação que a 043 removeu.
+ *
+ * Devolve `null` (nada a exibir) para ausência de dado. `null` e `0` são casos
+ * diferentes de propósito: balancete cujo rodapé não foi lido por inteiro não
+ * sabe o rendimento, e "R$ 0,00 de rendimento" seria uma afirmação falsa.
+ * Zero explícito também não vira legenda — não há composição a mostrar.
+ *
+ * @param {number|null|undefined} valor  project_balances/projects.rendimento_informativo
+ * @returns {string|null}
+ */
+export function formatRendimento(valor) {
+  if (valor === null || valor === undefined || valor === '') return null;
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `inclui ${formatBRL(n)} de rendimento`;
+}
+
+/**
+ * Consolida a composição informativa de vários saldos sem transformar ausência
+ * de dado em zero. O total devolvido contém apenas valores conhecidos; por isso
+ * quem o exibe também precisa consultar `unknownCount`.
+ */
+export function summarizeRendimento(projects = []) {
+  return projects.reduce((summary, project) => {
+    const raw = project?.rendimento_informativo;
+    const value = raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+
+    if (!Number.isFinite(value)) {
+      summary.unknownCount += 1;
+      return summary;
+    }
+
+    summary.knownCount += 1;
+    summary.total += value;
+    return summary;
+  }, { total: 0, knownCount: 0, unknownCount: 0 });
+}
+
+/**
  * Converte texto monetário em número.
  *
  * AMBIGUIDADE DELIBERADA: um ponto único sem vírgula é lido como DECIMAL,
@@ -233,6 +277,6 @@ if (typeof window !== 'undefined') {
   Object.assign(window, {
     formatBRL, parseBRL, escapeAttr, escapeAttrJs, formatDate, toInputDate, localISODate,
     inferBalanceStatus, generateMonthSeries, calcProjectMonthly,
-    diffProjections,
+    diffProjections, formatRendimento, summarizeRendimento,
   });
 }

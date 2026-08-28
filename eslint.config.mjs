@@ -33,6 +33,7 @@ export default [
         AssistentePage: "writable",
         UsuariosPage: "writable",
         ImportQueue: "writable",
+        Notifications: "writable",
         CrudPage: "writable",
         ChartBuilder: "writable",
         SimulationEngine: "writable",
@@ -48,6 +49,8 @@ export default [
         calcProjectMonthly: "readonly",
         diffProjections: "readonly",
         parseBRL: "readonly",
+        formatRendimento: "readonly",
+        summarizeRendimento: "readonly",
         // parsers + components (window-bridged via <script type="module">)
         parseBalanceteText: "readonly",
         parsePtFromHtml: "readonly",
@@ -68,6 +71,8 @@ export default [
         confirmAction: "readonly",
         handleSupabaseResponse: "readonly",
         exportToCSV: "readonly",
+        rendimentoLegendaHTML: "readonly",
+        detalheTecnico: "readonly",
       },
     },
     rules: {

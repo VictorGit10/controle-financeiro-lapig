@@ -154,10 +154,10 @@ const AssistentePage = (() => {
           <strong>Assistente indisponível.</strong>
           <p>${escapeAttr(erroSetup)}</p>
           <p class="chat__banner-dica">
-            A aba depende da Edge Function <code>assistente</code>, que guarda a
+            ${detalheTecnico(`A aba depende da Edge Function <code>assistente</code>, que guarda a
             chave do Ollama Cloud. Publique com
             <code>supabase functions deploy assistente</code> e confira o secret
-            <code>OLLAMA_API_KEY</code>.
+            <code>OLLAMA_API_KEY</code>.`)}
           </p>
           <button class="btn btn--secondary btn--sm" id="chat-retry">
             <i data-lucide="refresh-cw"></i> Tentar de novo

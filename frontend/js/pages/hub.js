@@ -25,6 +25,12 @@ const HubPage = (() => {
   let allProjects       = [];
   let selectedProjectId = null;
 
+  // Quais consultas falharam. Antes só a consulta principal e a contagem de
+  // observações eram checadas: bolsas, projeção e previsto x realizado caíam em
+  // `|| []` / `|| null` e viravam "0" ou "sem dados" na tela — indistinguível
+  // do caso real em que o projeto não tem aquilo.
+  let loadErrors        = {};
+
   // Compartilhado com ProjetosPage de propósito (projeto atual único).
   const STORAGE_KEY = 'cf_selected_project_id';
   const ALERT_DAYS  = 90;   // mesma régua de "encerrando" da aba Bolsistas
@@ -122,14 +128,56 @@ const HubPage = (() => {
       return;
     }
 
-    const project      = projectRes.data;
+    loadErrors = {
+      bolsas:    scholarshipsRes.error || null,
+      projecao:  monthlyRes.error      || null,
+      execucao:  prevRealRes.error     || null,
+      obs:       obsRes.error          || null,
+    };
+
+    const project       = projectRes.data;
     const scholarships  = scholarshipsRes.data || [];
     const monthlyData   = monthlyRes.data || [];
     const prevReal      = prevRealRes.data || null;
-    if (obsRes.error) showToast('Erro ao contar observações: ' + obsRes.error.message, 'error');
-    const obsCount      = obsRes.count ?? 0;
+    const obsCount      = obsRes.count ?? null;
 
     renderView(project, scholarships, monthlyData, prevReal, obsCount);
+  }
+
+  /* ── Consulta que falhou não vira número ─────────────────── */
+
+  const ERROR_LABELS = {
+    bolsas:   'bolsas do projeto',
+    projecao: 'projeção mensal',
+    execucao: 'previsto × realizado',
+    obs:      'observações',
+  };
+
+  function errorBannerHTML() {
+    const falhas = Object.keys(loadErrors).filter(k => loadErrors[k]);
+    if (!falhas.length) return '';
+    return `
+      <div class="alert-banner alert-banner--danger fade-in" style="margin-bottom:16px;">
+        <i data-lucide="wifi-off" class="alert-banner__icon"></i>
+        <div class="alert-banner__body">
+          <strong>Dados incompletos nesta tela</strong>
+          <div style="font-size:0.85rem;color:var(--text-secondary);">
+            Não foi possível consultar: ${falhas.map(k => ERROR_LABELS[k]).join(', ')}.
+            Os campos afetados aparecem como “—”, não como zero. Recarregue para tentar de novo.
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function kpiIndisponivel() {
+    return `<div class="stat-card__value" style="color:var(--text-muted);">—</div>
+            <div style="font-size:0.7rem;color:var(--danger);margin-top:2px;">não foi possível consultar</div>`;
+  }
+
+  function secaoIndisponivel(oQue) {
+    return `<p class="hub-section__text" style="color:var(--danger);">
+              Não foi possível consultar ${oQue}. O vazio aqui é falha de consulta, não ausência de dado.
+            </p>`;
   }
 
   /* ── Render view ─────────────────────────────────────────── */
@@ -159,6 +207,8 @@ const HubPage = (() => {
     const saldoProjetado = lastMonth ? Number(lastMonth.net_balance) : null;
 
     containerEl.innerHTML = `
+
+      ${errorBannerHTML()}
 
       <!-- ── Banner experimental ── -->
       <div class="fade-in" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;padding:12px 16px;border-radius:10px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);color:var(--text-secondary);font-size:0.85rem;">
@@ -207,8 +257,9 @@ const HubPage = (() => {
             <div class="stat-card__label">Saldo Atual</div>
             <div class="stat-card__value currency">${formatBRL(saldoAtual)}</div>
             ${project.balance_date
-              ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">+ rend. em ${formatDate(project.balance_date)}</div>`
+              ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">em ${formatDate(project.balance_date)}</div>`
               : `<div style="font-size:0.7rem;color:var(--warning);margin-top:2px;">Data do saldo não informada</div>`}
+            ${rendimentoLegendaHTML(project.rendimento_informativo)}
           </div>
         </div>
 
@@ -229,10 +280,11 @@ const HubPage = (() => {
           </div>
           <div class="stat-card__content">
             <div class="stat-card__label">Bolsas / Mês</div>
-            <div class="stat-card__value currency">${formatBRL(custoMensal)}</div>
-            <div style="font-size:0.7rem;color:${vencendo > 0 ? 'var(--warning)' : 'var(--text-muted)'};margin-top:2px;">
-              ${activeScholarships.length} ativa(s)${vencendo > 0 ? ` · ${vencendo} encerrando em ${ALERT_DAYS}d` : ''}
-            </div>
+            ${loadErrors.bolsas ? kpiIndisponivel() : `
+              <div class="stat-card__value currency">${formatBRL(custoMensal)}</div>
+              <div style="font-size:0.7rem;color:${vencendo > 0 ? 'var(--warning)' : 'var(--text-muted)'};margin-top:2px;">
+                ${activeScholarships.length} ativa(s)${vencendo > 0 ? ` · ${vencendo} encerrando em ${ALERT_DAYS}d` : ''}
+              </div>`}
           </div>
         </div>
 
@@ -242,10 +294,11 @@ const HubPage = (() => {
           </div>
           <div class="stat-card__content">
             <div class="stat-card__label">Saldo Projetado</div>
-            <div class="stat-card__value currency ${saldoProjetado != null && saldoProjetado < 0 ? 'currency--negative' : ''}">
-              ${saldoProjetado != null ? formatBRL(saldoProjetado) : '—'}
-            </div>
-            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">fim da vigência</div>
+            ${loadErrors.projecao ? kpiIndisponivel() : `
+              <div class="stat-card__value currency ${saldoProjetado != null && saldoProjetado < 0 ? 'currency--negative' : ''}">
+                ${saldoProjetado != null ? formatBRL(saldoProjetado) : '—'}
+              </div>
+              <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">fim da vigência</div>`}
           </div>
         </div>
 
@@ -262,23 +315,26 @@ const HubPage = (() => {
 
         ${sectionCard({
           icon: 'users', title: 'Bolsistas',
-          body: `<div class="hub-section__metric">${formatBRL(custoMensal)}<span>/mês</span></div>
+          body: loadErrors.bolsas ? secaoIndisponivel('as bolsas deste projeto') :
+                `<div class="hub-section__metric">${formatBRL(custoMensal)}<span>/mês</span></div>
                  <p class="hub-section__text">${activeScholarships.length} bolsa(s) ativa(s)${vencendo > 0 ? ` · <strong style="color:var(--warning);">${vencendo} encerrando</strong> nos próximos ${ALERT_DAYS} dias` : ''}.</p>`,
           page: 'holders', btnLabel: 'Abrir Bolsistas',
         })}
 
         ${sectionCard({
           icon: 'file-stack', title: 'Execução (Balancete FUNAPE)',
-          body: prevReal && prevReal.has_balancete
+          body: loadErrors.execucao ? secaoIndisponivel('o previsto × realizado') :
+                prevReal && prevReal.has_balancete
             ? `<div class="hub-section__metric">${formatBRL(prevReal.rendimento_liquido)}<span>rend. líq.</span></div>
-               <p class="hub-section__text">Último balancete em <strong>${formatDate(prevReal.data_referencia)}</strong>. Gastos por rubrica vêm do PDF da FUNAPE.</p>`
+               <p class="hub-section__text">Rendimento apurado no último balancete, em <strong>${formatDate(prevReal.data_referencia)}</strong>. Gastos por rubrica vêm do PDF da FUNAPE.</p>`
             : `<p class="hub-section__text">Nenhum balancete importado ainda. Importe o PDF da FUNAPE para ver a execução.</p>`,
           page: 'plano-trabalho', btnLabel: 'Abrir Balancetes',
         })}
 
         ${sectionCard({
           icon: 'clipboard-list', title: 'Observações',
-          body: `<div class="hub-section__metric">${obsCount}<span>registros</span></div>
+          body: obsCount == null ? secaoIndisponivel('as observações') :
+                `<div class="hub-section__metric">${obsCount}<span>registros</span></div>
                  <p class="hub-section__text">Acompanhamento pontual do projeto (discrimina acontecimentos entre saldos). Apague quando não for mais relevante.</p>`,
           page: 'monitoramento', btnLabel: 'Abrir Observações',
         })}
@@ -288,7 +344,8 @@ const HubPage = (() => {
           body: `<p class="hub-section__text" style="margin-bottom:8px;">
                    <strong>${formatDate(project.start_date)}</strong> — <strong>${formatDate(project.end_date)}</strong>
                  </p>
-                 <p class="hub-section__text">Saldo atual: <strong class="currency">${formatBRL(saldoAtual)}</strong>${project.balance_date ? ` (em ${formatDate(project.balance_date)})` : ''}.</p>`,
+                 <p class="hub-section__text">Saldo atual: <strong class="currency">${formatBRL(saldoAtual)}</strong>${project.balance_date ? ` (em ${formatDate(project.balance_date)})` : ''}.</p>
+                 ${rendimentoLegendaHTML(project.rendimento_informativo)}`,
           page: 'saldos', btnLabel: 'Abrir Saldos',
         })}
 
@@ -302,6 +359,14 @@ const HubPage = (() => {
 
   // Resume o Previsto x Realizado num KPI e num bloco.
   function computeOrcamento(prevReal) {
+    // Falha de consulta vem ANTES de "sem plano": sem a resposta não dá para
+    // afirmar que o projeto não tem plano — só que não foi possível perguntar.
+    if (loadErrors.execucao) {
+      return {
+        value: '—', color: 'info', hint: 'não foi possível consultar',
+        sectionBody: secaoIndisponivel('o previsto × realizado'),
+      };
+    }
     if (!prevReal || prevReal.has_plano === false) {
       return {
         value: '—', color: 'info', hint: 'Sem plano ativo',

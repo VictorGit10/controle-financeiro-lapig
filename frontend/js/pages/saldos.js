@@ -1,13 +1,27 @@
 /* ============================================================
-   Saldos Page — Monthly balance entry per project
-   Historico mensal de saldos via project_balances
+   Saldos Page — registro mensal de saldos (SOMENTE LEITURA)
+
+   Esta tela já foi um formulário de digitação. Deixou de ser na
+   migração 043: o saldo do projeto é o SALDO DISPONÍVEL do
+   balancete, e digitá-lo de novo aqui era retrabalho — dois
+   lugares para o mesmo número, que divergem no dia em que
+   alguém atualiza um e esquece o outro.
+
+   O que sobrou é o registro: qual saldo cada centro de custo
+   tinha em cada competência, de onde veio e em que data. Para
+   ATUALIZAR um saldo, sobe-se o balancete (Fechamento Mensal);
+   o gatilho da 043 faz o resto até projects.initial_balance.
+
+   Sem estado editável, esta página não tem mais o que perder ao
+   trocar de rota — por isso não registra guard nem dirtyChecker
+   no Router (só projetos.js o faz agora).
    ============================================================ */
 
 Router.register('saldos', {
   title: 'Saldos',
 
   actions(container) {
-    // No action button — all projects shown automatically
+    // Somente leitura — nada a acionar aqui.
   },
 
   async render(container) {
@@ -18,11 +32,18 @@ Router.register('saldos', {
 
 const SaldosPage = (() => {
 
-  let containerEl    = null;
-  let allRows         = [];   // result from get_balances_for_month
-  let dirtyRows      = new Set(); // project_id set for rows that changed
-  let currentMonth   = new Date().getMonth() + 1;
-  let currentYear    = new Date().getFullYear();
+  let containerEl  = null;
+  let allRows      = [];   // resultado de get_balances_for_month
+  let currentMonth = new Date().getMonth() + 1;
+  let currentYear  = new Date().getFullYear();
+
+  // Projeto atual do app. Esta tela é por competência (todos os projetos de
+  // uma vez), então o contexto que vem do botão "Abrir Saldos" da Visão do
+  // Projeto não vira filtro — vira destaque: a linha dele fica marcada e a
+  // página rola até ela. Filtrar aqui destruiria o "Total em Conta", que é
+  // justamente a soma de todo mundo.
+  const PROJECT_KEY = 'cf_selected_project_id';
+  let highlightProjectId = null;
 
   const MONTH_NAMES = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -33,6 +54,7 @@ const SaldosPage = (() => {
 
   async function load(container) {
     containerEl = container;
+    highlightProjectId = localStorage.getItem(PROJECT_KEY) || null;
     containerEl.innerHTML = '<div class="skeleton skeleton--card" style="height:200px;"></div>';
     await refresh();
   }
@@ -48,18 +70,20 @@ const SaldosPage = (() => {
       return;
     }
 
-    allRows    = data || [];
-    dirtyRows  = new Set();
+    allRows = data || [];
     renderPage();
+
+    // Depois do render, leva a linha destacada para a área visível. Sem isto o
+    // destaque existiria fora da tela em quem tem muitos centros de custo.
+    if (highlightProjectId) {
+      containerEl.querySelector('.balance-row--atual')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
   }
 
-  /* ── Month Navigation ────────────────────────────────────── */
+  /* ── Navegação de mês ────────────────────────────────────── */
 
   async function changeMonth(month, year) {
-    if (dirtyRows.size > 0) {
-      const ok = await confirmAction('Alterações não salvas serão perdidas. Continuar?');
-      if (!ok) return;
-    }
     currentMonth = month;
     currentYear  = year;
     await refresh();
@@ -89,15 +113,42 @@ const SaldosPage = (() => {
     if (sel) changeMonth(currentMonth, parseInt(sel.value, 10));
   }
 
-  /* ── Render Page ─────────────────────────────────────────── */
+  function abrirFechamento() {
+    Router.navigate('fechamento');
+  }
+
+  /* ── Saldo de uma linha ──────────────────────────────────── */
+
+  // Mesma conta do resto do app (`saldoAtual` em projetos.js e hub.js):
+  // é a soma que alimenta calc_project_monthly, não só initial_balance.
+  // Em linha vinda do balancete o yield é sempre 0 — o rodapé do PDF já
+  // dá o valor "PÓS IR/IOF ESTIMADO S/ REND. APL. FINANCEIRA", com o
+  // rendimento dentro (ver o cabeçalho da migração 043).
+  function saldoDaLinha(row) {
+    return Number(row.initial_balance || 0) + Number(row.yield_amount || 0);
+  }
+
+  /* ── Render ──────────────────────────────────────────────── */
 
   function renderPage() {
-    const totalBalance  = allRows.reduce((s, r) => s + (Number(r.initial_balance) + Number(r.yield_amount || 0)), 0);
-    const withBalance   = allRows.filter(r => r.id !== null).length;
-    const pending       = allRows.filter(r => r.id === null && r.project_active).length;
+    const comSaldo = allRows.filter(r => r.id !== null);
+    const total    = comSaldo.reduce((s, r) => s + saldoDaLinha(r), 0);
+    const pendente = allRows.filter(r => r.id === null && r.project_active).length;
 
     containerEl.innerHTML = `
-      <!-- Month Selector -->
+      <!-- Como se atualiza um saldo -->
+      <div class="fade-in" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;padding:12px 16px;border-radius:10px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);color:var(--text-secondary);font-size:0.85rem;">
+        <i data-lucide="info" style="width:18px;height:18px;color:var(--info,#3b82f6);flex-shrink:0;"></i>
+        <div style="flex:1;">
+          Registro somente leitura. O saldo vem do <strong>SALDO DISPONÍVEL</strong> do balancete —
+          para atualizar, suba o PDF no Fechamento Mensal.
+        </div>
+        <button class="btn btn--ghost btn--sm" onclick="SaldosPage.abrirFechamento()" style="flex-shrink:0;">
+          <i data-lucide="calendar-check"></i> Abrir Fechamento
+        </button>
+      </div>
+
+      <!-- Seletor de mês -->
       <div class="saldos-month-selector fade-in">
         <button class="btn btn--ghost btn--sm" onclick="SaldosPage.prevMonth()" title="Mês anterior">
           <i data-lucide="chevron-left"></i>
@@ -114,15 +165,16 @@ const SaldosPage = (() => {
         </button>
       </div>
 
-      <!-- KPI Cards -->
+      <!-- KPIs -->
       <div class="stats-grid fade-in" style="margin-top:20px;">
         <div class="stat-card">
           <div class="stat-card__icon stat-card__icon--success">
             <i data-lucide="landmark"></i>
           </div>
           <div class="stat-card__content">
-            <div class="stat-card__label">Total</div>
-            <div class="stat-card__value currency">${formatBRL(totalBalance)}</div>
+            <div class="stat-card__label">Total em Conta</div>
+            <div class="stat-card__value currency">${formatBRL(total)}</div>
+            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">soma dos ${comSaldo.length} com registro</div>
           </div>
         </div>
         <div class="stat-card">
@@ -131,7 +183,7 @@ const SaldosPage = (() => {
           </div>
           <div class="stat-card__content">
             <div class="stat-card__label">Com Saldo</div>
-            <div class="stat-card__value">${withBalance}</div>
+            <div class="stat-card__value">${comSaldo.length}</div>
           </div>
         </div>
         <div class="stat-card">
@@ -139,18 +191,19 @@ const SaldosPage = (() => {
             <i data-lucide="alert-circle"></i>
           </div>
           <div class="stat-card__content">
-            <div class="stat-card__label">Pendentes</div>
-            <div class="stat-card__value">${pending}</div>
+            <div class="stat-card__label">Sem Balancete</div>
+            <div class="stat-card__value">${pendente}</div>
+            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">ativos, nesta competência</div>
           </div>
         </div>
       </div>
 
-      <!-- Balance Table -->
+      <!-- Tabela -->
       <div class="card fade-in" style="animation-delay:0.1s;margin-top:24px;">
         <div class="card__header">
           <div>
             <h3 class="card__title">Saldos — ${MONTH_NAMES[currentMonth - 1]}/${currentYear}</h3>
-            <p class="card__subtitle">Informe o saldo e rendimentos de cada projeto para este mês</p>
+            <p class="card__subtitle">Saldo registrado de cada centro de custo nesta competência</p>
           </div>
         </div>
 
@@ -161,9 +214,9 @@ const SaldosPage = (() => {
                 <tr>
                   <th>Projeto</th>
                   <th>Status</th>
-                  <th style="min-width:140px;">Saldo (R$)</th>
-                  <th style="min-width:130px;">Rendimentos (R$)</th>
-                  <th style="min-width:140px;">Data do Saldo</th>
+                  <th style="min-width:160px;">Saldo em Conta</th>
+                  <th style="min-width:130px;">Data do Saldo</th>
+                  <th style="min-width:120px;">Origem</th>
                 </tr>
               </thead>
               <tbody>
@@ -171,22 +224,11 @@ const SaldosPage = (() => {
               </tbody>
             </table>
           </div>
-
-          ${dirtyRows.size > 0 ? `
-          <div class="saldos-batch-actions">
-            <button class="btn btn--primary btn--sm" onclick="SaldosPage.saveAllChanges()">
-              <i data-lucide="save"></i> Salvar Alterações
-            </button>
-            <button class="btn btn--ghost btn--sm" onclick="SaldosPage.discardChanges()">
-              <i data-lucide="rotate-ccw"></i> Descartar
-            </button>
-          </div>
-          ` : ''}
         ` : `
           <div class="empty-state" style="padding:32px;">
             <i data-lucide="folder-plus" class="empty-state__icon"></i>
             <h3 class="empty-state__title">Nenhum projeto cadastrado</h3>
-            <p class="empty-state__text">Crie um projeto na aba Projetos para informar saldos.</p>
+            <p class="empty-state__text">Crie um projeto na aba <strong>Gestão de Projetos</strong>.</p>
           </div>
         `}
       </div>
@@ -196,48 +238,59 @@ const SaldosPage = (() => {
   }
 
   function renderRow(row) {
-    const hasBalance  = row.id !== null;
-    const isDirty     = dirtyRows.has(row.project_id);
-    const rowClass    = isDirty ? 'row--dirty' : (!hasBalance && row.project_active ? 'row--empty' : '');
+    const temSaldo = row.id !== null;
+
+    const atual = row.project_id && row.project_id === highlightProjectId;
+
+    if (!temSaldo) {
+      return `
+        <tr class="${row.project_active ? 'row--empty' : ''} ${atual ? 'balance-row--atual' : ''}">
+          <td style="font-weight:600;color:var(--text-primary);">${escapeAttr(row.project_name)}</td>
+          <td>
+            <span class="badge badge--${row.project_active ? 'active' : 'ended'}">
+              ${row.project_active ? 'Ativo' : 'Inativo'}
+            </span>
+          </td>
+          <td colspan="3" style="color:var(--text-muted);font-size:0.8rem;">
+            Sem balancete nesta competência
+          </td>
+        </tr>`;
+    }
+
+    const doBalancete = row.source === 'balancete';
+    // Duas origens para a mesma legenda, porque são duas eras do dado:
+    //   • linha do balancete (043 em diante): a composição está em
+    //     `rendimento_informativo`, que a mig. 045 acrescentou — o rendimento
+    //     está DENTRO do saldo e não pode ser somado;
+    //   • linha digitada antes da 043: está em `yield_amount`, que ali É
+    //     parcela a somar (veio de extrato com principal e rendimento em
+    //     linhas separadas), e `saldoDaLinha` já a soma.
+    // `null` continua diferente de `0`: rodapé não lido não vira "sem rendimento".
+    const rendimento = row.rendimento_informativo != null
+      ? row.rendimento_informativo
+      : row.yield_amount;
 
     return `
-      <tr class="${rowClass}" data-project-id="${row.project_id}">
-        <td style="font-weight:600;color:var(--text-primary);">
-          ${escapeAttr(row.project_name)}
-        </td>
+      <tr class="${atual ? 'balance-row--atual' : ''}">
+        <td style="font-weight:600;color:var(--text-primary);">${escapeAttr(row.project_name)}</td>
         <td>
           <span class="badge badge--${row.project_active ? 'active' : 'ended'}">
             ${row.project_active ? 'Ativo' : 'Inativo'}
           </span>
         </td>
         <td>
-          <input type="number" step="0.01" class="form-input form-input--inline"
-            value="${hasBalance ? row.initial_balance : ''}"
-            placeholder="0,00"
-            data-field="initial_balance"
-            data-project-id="${row.project_id}"
-            onchange="SaldosPage.markDirty('${escapeAttrJs(row.project_id)}', this)"
-            style="width:130px;">
+          <span class="currency" style="font-weight:600;">${formatBRL(saldoDaLinha(row))}</span>
+          ${rendimentoLegendaHTML(rendimento)}
         </td>
+        <td>${row.balance_date ? formatDate(row.balance_date) : '—'}</td>
         <td>
-          <input type="number" step="0.01" class="form-input form-input--inline"
-            value="${hasBalance ? row.yield_amount : ''}"
-            placeholder="0,00"
-            data-field="yield_amount"
-            data-project-id="${row.project_id}"
-            onchange="SaldosPage.markDirty('${escapeAttrJs(row.project_id)}', this)"
-            style="width:120px;">
+          <span class="badge badge--${doBalancete ? 'active' : 'ended'}" title="${doBalancete
+            ? 'Derivado do SALDO DISPONÍVEL do balancete'
+            : 'Digitado à mão, antes de a aba virar somente leitura'}">
+            ${doBalancete ? 'Balancete' : 'Digitado'}
+          </span>
         </td>
-        <td>
-          <input type="date" class="form-input form-input--inline"
-            value="${hasBalance && row.balance_date ? toInputDate(row.balance_date) : ''}"
-            data-field="balance_date"
-            data-project-id="${row.project_id}"
-            onchange="SaldosPage.markDirty('${escapeAttrJs(row.project_id)}', this)"
-            style="width:150px;">
-        </td>
-      </tr>
-    `;
+      </tr>`;
   }
 
   function yearOptions(selected) {
@@ -249,180 +302,12 @@ const SaldosPage = (() => {
     return years.join('');
   }
 
-  /* ── Dirty Tracking ──────────────────────────────────────── */
-
-  function markDirty(projectId, inputEl) {
-    dirtyRows.add(projectId);
-
-    // Update the row class
-    const tr = inputEl.closest('tr');
-    if (tr) {
-      tr.classList.remove('row--empty');
-      tr.classList.add('row--dirty');
-    }
-
-    // Show batch actions if this is the first dirty row
-    if (dirtyRows.size === 1) {
-      const actionsDiv = containerEl.querySelector('.saldos-batch-actions');
-      if (!actionsDiv) {
-        const tableWrapper = containerEl.querySelector('.data-table-wrapper');
-        if (tableWrapper) {
-          const html = `
-            <div class="saldos-batch-actions">
-              <button class="btn btn--primary btn--sm" onclick="SaldosPage.saveAllChanges()">
-                <i data-lucide="save"></i> Salvar Alterações
-              </button>
-              <button class="btn btn--ghost btn--sm" onclick="SaldosPage.discardChanges()">
-                <i data-lucide="rotate-ccw"></i> Descartar
-              </button>
-            </div>`;
-          tableWrapper.insertAdjacentHTML('afterend', html);
-          lucide.createIcons();
-        }
-      }
-    }
-  }
-
-  /* ── Save ────────────────────────────────────────────────── */
-
-  // Lê um campo numérico da linha. Devolve `null` para "não informado" e
-  // `NaN` para lixo digitado — os dois casos são distintos e nenhum dos
-  // dois pode virar 0 silenciosamente (ver saveAllChanges).
-  function readNumber(projectId, field) {
-    const input = containerEl.querySelector(`input[data-field="${field}"][data-project-id="${projectId}"]`);
-    const raw = input?.value.trim();
-    if (raw === '' || raw === undefined) return null;
-    return parseFloat(raw);
-  }
-
-  async function saveAllChanges() {
-    if (dirtyRows.size === 0) {
-      showToast('Nenhuma alteração para salvar.', 'info');
-      return;
-    }
-
-    // Campo vazio significa "não informado", mas as colunas são NOT NULL
-    // DEFAULT 0 (migração 017) — então enviar 0 não grava "vazio", grava a
-    // afirmação "a conta está zerada". Isso não é só cosmético: o trigger
-    // sync_project_balance copia o saldo mais recente para
-    // projects.initial_balance, que alimenta calc_project_monthly e toda
-    // projeção da aba Projetos e do Dashboard.
-    //
-    // Portanto: nunca inventamos um número. Se o campo está vazio e já
-    // existe linha salva, preservamos o valor salvo; se não existe linha,
-    // recusamos a gravação e dizemos qual projeto e por quê.
-    const payloads  = [];
-    const problemas = [];
-
-    dirtyRows.forEach(projectId => {
-      const stored   = allRows.find(r => r.project_id === projectId);
-      const nome     = stored?.project_name || 'projeto';
-      const temLinha = !!stored && stored.id !== null;
-
-      const initialBalance = readNumber(projectId, 'initial_balance');
-      const yieldAmount    = readNumber(projectId, 'yield_amount');
-      const balanceDate    = containerEl.querySelector(`input[data-field="balance_date"][data-project-id="${projectId}"]`)?.value || null;
-
-      // Linha totalmente vazia: nada a salvar (é o único caso em que
-      // "vazio" já era representável antes desta correção).
-      if (initialBalance === null && yieldAmount === null && !balanceDate) return;
-
-      if (Number.isNaN(initialBalance) || Number.isNaN(yieldAmount)) {
-        problemas.push(`${nome}: valor inválido — use apenas números.`);
-        return;
-      }
-
-      if (initialBalance === null && !temLinha) {
-        problemas.push(`${nome}: informe o saldo. Deixar em branco gravaria R$ 0,00, que o sistema lê como conta zerada e usa nas projeções.`);
-        return;
-      }
-
-      // A data tem que cair no mês de referência — é o
-      // chk_balance_date_matches_month da migração 017. Sem esta checagem o
-      // constraint estoura no banco e o toast mostra o erro cru do Postgres
-      // (acontece toda vez que o saldo de junho é informado em 3 de julho).
-      if (balanceDate) {
-        const [ano, mes] = balanceDate.split('-').map(Number);
-        if (mes !== currentMonth || ano !== currentYear) {
-          problemas.push(`${nome}: a data ${formatDate(balanceDate)} está fora de ${MONTH_NAMES[currentMonth - 1]}/${currentYear}. Informe uma data do mês de referência ou troque o mês no seletor acima.`);
-          return;
-        }
-      }
-
-      payloads.push({
-        p_project_id:      projectId,
-        p_reference_month: currentMonth,
-        p_reference_year:  currentYear,
-        // Vazio + linha existente = preserva o que está salvo (editar só o
-        // rendimento não pode zerar o saldo). Vazio + linha nova só chega
-        // aqui no rendimento, cujo zero é semanticamente correto.
-        p_initial_balance: initialBalance ?? Number(stored?.initial_balance ?? 0),
-        p_yield_amount:    yieldAmount ?? Number(stored?.yield_amount ?? 0),
-        p_balance_date:    balanceDate || `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`,
-      });
-    });
-
-    if (problemas.length > 0) {
-      const extra = problemas.length > 1 ? ` (e mais ${problemas.length - 1})` : '';
-      showToast(problemas[0] + extra, 'error');
-      return;
-    }
-
-    if (payloads.length === 0) {
-      showToast('Nenhuma alteração para salvar.', 'info');
-      return;
-    }
-
-    const results = await Promise.allSettled(
-      payloads.map(p => supabaseClient.rpc('upsert_project_balance', p))
-    );
-    const failures = results.filter(r => r.status === 'rejected' || r.value?.error);
-
-    if (failures.length > 0) {
-      const firstError = failures[0].reason || failures[0].value?.error;
-      showToast('Erro ao salvar alguns saldos: ' + (firstError?.message || 'Erro desconhecido'), 'error');
-      return;
-    }
-
-    showToast('Saldos salvos com sucesso!', 'success');
-    await refresh();
-  }
-
-  /* ── Discard ─────────────────────────────────────────────── */
-
-  async function discardChanges() {
-    if (dirtyRows.size === 0) return;
-    const ok = await confirmAction('Descartar todas as alterações não salvas?');
-    if (!ok) return;
-    await refresh();
-  }
-
-  function isDirty() {
-    return dirtyRows.size > 0;
-  }
-
-  function discardBalanceChanges() {
-    dirtyRows = new Set();
-  }
-
-  Router.registerGuard(async (from, to) => {
-    if (dirtyRows.size === 0) return true;
-    const ok = await confirmAction('Alterações nos saldos não salvas serão perdidas. Continuar?');
-    if (ok) discardBalanceChanges();
-    return ok;
-  });
-
-  Router.registerDirtyChecker(isDirty);
-
   return {
     load,
     prevMonth,
     nextMonth,
     onMonthSelect,
     onYearSelect,
-    markDirty,
-    saveAllChanges,
-    discardChanges,
-    isDirty,
+    abrirFechamento,
   };
 })();

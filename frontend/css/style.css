@@ -802,6 +802,31 @@ img { max-width: 100%; display: block; }
   margin-top: 2px;
 }
 
+/* Linha do projeto atual na aba Saldos. A tela é por competência e mostra
+   todos os centros de custo; o destaque é como o contexto vindo da Visão do
+   Projeto sobrevive sem virar filtro (que destruiria o "Total em Conta"). */
+.balance-row--atual > td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.balance-row--atual > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Composição do saldo: quanto dele é rendimento (mig. 045). Discreto de
+   propósito — é qualificação de um número, não um número a mais. */
+.stat-card__rendimento {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
+}
+
+.stat-card__rendimento--incompleto {
+  color: var(--warning);
+  border-left-color: var(--warning);
+}
+
 /* ── Hub do Projeto — blocos por área (tela experimental) ── */
 .hub-section__metric {
   font-size: 1.6rem;

@@ -1,6 +1,7 @@
 /* ============================================================
    Dashboard Page — Consolidated financial overview
-   With dynamic project filter + notification bell + monthly chart
+   With dynamic project filter + monthly chart. O sino de alertas
+   NÃO mora mais aqui — virou global em js/notifications.js.
    ============================================================ */
 
 Router.register('dashboard', {
@@ -30,15 +31,33 @@ const DashboardPage = (() => {
   let _chartInstance = null;
   let currentBalanceStatus = 'unpaid_current';
   let _autoSelected = false;
-  let _bellInited = false;
+
+  // Consultas que falharam nesta carga. Mesma regra das abas Projetos e Visão
+  // do Projeto: em tela de dinheiro, "não consegui consultar" não pode
+  // renderizar igual a "o valor é zero".
+  let loadErrors = {};
+  let projecaoParcial = 0;   // nº de centros que não responderam na projeção
 
   const STORAGE_KEY = 'cf_dashboard_selected_projects';
+
+  function rendimentoConsolidadoHTML({ total, knownCount, unknownCount }) {
+    if (!unknownCount) return rendimentoLegendaHTML(total);
+
+    const projetos = `${unknownCount} projeto${unknownCount === 1 ? '' : 's'}`;
+    const conhecido = knownCount > 0 && total > 0
+      ? `Rendimento identificado: ${formatBRL(total)}. `
+      : '';
+
+    return `<div class="stat-card__rendimento stat-card__rendimento--incompleto"
+      title="O total de rendimento está incompleto; valores ausentes não foram tratados como zero.">
+      ${conhecido}${projetos} sem informação de rendimento.
+    </div>`;
+  }
 
   /* ── Load ────────────────────────────────────────────────── */
 
   async function load(container) {
     containerEl = container;
-    _initBell();
 
     const { data: projects, error } = await supabaseClient
       .from('v_project_summary')
@@ -82,65 +101,6 @@ const DashboardPage = (() => {
     await renderFull();
   }
 
-  /* ── Notification Bell ───────────────────────────────────── */
-
-  function _initBell() {
-    // O sino vive no topbar estático: registrar os listeners uma única
-    // vez, senão cada visita ao Dashboard empilha um par de handlers e
-    // o toggle de panel.hidden vira no-op.
-    if (_bellInited) return;
-    const btn   = document.getElementById('notif-bell-btn');
-    const panel = document.getElementById('notif-dropdown');
-    if (!btn || !panel) return;
-    _bellInited = true;
-
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      panel.hidden = !panel.hidden;
-    });
-
-    document.addEventListener('click', e => {
-      if (!document.getElementById('notif-bell-wrapper')?.contains(e.target)) {
-        if (panel) panel.hidden = true;
-      }
-    });
-  }
-
-  function _updateBell(alerts) {
-    const badge = document.getElementById('notif-badge');
-    const count = document.getElementById('notif-count');
-    const list  = document.getElementById('notif-list');
-    if (!badge || !count || !list) return;
-
-    if (alerts.length === 0) {
-      badge.hidden = true;
-      count.textContent = 'Nenhum alerta';
-      list.innerHTML = '<p class="notif-dropdown__empty">Tudo certo! Nenhum alerta ativo.</p>';
-      return;
-    }
-
-    badge.hidden = false;
-    badge.textContent = alerts.length;
-    count.textContent = `${alerts.length} alerta${alerts.length > 1 ? 's' : ''}`;
-
-    list.innerHTML = alerts.map(a => {
-      const color = a.severity === 'danger' ? 'var(--danger)'
-                  : a.severity === 'warning' ? 'var(--warning)'
-                  : 'var(--info)';
-      const icon  = a.severity === 'danger' ? 'alert-triangle' : 'alert-circle';
-      return `
-        <div class="notif-item" style="border-left-color:${color};">
-          <i data-lucide="${icon}" style="color:${color};width:14px;height:14px;flex-shrink:0;"></i>
-          <div class="notif-item__body">
-            <span class="notif-item__project">${escapeAttr(a.project_name)}</span>
-            <span class="notif-item__msg">${escapeAttr(a.message)}</span>
-          </div>
-        </div>`;
-    }).join('');
-
-    lucide.createIcons({ nodes: [list] });
-  }
-
   /* ── Persist & Toggle ────────────────────────────────────── */
 
   function persistSelection() {
@@ -158,6 +118,37 @@ const DashboardPage = (() => {
     }
   }
 
+  /* ── Consulta que falhou não vira número ─────────────────── */
+
+  function errorBannerHTML() {
+    const partes = [];
+    if (loadErrors.bolsas)   partes.push('bolsistas ativos');
+    if (loadErrors.projecao) partes.push('projeção consolidada');
+    if (projecaoParcial > 0) {
+      partes.push(`projeção de ${projecaoParcial} centro(s) de custo`);
+    }
+    if (!partes.length) return '';
+    return `
+      <div class="alert-banner alert-banner--danger fade-in" style="margin-bottom:16px;">
+        <i data-lucide="wifi-off" class="alert-banner__icon"></i>
+        <div class="alert-banner__body">
+          <strong>Consolidado incompleto</strong>
+          <div style="font-size:0.85rem;color:var(--text-secondary);">
+            Não foi possível consultar: ${partes.join(', ')}.
+            ${projecaoParcial > 0
+              ? 'Os centros que não responderam ficaram <strong>fora da soma</strong> — o total abaixo não cobre todos os selecionados.'
+              : 'Os campos afetados aparecem como “—”, não como zero.'}
+            Recarregue para tentar de novo.
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function kpiIndisponivel() {
+    return `<div class="stat-card__value" style="color:var(--text-muted);">—</div>
+            <div style="font-size:0.7rem;color:var(--danger);margin-top:2px;">não foi possível consultar</div>`;
+  }
+
   /* ── Render ─────────────────────────────────────────────── */
 
   async function renderFull() {
@@ -167,6 +158,11 @@ const DashboardPage = (() => {
     // "Saldo Atual" = initial_balance (valor atualizado da FUNAPE) + yield_amount
     const totalSaldoAtual    = selectedProjects.reduce((s, p) =>
       s + Number(p.initial_balance) + Number(p.yield_amount || 0), 0);
+
+    // Quanto do consolidado é rendimento (mig. 045). O resumo mantém a
+    // distinção entre zero conhecido e ausência de informação; exibir apenas a
+    // soma conhecida faria um consolidado parcial parecer completo.
+    const rendimentoResumo = summarizeRendimento(selectedProjects);
     const totalScholarships  = selectedProjects.reduce((s, p) =>
       s + Number(p.current_monthly_scholarships || 0), 0);
     const activeCount        = selectedProjects.filter(p => p.active).length;
@@ -176,6 +172,8 @@ const DashboardPage = (() => {
       .filter(p => p.balance_date).map(p => p.balance_date).sort().pop() || null;
 
     // Monthly projection chart data
+    loadErrors = {};
+    projecaoParcial = 0;
     let monthlyData = [];
     if (selectedIds.size > 0) {
       monthlyData = await calcAggregatedMonthly([...selectedIds]);
@@ -199,28 +197,21 @@ const DashboardPage = (() => {
         .order('amount', { ascending: false });
 
       if (schError) showToast('Erro ao carregar bolsistas ativos: ' + schError.message, 'error');
+      loadErrors.bolsas = schError || null;
       activeHolders = scholarships || [];
     }
 
     // Unique active holders count
     const uniqueHolders = new Set(activeHolders.map(s => s.holder?.id).filter(Boolean)).size;
 
-    // Alerts for notification bell (batch — single RPC call)
-    let allAlerts = [];
-    if (selectedProjects.length > 0) {
-      const activeIds = selectedProjects.filter(p => p.active).map(p => p.id);
-      if (activeIds.length > 0) {
-        const { data: alertsData, error: alertsError } = await supabaseClient.rpc('get_alerts_for_projects', {
-          p_project_ids: activeIds
-        });
-        if (alertsError) showToast('Erro ao carregar alertas: ' + alertsError.message, 'error');
-        allAlerts = alertsData || [];
-      }
-    }
-
-    _updateBell(allAlerts);
+    // O sino não é mais alimentado daqui. Ele é global (js/notifications.js,
+    // montado no boot por app.js) e cobre TODOS os centros de custo ativos que
+    // o usuário enxerga — não o recorte do filtro desta tela, que era um escopo
+    // invisível para quem lia o badge em outra página.
 
     containerEl.innerHTML = `
+      ${errorBannerHTML()}
+
       <!-- Filter Panel -->
       <div id="dash-filter-panel" class="dash-filter ${filterOpen ? 'dash-filter--open' : ''}">
         <div class="dash-filter__header">
@@ -287,6 +278,7 @@ const DashboardPage = (() => {
               ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">em ${formatDate(repBalanceDate)}</div>`
               : `<div style="font-size:0.7rem;color:var(--warning);margin-top:2px;">Data do saldo não informada</div>`
             }
+            ${rendimentoConsolidadoHTML(rendimentoResumo)}
           </div>
         </div>
 
@@ -296,7 +288,9 @@ const DashboardPage = (() => {
           </div>
           <div class="stat-card__content">
             <div class="stat-card__label">Bolsistas Ativos</div>
-            <div class="stat-card__value">${uniqueHolders}</div>
+            ${loadErrors.bolsas
+              ? kpiIndisponivel()
+              : `<div class="stat-card__value">${uniqueHolders}</div>`}
           </div>
         </div>
 
@@ -450,8 +444,13 @@ const DashboardPage = (() => {
         agg.funding_income      += Number(row.funding_income || 0);
         agg.net_balance         += Number(row.net_balance || 0);
       });
+    } else if (batchError && batchError.code !== 'PGRST202') {
+      // A RPC em lote existe e falhou de verdade (não é "função ausente"):
+      // repetir a mesma pergunta N vezes tende a falhar igual, e o fallback
+      // mascararia o problema como projeção vazia.
+      loadErrors.projecao = batchError;
     } else {
-      // Fallback: N+1 queries
+      // Fallback: N+1 queries — só quando calc_projects_batch não existe
       const results = await Promise.all(
         projectIds.map(id => supabaseClient.rpc('calc_project_monthly', {
           p_project_id: id,
@@ -460,7 +459,9 @@ const DashboardPage = (() => {
         }))
       );
       results.forEach(res => {
-        if (res.error || !res.data) return;
+        // Centro que não respondeu fica FORA da soma. Um consolidado com parte
+        // dos centros de custo é pior que nenhum: parece completo e não é.
+        if (res.error || !res.data) { projecaoParcial++; return; }
         res.data.forEach(row => {
           const key = row.month_start;
           if (!monthMap.has(key)) {

@@ -29,7 +29,13 @@ const HoldersPage = (() => {
   let allHolders  = [];
   let allProjects = [];
   let searchQuery = '';
-  let filterProjectId = '';
+
+  // Projeto atual, compartilhado com Projetos e Visão do Projeto. Chegar aqui
+  // pelo botão "Abrir Bolsistas" do hub e cair na lista global era perder o
+  // contexto que o botão prometia. Segue sendo um FILTRO — "Todos os projetos"
+  // continua a um clique, e escolher lá muda o projeto atual do app.
+  const PROJECT_KEY = 'cf_selected_project_id';
+  let filterProjectId = localStorage.getItem(PROJECT_KEY) || '';
   const ALERT_DAYS = 90;
   let filterShowInactive = false;
 
@@ -62,6 +68,9 @@ const HoldersPage = (() => {
 
   async function load(container) {
     containerEl = container;
+    // Relê a cada entrada na tela, não só na carga do script: o projeto atual
+    // pode ter mudado em Projetos ou na Visão do Projeto desde a última visita.
+    filterProjectId = localStorage.getItem(PROJECT_KEY) || '';
     await refresh();
   }
 
@@ -91,6 +100,12 @@ const HoldersPage = (() => {
 
     allHolders  = holdersRes.data || [];
     allProjects = projectsRes.data || [];
+
+    // Projeto guardado que o usuário não enxerga mais (escopo mudou, projeto
+    // apagado) filtraria a lista para vazio sem dizer por quê.
+    if (filterProjectId && !allProjects.some(p => p.id === filterProjectId)) {
+      filterProjectId = '';
+    }
 
     renderPage();
   }
@@ -544,6 +559,9 @@ const HoldersPage = (() => {
 
   function onProjectFilter(value) {
     filterProjectId = value;
+    // "Todos os projetos" não desfaz a escolha das outras telas: limpar o
+    // filtro daqui é ampliar esta lista, não esquecer em que projeto se está.
+    if (value) localStorage.setItem(PROJECT_KEY, value);
     renderTable();
   }
 
@@ -1143,7 +1161,7 @@ const HoldersPage = (() => {
           <i data-lucide="alert-triangle" class="alert-banner__icon"></i>
           <div class="alert-banner__body">
             ${missing
-              ? '<strong>Histórico indisponível</strong><div style="font-size:0.85rem;color:var(--text-secondary);">Execute a migração <code>031_reconciliacoes.sql</code> para habilitar o registro das reconciliações.</div>'
+              ? `<strong>Histórico indisponível</strong><div style="font-size:0.85rem;color:var(--text-secondary);">${detalheTecnico('Execute a migração <code>031_reconciliacoes.sql</code> para habilitar o registro das reconciliações.')}</div>`
               : `<strong>Erro ao carregar histórico</strong><div style="font-size:0.85rem;color:var(--text-secondary);">${escapeAttr(error.message)}</div>`}
           </div>
         </div>`;
@@ -1542,7 +1560,11 @@ const HoldersPage = (() => {
           },
         });
         if (regError) {
-          showToast('Histórico não registrado (rode a migração 031): ' + regError.message, 'error');
+          showToast(
+            (typeof Auth !== 'undefined' && Auth.isAdmin?.())
+              ? 'Histórico não registrado (rode a migração 031): ' + regError.message
+              : 'A reconciliação foi aplicada, mas não ficou registrada no histórico. Avise o administrador.',
+            'error');
         }
 
         // Recarrega o universo: próximos arquivos da fila enxergam os

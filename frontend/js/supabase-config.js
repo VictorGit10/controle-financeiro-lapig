@@ -28,6 +28,37 @@ if (window.SENTRY_DSN) {
 // This overwrites the library namespace avoiding the "Identifier 'supabase' has already been declared" SyntaxError.
 window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Utility: legenda "inclui R$ X de rendimento" sob um valor de saldo.
+//
+// Wrapper de marcação sobre formatRendimento() (pure-fns.js), que é onde mora a
+// regra. Existe global porque as 4 telas que mostram saldo — Projetos, Visão do
+// Projeto, Saldos e Visão Geral — precisam exibir a mesma legenda do mesmo
+// jeito; uma cópia por página é o tipo de par que diverge em silêncio.
+/* exported rendimentoLegendaHTML */
+function rendimentoLegendaHTML(valor) {
+  const texto = formatRendimento(valor);
+  if (!texto) return '';
+  return `<div class="stat-card__rendimento" title="O rendimento já está dentro do saldo — não é parcela a somar.">${escapeAttr(texto)}</div>`;
+}
+
+// Utility: detalhe técnico só para quem pode agir sobre ele.
+//
+// Nome de migração, comando de deploy e nome de secret são instruções para o
+// administrador. Para um professor são ruído que faz o sistema parecer quebrado
+// e não dá nenhuma ação possível — ele não tem acesso ao painel do Supabase.
+// A mensagem genérica devolvida aqui diz a única coisa acionável para ele:
+// avisar quem administra.
+//
+// Não é segurança (nada disso é segredo, e o RLS é a barreira real) — é dizer a
+// cada um o que dá para fazer com a informação.
+/* exported detalheTecnico */
+function detalheTecnico(html) {
+  const isAdminUser = typeof Auth !== 'undefined' && Auth.isAdmin?.();
+  return isAdminUser
+    ? html
+    : 'Funcionalidade indisponível no momento. Avise o administrador do sistema.';
+}
+
 // Utility: Show toast notification
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container') || createToastContainer();

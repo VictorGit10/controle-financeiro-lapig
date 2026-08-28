@@ -111,10 +111,14 @@ async function detalharErro(error) {
     /* corpo não-JSON: fica o genérico */
   }
   if (resposta.status === 404) {
-    return (
-      'A Edge Function "assistente" não está publicada neste projeto. ' +
-      'Rode: supabase functions deploy assistente'
-    );
+    // O comando de deploy só serve para quem tem o painel do Supabase. Para o
+    // professor é ruído sem ação possível — ver `detalheTecnico` em
+    // supabase-config.js, mesma regra.
+    const admin = typeof Auth !== 'undefined' && Auth.isAdmin?.();
+    return admin
+      ? 'A Edge Function "assistente" não está publicada neste projeto. ' +
+        'Rode: supabase functions deploy assistente'
+      : 'O assistente está indisponível no momento. Avise o administrador do sistema.';
   }
   return generico;
 }

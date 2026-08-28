@@ -220,7 +220,11 @@ describe('erro de transporte', () => {
     );
   });
 
-  it('explica o 404 como falta de deploy', async () => {
+  // O 404 (função não publicada) diz coisas diferentes conforme quem lê: o
+  // comando de deploy só serve para quem tem o painel do Supabase. Os dois
+  // casos são testados porque a regra vale para toda mensagem técnica da
+  // interface, e é fácil alguém "simplificar" isso de volta para uma só.
+  function invoke404() {
     globalThis.window.supabaseClient.functions.invoke = () =>
       Promise.resolve({
         data: null,
@@ -229,9 +233,32 @@ describe('erro de transporte', () => {
           context: { status: 404, json: async () => { throw new Error('não é JSON'); } },
         },
       });
+  }
 
-    await expect(conversar({ mensagens: perguntar('x'), modelo: 'm1' })).rejects.toThrow(
-      /supabase functions deploy assistente/
-    );
+  it('explica o 404 como falta de deploy para o admin', async () => {
+    invoke404();
+    globalThis.Auth = { isAdmin: () => true };
+    try {
+      await expect(conversar({ mensagens: perguntar('x'), modelo: 'm1' })).rejects.toThrow(
+        /supabase functions deploy assistente/
+      );
+    } finally {
+      delete globalThis.Auth;
+    }
+  });
+
+  it('para o professor, diz o que ele pode fazer e não cita deploy', async () => {
+    invoke404();
+    globalThis.Auth = { isAdmin: () => false };
+    try {
+      await expect(conversar({ mensagens: perguntar('x'), modelo: 'm1' })).rejects.toThrow(
+        /Avise o administrador/
+      );
+      await expect(conversar({ mensagens: perguntar('x'), modelo: 'm1' })).rejects.not.toThrow(
+        /supabase functions deploy/
+      );
+    } finally {
+      delete globalThis.Auth;
+    }
   });
 });

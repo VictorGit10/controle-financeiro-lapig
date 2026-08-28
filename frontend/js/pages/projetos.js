@@ -22,6 +22,16 @@ const ProjetosPage = (() => {
   let projectData          = null;
   let fundingData          = [];
 
+  // Projeção mensal vinda de calc_project_monthly. Fora do modo simulação é
+  // ESTA que a tela mostra — ver o comentário em renderView().
+  let dbMonthlyData        = [];
+
+  // Quais consultas falharam nesta carga. Em tela de dinheiro, "não consegui
+  // consultar" tem que ser visualmente diferente de "o valor é zero": as duas
+  // renderizam igual se a falha só for para o console, e a segunda é uma
+  // afirmação sobre o dinheiro do projeto.
+  let loadErrors           = {};
+
   // Simulation mode state
   let editorMode           = false;
   let draftScholarships    = [];
@@ -125,22 +135,19 @@ const ProjetosPage = (() => {
       <div class="skeleton skeleton--card" style="height:320px;margin-top:20px;"></div>
     `;
 
-    const todayStartStr = localISODate().slice(0, 8) + '01';
+    // O status com que a projeção vai ser pedida. Guardado porque a inferência
+    // abaixo pode mudá-lo depois que a resposta já voltou.
+    const statusPedido = currentBalanceStatus;
 
     // Fetch all data in parallel
-    const [projectRes, scholarshipsRes, fundingRes, alertsRes, monthlyRes] = await Promise.all([
+    const [projectRes, scholarshipsRes, fundingRes, monthlyRes] = await Promise.all([
       supabaseClient.from('projects').select('*').eq('id', selectedProjectId).single(),
       supabaseClient.from('scholarships')
         .select('*, holder:holder_id(id, full_name)')
         .eq('project_id', selectedProjectId)
         .order('start_date'),
       supabaseClient.from('funding_releases').select('*').eq('project_id', selectedProjectId).order('release_date'),
-      supabaseClient.rpc('get_project_alerts', { p_project_id: selectedProjectId }),
-      supabaseClient.rpc('calc_project_monthly', {
-        p_project_id: selectedProjectId,
-        p_start_date: todayStartStr,
-        p_balance_status: currentBalanceStatus
-      }),
+      fetchMonthly(statusPedido),
     ]);
 
     if (projectRes.error) {
@@ -148,41 +155,108 @@ const ProjetosPage = (() => {
       return;
     }
 
-    const suppErrors = [scholarshipsRes, fundingRes, alertsRes, monthlyRes].filter(r => r.error);
-    if (suppErrors.length) {
-      console.warn('Partial load errors:', suppErrors.map(r => r.error.message));
-    }
+    // Antes isto era um console.warn e cada lista virava []. O efeito era uma
+    // tela plausível e errada: bolsas que não carregaram viravam "0 bolsas
+    // ativas", indistinguível de projeto sem bolsista.
+    loadErrors = {
+      bolsas:   scholarshipsRes.error || null,
+      repasses: fundingRes.error      || null,
+      projecao: monthlyRes.error      || null,
+    };
 
     projectData          = projectRes.data;
     draftScholarships    = (scholarshipsRes.data || []).map(s => ({ ...s }));
     originalScholarships = draftScholarships.map(s => ({ ...s }));
     fundingData          = fundingRes.data || [];
-    const alerts         = alertsRes.data || [];
-    const monthlyData    = monthlyRes.data || [];
+    dbMonthlyData        = monthlyRes.data || [];
 
     // Auto-select balance status based on balance date
     if (!_userSetBalanceStatus) {
       currentBalanceStatus = inferBalanceStatus(projectData.balance_date);
     }
 
-    renderView(alerts, monthlyData);
+    // A projeção acima foi pedida com o status anterior à inferência. Se ela
+    // mudou de ideia, o que voltou responde a outra pergunta — refaz, em vez de
+    // exibir a resposta antiga sob o rótulo novo.
+    if (currentBalanceStatus !== statusPedido) await refetchMonthly();
+
+    renderView();
+  }
+
+  /* ── Projeção mensal (sempre do banco) ───────────────────── */
+
+  function fetchMonthly(balanceStatus) {
+    const todayStartStr = localISODate().slice(0, 8) + '01';
+    return supabaseClient.rpc('calc_project_monthly', {
+      p_project_id: selectedProjectId,
+      p_start_date: todayStartStr,
+      p_balance_status: balanceStatus,
+    });
+  }
+
+  async function refetchMonthly() {
+    const res = await fetchMonthly(currentBalanceStatus);
+    loadErrors.projecao = res.error || null;
+    dbMonthlyData = res.data || [];
+  }
+
+  /* ── Consulta que falhou não vira número ─────────────────── */
+
+  const ERROR_LABELS = {
+    bolsas:   'bolsas do projeto',
+    repasses: 'desembolsos recebidos',
+    projecao: 'projeção mensal',
+  };
+
+  function failedSources() {
+    return Object.keys(loadErrors).filter(k => loadErrors[k]);
+  }
+
+  // Banner único no topo. O toast some sozinho; quem chegou na tela depois de
+  // um erro precisa continuar vendo que o que está lendo está incompleto.
+  function errorBannerHTML() {
+    const falhas = failedSources();
+    if (!falhas.length) return '';
+    return `
+      <div class="alert-banner alert-banner--danger fade-in" style="margin-bottom:16px;">
+        <i data-lucide="wifi-off" class="alert-banner__icon"></i>
+        <div class="alert-banner__body">
+          <strong>Dados incompletos nesta tela</strong>
+          <div style="font-size:0.85rem;color:var(--text-secondary);">
+            Não foi possível consultar: ${falhas.map(k => ERROR_LABELS[k]).join(', ')}.
+            Os campos afetados aparecem como “—”, não como zero. Recarregue para tentar de novo.
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // Valor indisponível. Nunca formatBRL(0) — em tela de dinheiro, zero é uma
+  // afirmação sobre a conta do projeto.
+  function kpiIndisponivel() {
+    return `<div class="stat-card__value" style="color:var(--text-muted);">—</div>
+            <div style="font-size:0.7rem;color:var(--danger);margin-top:2px;">não foi possível consultar</div>`;
   }
 
   /* ── Render view (also called by simulation mode refresh) ── */
 
-  function renderView(alerts = [], monthlyDataFromDB = null) {
+  function renderView() {
     const todayStartStr = localISODate().slice(0, 8) + '01';
     let monthlyData;
     let originalMonthlyData = [];
     if (editorMode) {
+      // Só aqui o SimulationEngine responde: as bolsas em edição ainda não
+      // existem no banco, então não há RPC capaz de projetá-las. É o motivo de
+      // ele existir — e o único.
       monthlyData         = SimulationEngine.calcProjectMonthly(projectData, draftScholarships, fundingData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
       originalMonthlyData = SimulationEngine.calcProjectMonthly(projectData, originalScholarships, fundingData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
     } else {
-      // Always use SimulationEngine so that balance status changes reflect immediately.
-      // monthlyDataFromDB (from the RPC) is used only as a reference when there is no
-      // user-driven balance-status selection and the local data mirrors the DB perfectly.
-      // Using SimulationEngine here ensures the selector always triggers a visible update.
-      monthlyData = SimulationEngine.calcProjectMonthly(projectData, draftScholarships, fundingData, { startDateParam: todayStartStr, balanceStatus: currentBalanceStatus });
+      // Fora da simulação a projeção é a que o banco devolveu. Antes esta tela
+      // buscava calc_project_monthly, DESCARTAVA o resultado e recalculava aqui
+      // — duas implementações da mesma conta no caminho normal, livres para
+      // divergir do Dashboard e do Assistente. O seletor de desconto continua
+      // atualizando na hora porque é parâmetro da RPC: trocá-lo refaz a
+      // pergunta (setBalanceStatus), não a conta.
+      monthlyData = dbMonthlyData;
     }
 
     // KPI calculations
@@ -211,6 +285,8 @@ const ProjetosPage = (() => {
     }).length;
 
     containerEl.innerHTML = `
+
+      ${errorBannerHTML()}
 
       <!-- ── Project Selector Bar ── -->
       <div class="proj-selector-bar fade-in">
@@ -285,6 +361,7 @@ const ProjetosPage = (() => {
               ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">em ${formatDate(projectData.balance_date)}</div>`
               : `<div style="font-size:0.7rem;color:var(--warning);margin-top:2px;">Data do saldo não informada</div>`
             }
+            ${rendimentoLegendaHTML(projectData.rendimento_informativo)}
           </div>
         </div>
 
@@ -294,7 +371,9 @@ const ProjetosPage = (() => {
           </div>
           <div class="stat-card__content">
             <div class="stat-card__label">Bolsas / Mês Atual</div>
-            <div class="stat-card__value currency">${formatBRL(totalMonthly)}</div>
+            ${loadErrors.bolsas
+              ? kpiIndisponivel()
+              : `<div class="stat-card__value currency">${formatBRL(totalMonthly)}</div>`}
           </div>
         </div>
 
@@ -316,9 +395,11 @@ const ProjetosPage = (() => {
           </div>
           <div class="stat-card__content">
             <div class="stat-card__label">Saldo Projetado ${editorMode ? '(Simulação)' : '(Último Mês)'}</div>
-            <div class="stat-card__value currency ${lastMonth && lastMonth.net_balance < 0 ? 'currency--negative' : ''}">
-              ${lastMonth ? formatBRL(lastMonth.net_balance) : '—'}
-            </div>
+            ${!editorMode && loadErrors.projecao
+              ? kpiIndisponivel()
+              : `<div class="stat-card__value currency ${lastMonth && lastMonth.net_balance < 0 ? 'currency--negative' : ''}">
+                   ${lastMonth ? formatBRL(lastMonth.net_balance) : '—'}
+                 </div>`}
           </div>
         </div>
 
@@ -342,6 +423,15 @@ const ProjetosPage = (() => {
         ${monthlyData.length > 0 ? `
           <div style="position:relative;height:300px;">
             <canvas id="proj-monthly-chart"></canvas>
+          </div>
+        ` : (!editorMode && loadErrors.projecao) ? `
+          <div class="empty-state" style="padding:32px;">
+            <i data-lucide="wifi-off" class="empty-state__icon" style="color:var(--danger);"></i>
+            <h3 class="empty-state__title">Projeção indisponível</h3>
+            <p class="empty-state__text">
+              A consulta ao banco falhou — o gráfico vazio aqui não significa projeção zerada.
+              Recarregue a página para tentar de novo.
+            </p>
           </div>
         ` : `
           <div class="empty-state" style="padding:32px;">
@@ -457,6 +547,15 @@ const ProjetosPage = (() => {
               </tbody>
             </table>
           </div>
+        ` : loadErrors.bolsas ? `
+          <div class="empty-state" style="padding:24px;">
+            <i data-lucide="wifi-off" class="empty-state__icon" style="color:var(--danger);"></i>
+            <h3 class="empty-state__title">Bolsas indisponíveis</h3>
+            <p class="empty-state__text">
+              A consulta falhou — esta lista vazia não significa que o projeto não tem bolsistas.
+              Recarregue a página para tentar de novo.
+            </p>
+          </div>
         ` : `
           <div class="empty-state" style="padding:24px;">
             <i data-lucide="user-x" class="empty-state__icon"></i>
@@ -477,7 +576,9 @@ const ProjetosPage = (() => {
       if (projectData.balance_date) {
         autoHint.textContent = 'Saldo de ' + formatDate(projectData.balance_date);
       } else {
-        autoHint.textContent = 'Informe o saldo na aba Saldos';
+        // A aba Saldos virou somente leitura na mig. 044 — mandar o usuário
+        // até lá seria mandá-lo a uma tela onde não há o que fazer.
+        autoHint.textContent = 'Sem saldo: suba o balancete no Fechamento Mensal';
       }
     }
 
@@ -494,6 +595,17 @@ const ProjetosPage = (() => {
   /* ── Simulation Mode ───────────────────────────────────── */
 
   function enterEditorMode() {
+    // Simular por cima de uma lista que não carregou é simular contra dado que
+    // não existe: o gráfico sairia como se o projeto não tivesse bolsas ou
+    // repasses. As duas coleções entram no SimulationEngine.
+    const fontesIndisponiveis = [
+      loadErrors.bolsas && 'bolsas',
+      loadErrors.repasses && 'desembolsos',
+    ].filter(Boolean);
+    if (fontesIndisponiveis.length) {
+      showToast(`Não foi possível consultar ${fontesIndisponiveis.join(' e ')} deste projeto. Recarregue antes de simular.`, 'error');
+      return;
+    }
     editorMode           = true;
     originalScholarships = draftScholarships.map(s => ({ ...s }));
     renderView();
@@ -659,12 +771,19 @@ const ProjetosPage = (() => {
 
   /* ── Balance Status ──────────────────────────────────────── */
 
-  function setBalanceStatus(val) {
+  async function setBalanceStatus(val) {
     currentBalanceStatus = val;
     _userSetBalanceStatus = true;
-    // Use renderView() directly — all project data is already in memory.
-    // This guarantees the chart and KPIs update immediately without a new
-    // round-trip to the database.
+    // O status é PARÂMETRO de calc_project_monthly: mudá-lo é uma pergunta
+    // nova ao banco, não um recálculo local. O round-trip a mais é o preço de
+    // ter uma só implementação da projeção (ver renderView).
+    //
+    // Rebusca TAMBÉM em modo simulação, onde a tela não usa `dbMonthlyData`:
+    // sem isto, trocar o desconto durante a simulação e depois cancelá-la
+    // devolveria o gráfico ao dado do status anterior, sob o rótulo do novo.
+    const sel = document.getElementById('proj-balance-status');
+    if (sel) sel.disabled = true;
+    await refetchMonthly();
     renderView();
   }
 

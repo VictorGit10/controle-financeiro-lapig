@@ -8,8 +8,12 @@ const App = (() => {
 
   function init() {
     if (initialized) {
-      // Just navigate to current or dashboard
-      Router.navigate(Router.getCurrent() || 'saldos');
+      // Volta para onde a pessoa estava; sem rota corrente, cai na mesma
+      // landing do primeiro boot. Antes o fallback era 'saldos', que desde a
+      // mig. 044 é um relatório somente leitura — reentrar no app por ali
+      // punha a pessoa numa tela onde não há nada a fazer.
+      Router.navigate(Router.getCurrent() || 'projetos');
+      Notifications.refresh();
       return;
     }
 
@@ -57,6 +61,14 @@ const App = (() => {
         sidebar.classList.remove('sidebar--open');
       }
     });
+
+    // O sino de alertas vive no topbar, que aparece em todas as telas — então
+    // é montado no boot, não pela página que por acaso o alimentava (era o
+    // Dashboard, e como a tela inicial é "Projetos" o primeiro clique no sino
+    // não fazia nada). `refresh()` não é aguardado: alerta é informação
+    // secundária e não deve atrasar a primeira tela.
+    Notifications.init();
+    Notifications.refresh();
 
     // Navigate to projetos (default landing page)
     Router.navigate('projetos');

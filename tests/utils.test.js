@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { formatBRL, parseBRL, escapeAttr, escapeAttrJs, formatDate, toInputDate, localISODate, inferBalanceStatus } from '../frontend/js/pure-fns.js';
+import { formatBRL, parseBRL, escapeAttr, escapeAttrJs, formatDate, toInputDate, localISODate, inferBalanceStatus, formatRendimento, summarizeRendimento } from '../frontend/js/pure-fns.js';
 
 describe('formatBRL', () => {
   it('formata valor positivo', () => {
@@ -233,5 +233,63 @@ describe('inferBalanceStatus', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-20T12:00:00'));
     expect(inferBalanceStatus('2026-01-01')).toBe('unpaid_current');
+  });
+});
+
+describe('formatRendimento', () => {
+  it('descreve o rendimento como componente do saldo', () => {
+    const texto = formatRendimento(8500);
+    expect(texto).toMatch(/^inclui /);
+    expect(texto).toMatch(/8\.500/);
+    expect(texto).toMatch(/de rendimento$/);
+  });
+
+  // A distinção que a migração 045 existe para preservar: rodapé de balancete
+  // não lido é ausência de dado, não afirmação de que não houve rendimento.
+  it('null é ausência de dado, não zero', () => {
+    expect(formatRendimento(null)).toBeNull();
+    expect(formatRendimento(undefined)).toBeNull();
+    expect(formatRendimento('')).toBeNull();
+  });
+
+  it('zero não vira legenda — não há composição a mostrar', () => {
+    expect(formatRendimento(0)).toBeNull();
+    expect(formatRendimento('0')).toBeNull();
+  });
+
+  it('ignora valor não numérico em vez de escrever NaN na tela', () => {
+    expect(formatRendimento('abc')).toBeNull();
+  });
+
+  it('aceita número em string (vem assim do PostgREST em numeric)', () => {
+    expect(formatRendimento('8500.00')).toMatch(/8\.500/);
+  });
+
+  it('valor negativo não vira legenda', () => {
+    expect(formatRendimento(-10)).toBeNull();
+  });
+});
+
+describe('summarizeRendimento', () => {
+  it('soma os valores conhecidos e conta os projetos sem informação', () => {
+    expect(summarizeRendimento([
+      { rendimento_informativo: '8500.00' },
+      { rendimento_informativo: null },
+      { rendimento_informativo: 1500 },
+      { rendimento_informativo: '' },
+    ])).toEqual({ total: 10000, knownCount: 2, unknownCount: 2 });
+  });
+
+  it('distingue zero conhecido de rendimento desconhecido', () => {
+    expect(summarizeRendimento([
+      { rendimento_informativo: 0 },
+      { rendimento_informativo: undefined },
+    ])).toEqual({ total: 0, knownCount: 1, unknownCount: 1 });
+  });
+
+  it('trata valor inválido como desconhecido', () => {
+    expect(summarizeRendimento([
+      { rendimento_informativo: 'valor inválido' },
+    ])).toEqual({ total: 0, knownCount: 0, unknownCount: 1 });
   });
 });
