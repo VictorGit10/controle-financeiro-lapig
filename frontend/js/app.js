@@ -2,6 +2,7 @@
    App — Main entry point
    ============================================================ */
 
+/* exported App -- global de script clássico: chamado por auth.js e pelo inline de index.html. */
 const App = (() => {
   let initialized = false;
 

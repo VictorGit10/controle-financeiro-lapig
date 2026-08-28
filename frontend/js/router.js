@@ -2,6 +2,7 @@
    Router — Simple page navigation
    ============================================================ */
 
+/* exported Router -- global de script clássico: consumido por app.js e por todas as páginas. */
 const Router = (() => {
   const pages = {};
   let currentPage = null;

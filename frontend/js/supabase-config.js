@@ -2,6 +2,8 @@
    Supabase Config — Connection to the database
    ============================================================ */
 
+/* exported confirmAction, handleSupabaseResponse, exportToCSV -- utilitários de UI usados pelas páginas (script clássico, sem import). */
+
 const SUPABASE_URL  = 'https://skxiivmkhpegefafdlty.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_cWm8BfwIb2JQ-WIOOjkQfA_jvTt7OmG';
 

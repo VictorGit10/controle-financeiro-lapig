@@ -12,6 +12,7 @@
    nas RPCs); o papel no frontend só controla a UI.
    ============================================================ */
 
+/* exported Auth -- global de script clássico: consumido por app.js e pelas páginas que checam papel. */
 const Auth = (() => {
   const loginScreen = document.getElementById('login-screen');
   const appScreen   = document.getElementById('app');

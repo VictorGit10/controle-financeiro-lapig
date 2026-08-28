@@ -2,6 +2,7 @@
    ChartBuilder — Shared chart configuration for financial charts
    ============================================================ */
 
+/* exported ChartBuilder -- global de script clássico: consumido por dashboard.js, projetos.js e holders.js. */
 const ChartBuilder = (() => {
 
   const COLORS = {

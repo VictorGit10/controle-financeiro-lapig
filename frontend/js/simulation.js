@@ -3,6 +3,7 @@
    API pública inalterada: { calcProjectMonthly, diffProjections, generateMonthSeries }
    ============================================================ */
 
+/* exported SimulationEngine -- global de script clássico: consumido por projetos.js. */
 const SimulationEngine = (() => {
   return {
     calcProjectMonthly: function(...a) { return window.calcProjectMonthly(...a); },
