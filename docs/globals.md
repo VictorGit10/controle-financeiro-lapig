@@ -9,7 +9,7 @@
 - `escapeAttr(str)` — escaping de atributos HTML (previne XSS)
 - `inferBalanceStatus(balanceDate)` — retorna `paid_current` só quando o saldo é do mês corrente com data posterior ao dia 7 (dia em que as bolsas do mês são debitadas); qualquer outro caso (saldo antigo, do início do mês ou ausente) retorna `unpaid_current`
 - `generateMonthSeries(startDate, endDate)` — gera array de `{ month_start, month_end, month_label }` entre duas datas
-- `calcProjectMonthly(project, scholarships, fundingReleases, expenses, options)` — calcula projeção mensal de saldo de um projeto
+- `calcProjectMonthly(project, scholarships, fundingReleases, options)` — calcula projeção mensal de saldo de um projeto. `options = { startDateParam, balanceStatus }`. O 4º parâmetro `expenses` **saiu na migração 032**, junto com a tabela: a execução financeira vem do balancete, não de gastos digitados. O espelho SQL (`calc_project_monthly`) foi recriado sem ele na mesma migração — os dois têm que continuar iguais.
 - `diffProjections(original, simulated)` — compara duas projeções e retorna os meses com diferença de saldo > R$ 0,01
 
 ## Fornecidas por `supabase-config.js`

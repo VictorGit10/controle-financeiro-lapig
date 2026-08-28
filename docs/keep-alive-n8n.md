@@ -22,8 +22,8 @@ Isso é suficiente para manter o banco ativo no plano gratuito do Supabase, que 
 
 | Arquivo | Descrição |
 | --- | --- |
-| `n8n-keep-alive-lapig.json` | Workflow do n8n pronto para importação. |
-| `N8N_KEEP_ALIVE_SETUP.md` | Este guia. |
+| [`tools/n8n-keep-alive-lapig.json`](../tools/n8n-keep-alive-lapig.json) | Workflow do n8n pronto para importação. |
+| `docs/keep-alive-n8n.md` | Este guia. |
 
 ---
 
@@ -32,7 +32,7 @@ Isso é suficiente para manter o banco ativo no plano gratuito do Supabase, que 
 1. Acesse seu n8n (local ou cloud).
 2. Vá em **Workflows** → **Add workflow**.
 3. Clique nos **três pontos** (⋮) no canto superior direito → **Import from file**.
-4. Selecione `n8n-keep-alive-lapig.json`.
+4. Selecione `tools/n8n-keep-alive-lapig.json`.
 5. Salve o workflow.
 
 ---

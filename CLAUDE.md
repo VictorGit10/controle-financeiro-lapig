@@ -51,21 +51,24 @@ As migrações 025–041 estão listadas abaixo em uma linha cada — tabelas, R
 
 ## Detailed Documentation
 
-Detailed reference docs are in `docs/`. Read them when working on the related area:
+Detailed reference docs are in `docs/` — índice completo em **[docs/README.md](docs/README.md)**. Read them when working on the related area:
 - **[Architecture](docs/architecture.md)** — Script load order, module pattern, auth, ChartBuilder, SimulationEngine
 - **[Pages](docs/pages.md)** — Dashboard, Projects, Holders, Funding, Observações, CrudPage factory
 - **[Database](docs/database.md)** — Core tables, schema details, RPC functions, views
 - **[Globals](docs/globals.md)** — Global utilities from pure-fns.js and supabase-config.js
 - **[Planos fora do padrão](docs/planos-fora-do-padrao.md)** — Leitura do PROAD em PDF, modelos-exceção (FAPEG, Prefeitura/emenda impositiva), detecção de modelo, roteamento por conteúdo e preenchimento manual
 - **[Acesso ao banco](docs/acesso-ao-banco.md)** — **Leia ANTES de qualquer escrita no banco de produção.** As 4 credenciais e o alcance de cada uma, regras duras (nunca PATCH/DELETE sem filtro; simular e aplicar em turnos separados), protocolo de escrita, login de automação e recuperação
+- **[Histórico](docs/historico/)** — relatórios datados (bug hunt e revisão externa, ambos de 2026-07-16). **Não são referência viva**: cada um diz quando foi conferido pela última vez e o que segue aberto. Não descrevem o sistema de hoje — consulte antes de "redescobrir" um bug, e nunca como fonte sobre o estado atual.
+
+`AGENTS.md` na raiz é só um **ponteiro** para este arquivo. Era uma cópia manual e divergiu (descrevia `expenses.js`, ignorava o multi-tenancy); virou ponteiro em 2026-08-28 para que não haja duas versões. Se estas instruções mudarem, o `AGENTS.md` não precisa de nada.
 
 ## Key Conventions
 
 - **No frontend build step.** All JS is browser-native ES5/ES6 loaded via `<script>` tags, except `pure-fns.js` which loads as `<script type="module">` and bridges exports to `window` for classic scripts. Dev tooling (eslint, vitest) runs via Node.js (`package.json`).
 - **Conventional commits:** `feat:`, `fix:`, `chore:`, `docs:` prefixes.
 - **CSS design system:** `frontend/css/style.css` (~1760 lines) uses CSS custom properties for theming. LAPIG institutional colors, glassmorphism effects.
-- **CDN with local fallback:** Libraries (Chart.js, Lucide, Supabase SDK, Mammoth, pdf.js, SheetJS) load from CDN with SRI integrity hashes. If CDN fails, `frontend/vendor/` provides local copies.
-- **Keep-alive do Supabase via n8n:** `n8n-keep-alive-lapig.json` (workflow) + `N8N_KEEP_ALIVE_SETUP.md` (guia) evitam que o projeto gratuito do Supabase entre em pausa por inatividade (7 dias). A cada 2 dias, o workflow faz uma query de leitura idêntica à da landing page (`projects` ativos). Não altera dados.
+- **CDN with local fallback:** Libraries (Chart.js, Lucide, Supabase SDK, Mammoth, pdf.js + worker, SheetJS) load from CDN with SRI integrity hashes. If CDN fails, `frontend/vendor/` provides local copies — **as 7 cópias existem**; até 2026-08-28 faltavam `mammoth.browser.min.js` e `pdf.min.js`, e o fallback dos dois formatos de importação era só promessa no HTML. O `workerSrc` do pdf.js é escolhido em runtime (local só quando o próprio `pdf.min.js` veio do vendor — CDN nesse caso derrubaria o worker junto e cairia no "fake worker"). Versões, procedimento de atualização e conferência do hash em `frontend/vendor/README.md`; `.gitattributes` marca esses arquivos `-text` para não perderem a igualdade byte a byte com o upstream.
+- **Keep-alive do Supabase via n8n:** `tools/n8n-keep-alive-lapig.json` (workflow) + `docs/keep-alive-n8n.md` (guia) evitam que o projeto gratuito do Supabase entre em pausa por inatividade (7 dias). A cada 2 dias, o workflow faz uma query de leitura idêntica à da landing page (`projects` ativos). Não altera dados.
 - **Security:** CSP meta tag in `index.html`. Sentry integration in `supabase-config.js` for error monitoring.
 - **Multi-tenancy por centro de custo (mig. 033 + 034):** cada usuário autenticado tem um papel (`admin`/`professor`) em `app_users` e centros de custo permitidos em `user_projects`. `auth.js` carrega o perfil no login (`Auth.isAdmin()`/`getRole()`/`getAllowedProjectIds()`) **antes** de `App.init()`. Professores veem/editam só os seus projetos — o RLS escopa todos os `from('projects')`, as views `security_invoker` e as RPCs invoker; admins veem tudo. **Desde a mig. 034 o professor também gerencia projetos** (cria — auto-atribuído a si em `user_projects` — e edita os seus via `save_project`) **e roda o Fechamento Mensal** (checklist escopado + reconciliação de bolsas via `apply_reconciliation` escopado); a mescla de duplicados (`merge_holders`, global) e a gestão de usuários (`save_user_assignments`) continuam admin-only. Só a rota **Usuários & Centros de Custo** (`usuarios.js`) tem `data-admin` no `<li>` (oculta no sidebar) + guard em `app.js` (Fechamento e Gestão de Projetos agora são professor-acessíveis). Criar logins continua no painel do Supabase (signup desativado); a anon key é pública, então o RLS é a barreira real — a service_role key **nunca** vai no frontend.
 - **localStorage keys** use `cf_` prefix: `cf_selected_project_id`, `cf_dashboard_selected_projects`, `cf_plano_trabalho_project_id`, `cf_plano_trabalho_tab`, `cf_holders_tab`. (`cf_recon_project_id` foi aposentada — o projeto da reconciliação agora é escolhido por arquivo na fila de importação.)

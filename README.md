@@ -1,239 +1,218 @@
 # Controle Financeiro — LAPIG
 
-Sistema de controle financeiro para gestão de projetos e bolsas do Laboratório de Processamento de Imagens e Geoprocessamento (LAPIG / UFG).
+Sistema de controle financeiro para gestão de centros de custo (projetos) e
+bolsas do Laboratório de Processamento de Imagens e Geoprocessamento
+(LAPIG / UFG).
 
-Migrado de uma arquitetura Google Sheets + Apps Script para uma aplicação web moderna com banco de dados relacional.
+Migrado de Google Sheets + Apps Script para uma aplicação web com banco
+relacional. Toda a interface e a documentação estão em **português do Brasil**.
 
 ---
 
 ## Stack
 
-| Camada    | Tecnologia                        |
-|-----------|-----------------------------------|
-| Frontend  | HTML + Vanilla JS + CSS           |
-| Backend   | Supabase (PostgreSQL + Auth + RLS)|
-| Gráficos  | Chart.js                          |
-| Ícones    | Lucide Icons                      |
-| Fontes    | DM Sans · Exo 2 · JetBrains Mono (Google Fonts) |
+| Camada     | Tecnologia                                        |
+|------------|---------------------------------------------------|
+| Frontend   | HTML + Vanilla JS + CSS — **sem build step**       |
+| Backend    | Supabase (PostgreSQL + Auth + RLS + Storage)       |
+| Gráficos   | Chart.js                                           |
+| Ícones     | Lucide Icons                                       |
+| Fontes     | DM Sans · Exo 2 · JetBrains Mono (Google Fonts)    |
+| Dev tools  | Node.js (ESLint + Vitest) — só para lint/teste/CI  |
 
 ---
 
-## Estrutura do Repositório
+## Como rodar
+
+Não há build. Sirva `frontend/` com qualquer servidor estático:
+
+```bash
+cd frontend && python -m http.server 8080
+```
+
+Ou use `abrir-site.bat` na raiz (Windows), que faz isso e abre o navegador.
+
+> **Tem que ser HTTP.** Abrir `frontend/index.html` como `file://` quebra os
+> `<script type="module">` (`pure-fns.js` e os parsers) por CORS, e a aplicação
+> sobe pela metade — sem mensagem de erro óbvia.
+
+As credenciais do Supabase ficam em `frontend/js/supabase-config.js`. A anon key
+é pública por natureza; quem protege os dados é o RLS (ver
+[`docs/seguranca-publicacao.md`](docs/seguranca-publicacao.md)).
+
+### Dev tooling
+
+```bash
+npm ci          # instala as dependências de desenvolvimento
+npm run lint    # ESLint em frontend/js/ e mcp/
+npm test        # Vitest em tests/
+```
+
+CI no GitHub Actions (`.github/workflows/ci.yml`): lint + testes a cada push/PR
+para `main`/`master`. Há um job separado que sobe o servidor MCP e confere o
+contrato das tools sem precisar de credencial.
+
+### Banco de dados
+
+Execute os scripts de `database/` **na ordem numérica**, 001 → 041.
+
+O alvo é a **última** migração, não uma parada intermediária: a camada de
+decisão nasce nas 038/039/040 (`get_saldo_livre`, `simular_alocacao`,
+`get_panorama`) e nem o servidor MCP nem a aba Assistente sobem sem elas.
+
+> `000_reset_completo.sql` é **destrutivo** — dropa todas as tabelas e dados.
+> Nunca rode sem a intenção explícita de zerar o banco.
+
+Antes de qualquer escrita no banco de **produção**, leia
+[`docs/acesso-ao-banco.md`](docs/acesso-ao-banco.md).
+
+---
+
+## Estrutura do repositório
+
+Mapa por diretório. A lista arquivo a arquivo vive nos docs de referência
+(linkados abaixo) — mantê-la em três lugares foi o que fez as três versões
+divergirem.
 
 ```
-ControleFinanceiro/
-├── .github/
-│   └── workflows/
-│       └── ci.yml              # CI: lint + testes no push/PR
-│
-├── data/
-│   └── DadosDoDashBoardAtual.xlsx  # Planilha legada (fonte original dos dados)
-│
-├── database/
-│   ├── 000_reset_completo.sql  # Reset completo do banco (⚠️ destrutivo)
-│   ├── 001_schema.sql          # Estrutura das tabelas
-│   ├── 002_rls_policies.sql    # Políticas de segurança (RLS)
-│   ├── 003_views_functions.sql # Views e funções de cálculo
-│   ├── 004_seed_data.sql       # Dados iniciais / configurações
-│   ├── 005_import_real_data.sql# Importação dos dados legados
-│   ├── 006–011_*.sql           # Audits, cascata, bolsas externas, saldo, batch RPC, balance_date
-│   ├── 012_save_editor_changes.sql  # Save do modo editor
-│   ├── 013_portuguese_months_batch_alerts_stats.sql  # Localização + alertas + stats
-│   ├── 014_audit_invalid_data.sql   # Audit de dados inválidos
-│   ├── 015_check_constraints.sql    # CHECK constraints de integridade
-│   ├── 016_save_project.sql        # RPC transacional save_project
-│   ├── 017_project_balances.sql    # Tabela de saldos mensais por projeto
-│   ├── 018_fix_security_definer_views.sql  # Corrige views SECURITY DEFINER
-│   ├── 019_fix_function_security.sql       # Segurança de funções RPC
-│   ├── 020_toggle_active.sql       # Triggers de auto-sync holder/project active
-│   ├── 021_integrity_fixes.sql     # Restrições de integridade adicionais
-│   ├── 022_remove_cascade_delete.sql  # FKs financeiras: CASCADE → RESTRICT
-│   ├── 023_database_triggers_audit.sql # Triggers de auditoria
-│   ├── 024_restrict_project_balances.sql # project_balances FK → RESTRICT
-│   ├── 025_plano_trabalho.sql    # Plano de Trabalho (rubricas, versões, desembolsos) + funape_managed
-│   ├── 026_balancetes.sql        # Balancete FUNAPE (PDF), conta_rubrica_map, Previsto x Realizado, bloqueia expenses em FUNAPE
-│   ├── 027_conta_rubrica_audit.sql # Seeds de mapeamento conta→rubrica descobertos na auditoria + cadastro inline na UI
-│   ├── 028_reconciliacao_bolsas.sql # cpf/education_level em holders, scholarship_type em scholarships, RPC apply_reconciliation
-│   ├── 029_holder_merge_reconciliacao_global.sql # apply_reconciliation global + RPC merge_holders
-│   ├── 030_delete_holder_cascade.sql # RPC delete_holder_cascade (exclusão consciente de bolsista com bolsas)
-│   ├── 031_reconciliacoes.sql      # Registro das reconciliações aplicadas + bucket bolsa-planilhas
-│   ├── 032_remove_funape_repurpose_expenses.sql # Remove funape_managed; expenses → monitoramento
-│   ├── 033_user_project_scoping.sql # Multi-tenancy: app_users, user_projects, RLS escopado
-│   ├── 034_professor_manage_projects_fechamento.sql # Professor gerencia projetos e roda o fechamento
-│   ├── 035_lockdown_anon.sql       # Fecha o role anon (EXECUTE em funções) + asserção de reauditoria
-│   ├── 036_search_path_hardening.sql # search_path fixo nas funções que ficaram sem
-│   ├── 037_linter_hardening.sql    # Warnings do Database Linter: policies e EXECUTE de triggers
-│   ├── 038_saldo_livre.sql         # RPC get_saldo_livre — previsto − realizado − compromissos
-│   ├── 039_simular_alocacao.sql    # RPC simular_alocacao — onde cabe um gasto, por risco de devolução
-│   ├── 040_panorama.sql            # RPC get_panorama + reparo de get_project_alerts
-│   └── utils/
-│       ├── generate_import_sql.py  # Gerador de SQL a partir do Excel
-│       └── check_dupes.py          # Verificador de duplicatas
-│
-├── docs/
-│   ├── architecture.md         # Ordem de scripts, padrão de módulos, auth
-│   ├── pages.md                # Dashboard, Projetos, Bolsistas, etc.
-│   ├── database.md             # Tabelas, RPCs, views, migrations
-│   └── globals.md              # Utilitários globais de supabase-config.js
-│
-├── frontend/
-│   ├── index.html              # Ponto de entrada da aplicação
-│   ├── css/
-│   │   └── style.css           # Design system completo (~1700 linhas)
-│   ├── images/
-│   │   └── lapig-logo.svg      # Logo institucional LAPIG
-│   ├── js/
-│   │   ├── app.js              # Bootstrap e utilitários globais
-│   │   ├── auth.js             # Autenticação Supabase
-│   │   ├── chart-builder.js    # Wrapper para Chart.js
-│   │   ├── pure-fns.js         # Funções utilitárias puras (ES module + window bridge)
-│   │   ├── router.js           # Sistema de rotas SPA
-│   │   ├── simulation.js       # Engine de simulação financeira
-│   │   ├── supabase-config.js  # Configuração do cliente Supabase
-│   │   └── pages/
-│   │       ├── crud-page.js    # Fábrica genérica de CRUD
-│   │       ├── dashboard.js    # Dashboard geral consolidado
-│   │       ├── projetos.js     # Seletor de projetos + KPIs
-│   │       ├── gestao-projetos.js  # Editor/CRUD de projetos
-│   │       ├── saldos.js       # Saldos mensais por projeto
-│   │       ├── holders.js      # Gestão de bolsistas
-│   │       ├── funding.js      # Desembolsos (CrudPage)
-│   │       ├── expenses.js     # Gastos gerais (CrudPage)
-│   │       ├── hub.js         # Visão do Projeto (experimental, somente leitura)
-│   │       ├── assistente.js  # Assistente: conversa sobre os dados (fase 3 da camada de IA)
-│   │       └── plano-trabalho.js  # Plano de Trabalho + Balancete (3 abas, import em lote)
-│   │
-│   │   ├── ai/
-│   │   │   ├── tools.js            # As 9 tools sobre as RPCs de decisão (irmão de mcp/src/tools.js)
-│   │   │   ├── agent.js            # Laço de tool calling + enquadramento (system prompt)
-│   │   │   └── markdown.js         # Markdown mínimo da resposta (escapa antes de formatar)
-│   │   ├── components/
-│   │   │   ├── docx-split-view.js  # Split-view de revisão de DOCX
-│   │   │   └── pdf-split-view.js   # Split-view de revisão de PDF
-│   │   └── parsers/
-│   │       ├── pt-parser.js        # Parser determinístico de Plano de Trabalho (DOCX → JSON)
-│   │       ├── balancete-parser.js # Parser determinístico de Balancete (PDF → JSON)
-│   │       ├── pt-rubrica-lookup.js # Tabela de aliases de rubricas
-│   │       ├── bolsa-parser.js     # Parser da planilha de bolsas FUNAPE (XLSX → JSON, via SheetJS)
-│   │       └── bolsa-comparator.js # Comparador planilha × banco (novos/removidos/alterados/iguais)
-│   └── vendor/                 # Fallback local dos CDN libs
-│       ├── chart.umd.js
-│       ├── lucide.js
-│       ├── mammoth.browser.min.js  # (baixar de jsdelivr/mammoth@1.8.0)
-│       ├── pdf.min.js              # (baixar de jsdelivr/pdfjs-dist@3.11.174)
-│       ├── xlsx.full.min.js        # (baixar de jsdelivr/xlsx@0.18.5) — SheetJS para Reconciliação
-│       └── supabase.js
-│
-├── supabase/
-│   └── functions/
-│       ├── assistente/             # Edge Function: proxy do Ollama Cloud (guarda a chave)
-│       ├── extract-plano-trabalho/ # Edge Function: DOCX → JSON (Ollama) — deprecated
-│       └── extract-balancete/      # Edge Function: PDF → JSON (Ollama) — deprecated
-│
-├── tests/
-│   ├── simulation.test.js      # Testes do SimulationEngine
-│   ├── utils.test.js            # Testes de funções utilitárias
-│   ├── pt-parser.test.js        # Testes do parser de Plano de Trabalho
-│   ├── balancete-parser.test.js # Testes do parser de Balancete
-│   ├── ai-tools.test.js         # Contrato das tools + trava anti-deriva contra o MCP
-│   ├── ai-agent.test.js         # Laço de tool calling (modelo e banco dublês)
-│   ├── ai-markdown.test.js      # Escape da resposta do modelo (XSS)
-│   ├── fixtures/                # HTMLs de exemplo de Planos de Trabalho reais
-│   └── sql/
-│       └── test_rpcs.sql        # Testes de integração das RPCs
-│
-├── CLAUDE.md                   # Guia para Claude Code
-├── eslint.config.mjs           # Configuração do ESLint
-├── package.json                # Dev dependencies (eslint, vitest)
-├── vitest.config.js            # Configuração do Vitest
-├── n8n-keep-alive-lapig.json   # Workflow n8n: keep-alive do Supabase (leitura a cada 2 dias)
-├── N8N_KEEP_ALIVE_SETUP.md     # Guia de importação do workflow de keep-alive
-└── README.md
+├── frontend/          Aplicação (index.html + css/ + js/ + images/ + vendor/)
+│   └── js/            app, auth, router, chart-builder, simulation, pure-fns,
+│                      import-queue · pages/ · parsers/ · components/ · ai/
+├── database/          Migrações SQL 000–041, em ordem · utils/ (scripts Python)
+├── docs/              Documentação de referência (índice em docs/README.md)
+├── tests/             Vitest (parsers, simulação, camada de IA) · sql/ (roteiros)
+├── mcp/               Servidor MCP — pacote Node próprio (fase 2 da camada de IA)
+├── supabase/          config.toml da stack local · functions/ (Edge Functions)
+├── tools/             Utilitários operacionais (n8n, userscript, réplica local)
+├── data/              Planilha legada (não versionada — ver data/README.md)
+└── .github/workflows/ CI (lint + testes) e deploy (GitHub Pages)
 ```
+
+---
+
+## Documentação
+
+O índice completo está em [`docs/README.md`](docs/README.md). Os quatro pontos
+de partida:
+
+| Documento | Para quê |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | Ordem de carga dos scripts, padrão de módulos, auth, camada de decisão |
+| [`docs/pages.md`](docs/pages.md) | O que cada tela faz e de onde tira os dados |
+| [`docs/database.md`](docs/database.md) | Tabelas, RPCs, views e o histórico das migrações |
+| [`docs/tutorial-novo-usuario.md`](docs/tutorial-novo-usuario.md) | Para quem vai **usar** o sistema, não mexer nele |
 
 ---
 
 ## Funcionalidades
 
-- **Dashboard Geral** — KPIs consolidados, gráfico de projeção mensal, painel de bolsistas ativos, alertas via sino de notificação
-- **Projetos** — Seletor suspenso, gráfico mensal por projeto, painel de bolsistas, Modo Editor com simulação em tempo real
-- **Bolsistas** — CRUD completo + visualização de rendimentos mensais com gráfico de barras empilhadas por projeto. Aba **Reconciliação** importa a planilha FUNAPE (.xlsx, via SheetJS), compara com o banco (novos/removidos/alterados/iguais) e aplica as mudanças aprovadas (`apply_reconciliation`). Ferramenta de **merge de duplicados** (automático por nome + manual) via `merge_holders`; exclusão em cascata consciente via `delete_holder_cascade`
-- **Visão do Projeto (Hub)** — tela experimental consolidada (somente leitura) com os 4 KPIs-chave de um projeto e atalhos para cada área
-- **Desembolsos e Gastos** — Registro e acompanhamento por projeto
-- **Plano de Trabalho** — Página com 3 abas (importação em **lote**: fila selection→review com "Arquivo X de N" e Salvar/Pular):
-  - **Orçamento** — Import de DOCX (plano + remanejamentos) com extração determinística de rubricas via `pt-parser.js` (Mammoth.js → HTML → parser) e versionamento
-  - **Balancetes** — Import de PDF mensal da FUNAPE com extração determinística via `balancete-parser.js` (pdf.js → texto → regex), mapeamento automático conta → rubrica (`resolve_rubrica_for_conta`) e cadastro inline de novos mapeamentos
-  - **Previsto x Realizado** — Comparação do orçamento previsto com o realizado por rubrica, % executado e saldo disponível
-- **Saldos** — Saldo mensal por projeto com salvamento em lote das linhas alteradas (`upsert_project_balance`) e aviso ao trocar de tela com mudanças não salvas
-- **Autenticação** — Login seguro via Supabase Auth com persistência de sessão
+**Rotina mensal**
 
-### Keep-alive do Supabase via n8n
+- **Fechamento Mensal** — checklist da competência (projeto ativo × balancete ×
+  planilha de bolsas × plano ativo) e um botão único que abre a fila de
+  importação com os 3 handlers, roteando cada arquivo por extensão com revisão
+  humana um a um.
+- **Saldos** — saldo mensal por projeto, com salvamento em lote das linhas
+  alteradas e aviso ao sair da tela com mudanças pendentes.
 
-O plano gratuito do Supabase pausa após 7 dias sem atividade. O workflow `n8n-keep-alive-lapig.json` faz uma query de leitura idêntica à da landing page a cada 2 dias, mantendo o banco ativo sem alterar dados. Instruções de importação em `N8N_KEEP_ALIVE_SETUP.md`.
+**Acompanhamento**
+
+- **Projetos** — seletor, projeção mensal, painel de bolsistas e Modo Editor com
+  simulação em tempo real (o cálculo JS espelha o SQL).
+- **Visão do Projeto (Hub)** — tela agregadora (somente leitura) com os 4
+  KPIs-chave e atalhos para cada área, incluindo a pasta do projeto no Drive.
+- **Plano de Trabalho** — 3 abas: **Orçamento** (import de DOCX/PDF com extração
+  determinística e versionamento), **Balancetes** (import do PDF mensal da
+  FUNAPE, mapeamento conta → rubrica) e **Previsto × Realizado**.
+- **Visão Geral** — KPIs consolidados, projeção agregada e sino de alertas.
+
+**Cadastros**
+
+- **Bolsistas** — CRUD, rendimentos mensais e aba **Reconciliação**: importa a
+  planilha FUNAPE (XLSX), compara com o banco (novos/removidos/alterados/iguais)
+  e aplica o aprovado numa transação. Inclui merge de duplicados e exclusão em
+  cascata consciente.
+- **Gestão de Projetos**, **Desembolsos**, **Observações**, **Usuários &
+  Centros de Custo** (admin).
+
+**Assistente** — aba de conversa sobre os dados do sistema. Ver abaixo.
 
 ---
 
-## Dev Tooling
+## Extração de documentos (determinística)
 
-```bash
-npm ci          # instala dependências de desenvolvimento
-npm run lint    # roda ESLint no frontend/js/
-npm test        # roda Vitest em tests/
-```
+Tudo que entra por arquivo é parseado **no browser, sem modelo de IA**:
 
-CI via GitHub Actions: lint + testes em todo push/PR para main/master.
+| Origem | Caminho |
+|---|---|
+| Plano de Trabalho DOCX | `mammoth` → HTML → `pt-parser.js` |
+| Plano de Trabalho PDF | `pdf.js` → linhas → `pt-pdf-parser.js` |
+| Balancete PDF | `pdf.js` → texto → `balancete-parser.js` |
+| Planilha de bolsas XLSX | SheetJS → `bolsa-parser.js` → `bolsa-comparator.js` |
+
+O plano PROAD tem **dois** parsers porque o pdf.js não entrega estrutura de
+tabela. Os modelos fora do padrão (FAPEG, prefeitura/emenda impositiva) estão em
+[`docs/planos-fora-do-padrao.md`](docs/planos-fora-do-padrao.md).
 
 ---
 
-## Configuração
+## Camada de IA
 
-1. Crie um projeto no [Supabase](https://supabase.com)
-2. Execute os scripts SQL em `/database/` na ordem numérica (001 → 040)
-3. Preencha as credenciais em `frontend/js/supabase-config.js`
-4. Abra `frontend/index.html` no navegador (ou sirva com qualquer servidor estático)
+Três fases sobre as **mesmas** RPCs de decisão (038/039/040), com uma regra
+dura: **zero lógica financeira fora do banco**. Todo número sai de RPC — duas
+implementações da mesma conta divergiriam do site.
 
-A ordem importa e o alvo é a **última** migração, não uma parada intermediária: as
-RPCs da camada de decisão nascem nas 038/039/040, e o servidor MCP (`mcp/`) não
-sobe sem elas.
+1. **RPCs de decisão** (`database/038`–`040`) — `get_saldo_livre` (quanto sobra
+   neste centro), `simular_alocacao` (onde cabe este gasto) e `get_panorama`
+   (como estão os centros). `panorama` **descreve**; `simular_alocacao`
+   **ranqueia**.
+2. **Servidor MCP** ([`mcp/README.md`](mcp/README.md)) — adaptador para clientes
+   de IA de terceiros. Autentica com o login de cada pessoa, então o RLS é a
+   barreira; o servidor não tem lógica de permissão própria.
+3. **Aba Assistente** (`frontend/js/ai/` + Edge Function
+   [`assistente`](supabase/functions/assistente/README.md)) — tool calling
+   nativo, com o laço rodando **no browser**: as tools chamam as RPCs pelo
+   `supabaseClient` já logado (mesmo JWT, mesmo RLS das outras telas). A tela
+   mostra **qual RPC foi consultada**, com o JSON cru dobrável embaixo de cada
+   passo — é assim que se confere a regra sem acreditar na palavra do modelo:
+   número na resposta sem passo correspondente é invenção. À Edge Function
+   sobrou guardar a `OLLAMA_API_KEY` e a allowlist de modelos.
 
-### Servidor MCP (`mcp/`)
-
-Adaptador para clientes de IA sobre as RPCs de decisão (038/039/040). Autentica
-com o login de cada pessoa, então o RLS é quem decide o que aparece. Instalação,
-registro e conferência em [`mcp/README.md`](mcp/README.md).
-
-### Assistente (`frontend/js/ai/` + Edge Function `assistente`)
-
-Aba de conversa sobre os dados do sistema — a fase 3 da camada de IA, sobre as
-mesmas RPCs de decisão que o MCP. O laço de tool calling roda **no browser**, e
-as tools consultam as RPCs pelo `supabaseClient` já logado: mesmo JWT, mesmo
-RLS, mesmo caminho das outras telas. A Edge Function
-[`assistente`](supabase/functions/assistente/README.md) ficou só com o que não
-pode ir no bundle público — a `OLLAMA_API_KEY` — e com a allowlist de modelos
-que alimenta o seletor da tela.
-
-A tela mostra **quais RPCs foram consultadas**, com o JSON cru dobrável embaixo
-de cada uma. Isso não é enfeite: a regra da camada é que todo número sai de RPC,
-e o passo visível é como se confere isso sem acreditar na palavra do modelo.
+`tests/ai-tools.test.js` trava a lista de tools e o bloco de regras do
+adaptador do site contra o do MCP, palavra por palavra — os dois são separados
+só por encanamento (stdio/npm × módulo ES sem build), e é o tipo de par que
+deriva em silêncio.
 
 ### Edge Functions de extração (deprecated)
 
-As Edge Functions `extract-plano-trabalho` e `extract-balancete` eram proxies para o Ollama Cloud (`kimi-k2.6:cloud`) e estão **deprecated desde 2026-05**. O frontend não as chama mais — a extração é 100% determinística via parsers no browser:
-
-- **DOCX** → `mammoth.browser.min.js` (CDN) extrai HTML → `pt-parser.js` parseia tabelas de rubricas e desembolsos
-- **PDF** → `pdfjsLib` (CDN `pdfjs-dist@3.11.174` + worker) extrai texto com quebras preservadas pela coordenada Y → `balancete-parser.js` parseia lançamentos contábeis
-
-As funções permanecem em `supabase/functions/` como histórico. Se necessário, deploy manual via `supabase functions deploy <name>`. O secret `OLLAMA_API_KEY` que elas usavam voltou a ser consumido — agora pela Edge Function `assistente`, que é a única a chamar o Ollama em runtime.
-
-**Bibliotecas para fallback offline:**
-- `mammoth.browser.min.js` de `https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js`
-- `pdf.min.js` de `https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js`
+`extract-plano-trabalho` e `extract-balancete` eram proxies do Ollama Cloud e
+estão **deprecated desde 2026-05**: o frontend não as chama mais (a extração é
+determinística). Permanecem deployadas como histórico.
 
 ---
 
-## Versionamento
+## Operação
 
-Este repositório segue o fluxo de trabalho simplificado:
+- **Keep-alive do Supabase** — o plano gratuito pausa após 7 dias sem atividade.
+  O workflow `tools/n8n-keep-alive-lapig.json` faz, a cada 2 dias, uma leitura
+  idêntica à da landing page. Importação em
+  [`docs/keep-alive-n8n.md`](docs/keep-alive-n8n.md).
+- **Publicação** — `.github/workflows/deploy.yml` publica `frontend/` no GitHub
+  Pages. Antes de tornar o repositório público, cumprir o checklist de
+  [`docs/seguranca-publicacao.md`](docs/seguranca-publicacao.md) — em especial
+  **desativar o signup** no Supabase Auth.
+- **Teste local do banco** — três níveis (sintético, réplica raspada de PII e
+  stack Supabase completa) em
+  [`tools/replica-local/README.md`](tools/replica-local/README.md).
 
-- `main` — versão estável em produção
-- Commits com prefixo convencional: `feat:`, `fix:`, `chore:`, `docs:`
+---
+
+## Convenções
+
+- **Commits convencionais:** `feat:`, `fix:`, `chore:`, `docs:`.
+- `main` — versão estável em produção.
+- Valores monetários são `numeric` (não centavos inteiros); exibição via
+  `formatBRL()`.
+- Chaves de `localStorage` usam o prefixo `cf_`.
+- Bibliotecas de CDN carregam com hash SRI e caem para `frontend/vendor/` se o
+  CDN falhar.

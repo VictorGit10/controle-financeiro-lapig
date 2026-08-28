@@ -73,13 +73,15 @@ Monthly balance entry per project. Uses `get_balances_for_month` RPC to list all
 - **Dirty tracking** — changed rows highlighted; batch save via `upsert_project_balance` RPC (salva em lote todas as linhas marcadas como sujas); discard button with confirmation
 - **Guard de navegação** — `registerGuard`/`registerDirtyChecker` (`isDirty` = `dirtyRows.size > 0`): ao trocar de rota com saldos pendentes, pede confirmação antes de descartar; o `beforeunload` em `app.js` avisa ao fechar/recarregar a aba
 
-## FundingPage (`funding.js`) and ExpensesPage (`expenses.js`)
+## FundingPage (`funding.js`) and MonitoramentoPage (`monitoramento.js`)
 
 Both built on the generic `CrudPage` module with server-side pagination, debounced search (300ms), and CSV export. O campo de data usa `<input type="date">` nativo (antes era texto livre).
 
 **Funding** — entity "Desembolso" (masculine), table `funding_releases`, stats via `funding_stats` RPC (total + count). Fields: project, description, date+amount (composite row), notes.
 
-**Expenses** — entity "Gasto" (masculine), table `expenses`, stats via `expenses_stats` RPC (total + count + category count). Fields: project, description, date+amount (composite row), category (with `<datalist>` suggestions), notes. Values display with `currency--negative` CSS class. **Projetos FUNAPE são filtrados do dropdown de projeto** (gastos vêm do balancete; o backend bloqueia inserts via trigger `block_expenses_for_funape`).
+**Observações** — entity "Observação" (feminine), table `monitoramento`, stats via `monitoramento_stats` RPC (count). Fields: project, date (`note_date`), free text (`observacao`). Rota `monitoramento`, ícone `clipboard-list`.
+
+> **Substituiu a antiga aba "Gastos"** (`expenses.js` + tabela `expenses`), removida pela migração 032. A execução financeira não é mais digitada: vem do **balancete** da FUNAPE. O que sobrou de útil era o texto livre — "compra de equipamento de R$ 50 mil enquanto não entra no saldo" —, e é isso que a tabela `monitoramento` guarda. O histórico textual de `expenses` foi migrado para lá pela própria 032; os campos financeiros (`amount`, `category`) não têm equivalente, de propósito.
 
 ## PlanoTrabalhoPage (`plano-trabalho.js`)
 
@@ -126,7 +128,7 @@ Rotina de conciliação mensal — a porta de entrada única dos 3 artefatos que
 
 - **Seletor de competência** — `<input type="month">`, default mês anterior (o fechamento cuida do mês que passou).
 - **4 stat cards** — Projetos fechados (balancete + bolsas ok), Balancetes, Planilhas de bolsas, Planos ativos (X / total).
-- **Checklist da competência** — tabela com os projetos `funape_managed` ativos × colunas Plano de Trabalho (ativo?), Balancete (existe `balancetes.data_referencia` no mês?) e Planilha de Bolsas (existe `reconciliacoes.competencia` no mês? — migração 031; sem a migração mostra banner de aviso).
+- **Checklist da competência** — tabela com os projetos ativos × colunas Plano de Trabalho (ativo?), Balancete (existe `balancetes.data_referencia` no mês?) e Planilha de Bolsas (existe `reconciliacoes.competencia` no mês? — migração 031; sem a migração mostra banner de aviso). Todo projeto é da FUNAPE desde a mig. 032 — não há mais filtro por `funape_managed`.
 - **Importar arquivos do mês** — abre a **ImportQueue** com os 3 handlers ao mesmo tempo (`PlanoTrabalhoPage.getImportHandlers()` + `HoldersPage.getBolsaImportHandler({ defaultCompetencia })`): PDFs viram balancetes, DOCX viram planos/remanejamentos, XLSX viram reconciliações de bolsas — tudo numa fila só, com badge de tipo por arquivo e revisão human-in-the-loop um-por-um.
 
 ## ImportQueue (`js/import-queue.js`)
@@ -139,7 +141,8 @@ Página **experimental** (somente leitura) que agrega numa tela só os 4 KPIs-ch
 
 - **Seletor de projeto** — compartilha `cf_selected_project_id` com a aba Projetos de propósito (ideia de "projeto atual" único). Botões "Abrir" propagam o projeto para a tela de destino.
 - **4 KPI cards** — Saldo Atual (+ rendimento), Execução do Orçamento (% previsto×realizado, colorido), Bolsas/Mês (custo mensal + nº encerrando em 90d), Saldo Projetado (último mês da projeção).
-- **Blocos por área** — Orçamento, Bolsistas, Execução (Balancete FUNAPE para `funape_managed` ou Gastos para projetos não-FUNAPE), Vigência & Saldo — cada um com botão "Abrir ..." que navega via `Router`.
+- **Blocos por área** — Orçamento, Bolsistas, Execução (Balancete FUNAPE), Vigência & Saldo — cada um com botão "Abrir ..." que navega via `Router`.
+- **Link para a pasta do Drive** — quando `projects.drive_folder_url` está preenchido (mig. 041), o cabeçalho mostra um botão que abre a pasta do projeto no Google Drive.
 - **Fontes** — `projects`, `scholarships`, `calc_project_monthly`, `get_previsto_vs_realizado`, `monitoramento` (carregadas em paralelo com `Promise.all`).
 
 ## UsuariosPage (`usuarios.js`) — admin-only

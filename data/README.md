@@ -1,7 +1,17 @@
-# Dados de Referência
+# Dados de referência (não versionados)
 
-Dados legados usados como fonte original para popular o banco de dados.
+Fonte original dos dados legados, usada uma única vez para popular o banco.
 
-## DadosDoDashBoardAtual.xlsx
+## `DadosDoDashBoardAtual.xlsx`
 
-Planilha original do dashboard LAPIG com dados de projetos, bolsistas, desembolsos e gastos. Usada pelo script `database/utils/generate_import_sql.py` para gerar o SQL de importação (migration 005).
+Planilha do dashboard LAPIG anterior à migração — projetos, bolsistas,
+desembolsos e gastos. Alimenta `database/utils/generate_import_sql.py`, que
+gerou `database/005_import_real_data.sql`.
+
+**O arquivo não está no repositório.** O `.gitignore` exclui `*.xlsx`, e por dois
+motivos independentes: a planilha traz nomes de bolsistas (o repositório é
+público) e é um binário grande que não ganha nada com versionamento. Quem
+precisar reexecutar o gerador tem que colocar a planilha aqui manualmente.
+
+O resultado da importação — o SQL gerado — está versionado e é o que importa:
+o `005` já foi expurgado de nomes reais (ver o histórico do repositório).

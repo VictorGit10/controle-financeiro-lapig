@@ -6,7 +6,7 @@
 
 - **Content-Security-Policy** — configured via `<meta>` tag in `index.html`, restricts script/style/font/connect sources
 - **Subresource Integrity (SRI)** — all CDN scripts include `integrity` hashes; tampered CDN responses are rejected
-- **CDN fallback** — if a CDN script fails to load, a local copy from `frontend/vendor/` is used via `document.write` fallback
+- **CDN fallback** — if a CDN script fails to load, a local copy from `frontend/vendor/` is used via `document.write` fallback. As 7 cópias existem no diretório (até 2026-08-28 faltavam mammoth e pdf.js — as duas importações que mais dependem disso). Procedimento de atualização e conferência do hash em [`frontend/vendor/README.md`](../frontend/vendor/README.md)
 - **Sentry** — optional error monitoring, enabled by setting `window.SENTRY_DSN` before `supabase-config.js` loads
 
 ## Script Load Order
@@ -19,10 +19,10 @@ Scripts in `index.html` must load in dependency order. Changing the order will b
 5. `router.js` — no dependencies
 6. `chart-builder.js` — depends on Chart.js (CDN)
 7. `pages/crud-page.js` — depends on `supabaseClient`, `handleSupabaseResponse`
-8. Page modules (projetos, gestao, holders, saldos, funding, expenses, plano-trabalho, fechamento, hub, assistente, dashboard) — depend on `Router`, `supabaseClient`, `ChartBuilder`, `SimulationEngine`, `CrudPage`, `ImportQueue` (`js/import-queue.js`, carregado logo após `router.js`)
+8. Page modules (dashboard, saldos, projetos, gestao, holders, funding, monitoramento, plano-trabalho, fechamento, hub, assistente, usuarios) — depend on `Router`, `supabaseClient`, `ChartBuilder`, `SimulationEngine`, `CrudPage`, `ImportQueue` (`js/import-queue.js`, carregado logo após `router.js`)
 9. `app.js` — bootstrap, depends on `Router`, `Auth`. Registra também um handler `beforeunload` que chama `Router.hasUnsavedChanges()` para avisar ao fechar/recarregar a aba com mudanças pendentes.
 
-The page `plano-trabalho` also depends on `mammoth` (DOCX → HTML, CDN com fallback em `frontend/vendor/mammoth.browser.min.js`), `pdfjsLib` (PDF → texto, CDN `pdfjs-dist@3.11.174` + worker), e dos parsers determinísticos `pt-parser.js` / `balancete-parser.js` (ES modules bridge-ados ao `window` como `parsePtFromHtml` / `parseBalanceteText`). A importação é em **lote** (`ImportQueue`, componente global): uma fila selection→review percorre N arquivos com "Arquivo X de N" e Salvar/Pular, roteando cada arquivo para o handler do seu tipo (PDF → balancete, DOCX → plano, XLSX → bolsas FUNAPE). O CSP em `index.html` inclui `worker-src 'self' https://cdn.jsdelivr.net blob:` para permitir o worker do pdf.js.
+The page `plano-trabalho` also depends on `mammoth` (DOCX → HTML, CDN com fallback em `frontend/vendor/mammoth.browser.min.js`), `pdfjsLib` (PDF → texto, CDN `pdfjs-dist@3.11.174` + worker), e dos parsers determinísticos `pt-parser.js` / `balancete-parser.js` (ES modules bridge-ados ao `window` como `parsePtFromHtml` / `parseBalanceteText`). A importação é em **lote** (`ImportQueue`, componente global): uma fila selection→review percorre N arquivos com "Arquivo X de N" e Salvar/Pular, roteando cada arquivo para o handler do seu tipo (PDF → balancete, DOCX → plano, XLSX → bolsas FUNAPE). O CSP em `index.html` inclui `worker-src 'self' https://cdn.jsdelivr.net blob:` para permitir o worker do pdf.js **das duas origens**: o `workerSrc` é escolhido em runtime e só aponta para `vendor/pdf.worker.min.js` quando o próprio `pdf.min.js` veio do vendor. Buscar o worker no CDN depois de o CDN ter falhado derrubaria o worker junto, e o pdf.js cairia no *fake worker* — parse na thread principal, tela travada em PDF grande.
 
 The page `holders` (aba Reconciliação) depende de `XLSX` (SheetJS, CDN `xlsx@0.18.5` + fallback em `frontend/vendor/xlsx.full.min.js`) e dos parsers `bolsa-parser.js` / `bolsa-comparator.js` (ES modules bridge-ados ao `window` como `parseBolsaSpreadsheet` / `compareBolsaData`).
 
