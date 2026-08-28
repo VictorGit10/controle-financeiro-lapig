@@ -7,7 +7,7 @@
   <meta name="description" content="Sistema de controle financeiro para gestão de projetos, bolsas e desembolsos.">
   <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
   <link rel="apple-touch-icon" href="images/favicon.svg">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://js.sentry-cdn.com; worker-src 'self' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://skxiivmkhpegefafdlty.supabase.co https://o450*.ingest.sentry.io https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://js.sentry-cdn.com; worker-src 'self' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://skxiivmkhpegefafdlty.supabase.co https://*.ingest.sentry.io https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';">
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,8 +39,15 @@
   <script>if(typeof pdfjsLib==="undefined")document.write('<script src="vendor/pdf.min.js"><\/script>');</script>
   <script>
     if (typeof pdfjsLib !== 'undefined') {
+      // O worker precisa vir da MESMA origem do pdf.min.js que efetivamente
+      // carregou. Se o CDN caiu e entramos pelo vendor/, apontar o worker
+      // para o CDN o derruba junto: o pdf.js cai no "fake worker" (parse na
+      // thread principal) e a importação de balancete trava a tela.
+      // A detecção é confiável porque o fallback acima insere a tag no DOM.
       pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        document.querySelector('script[src="vendor/pdf.min.js"]')
+          ? 'vendor/pdf.worker.min.js'
+          : 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
     }
   </script>
 

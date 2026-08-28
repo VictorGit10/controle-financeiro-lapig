@@ -1,0 +1,12 @@
+# Bibliotecas de terceiros: cópias byte-idênticas ao que o CDN serve.
+#
+# Sem isto o Git converte LF → CRLF no checkout (Windows) e o arquivo local
+# deixa de bater com o upstream — o que mata a única forma barata de conferir
+# que a cópia vendorizada não foi adulterada:
+#
+#   openssl dgst -sha384 -binary <arquivo> | openssl base64 -A
+#
+# O resultado tem que ser igual ao `integrity` do <script> do CDN em
+# frontend/index.html. As tags de fallback não carregam `integrity` (o browser
+# não valida SRI em same-origin), então essa conferência manual é a verificação.
+frontend/vendor/*.js -text -diff

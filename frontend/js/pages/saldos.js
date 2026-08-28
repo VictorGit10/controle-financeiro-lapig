@@ -285,48 +285,97 @@ const SaldosPage = (() => {
 
   /* ── Save ────────────────────────────────────────────────── */
 
+  // Lê um campo numérico da linha. Devolve `null` para "não informado" e
+  // `NaN` para lixo digitado — os dois casos são distintos e nenhum dos
+  // dois pode virar 0 silenciosamente (ver saveAllChanges).
+  function readNumber(projectId, field) {
+    const input = containerEl.querySelector(`input[data-field="${field}"][data-project-id="${projectId}"]`);
+    const raw = input?.value.trim();
+    if (raw === '' || raw === undefined) return null;
+    return parseFloat(raw);
+  }
+
   async function saveAllChanges() {
     if (dirtyRows.size === 0) {
       showToast('Nenhuma alteração para salvar.', 'info');
       return;
     }
 
-    const promises = [];
+    // Campo vazio significa "não informado", mas as colunas são NOT NULL
+    // DEFAULT 0 (migração 017) — então enviar 0 não grava "vazio", grava a
+    // afirmação "a conta está zerada". Isso não é só cosmético: o trigger
+    // sync_project_balance copia o saldo mais recente para
+    // projects.initial_balance, que alimenta calc_project_monthly e toda
+    // projeção da aba Projetos e do Dashboard.
+    //
+    // Portanto: nunca inventamos um número. Se o campo está vazio e já
+    // existe linha salva, preservamos o valor salvo; se não existe linha,
+    // recusamos a gravação e dizemos qual projeto e por quê.
+    const payloads  = [];
+    const problemas = [];
 
     dirtyRows.forEach(projectId => {
-      const balanceInput  = containerEl.querySelector(`input[data-field="initial_balance"][data-project-id="${projectId}"]`);
-      const yieldInput    = containerEl.querySelector(`input[data-field="yield_amount"][data-project-id="${projectId}"]`);
-      const dateInput     = containerEl.querySelector(`input[data-field="balance_date"][data-project-id="${projectId}"]`);
+      const stored   = allRows.find(r => r.project_id === projectId);
+      const nome     = stored?.project_name || 'projeto';
+      const temLinha = !!stored && stored.id !== null;
 
-      const rawBalance = balanceInput?.value.trim();
-      const rawYield   = yieldInput?.value.trim();
-      const initialBalance = rawBalance !== '' ? parseFloat(rawBalance) : null;
-      const yieldAmount    = rawYield !== '' ? parseFloat(rawYield) : null;
-      const balanceDate    = dateInput?.value || null;
+      const initialBalance = readNumber(projectId, 'initial_balance');
+      const yieldAmount    = readNumber(projectId, 'yield_amount');
+      const balanceDate    = containerEl.querySelector(`input[data-field="balance_date"][data-project-id="${projectId}"]`)?.value || null;
 
-      // Skip rows with no balance, no yield, and no date — nothing to save
+      // Linha totalmente vazia: nada a salvar (é o único caso em que
+      // "vazio" já era representável antes desta correção).
       if (initialBalance === null && yieldAmount === null && !balanceDate) return;
 
-      // If we have balance/yield but no date, default to 1st of reference month
-      const resolvedDate = balanceDate
-        ? balanceDate
-        : (initialBalance !== null || yieldAmount !== null)
-          ? `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`
-          : null;
+      if (Number.isNaN(initialBalance) || Number.isNaN(yieldAmount)) {
+        problemas.push(`${nome}: valor inválido — use apenas números.`);
+        return;
+      }
 
-      promises.push(
-        supabaseClient.rpc('upsert_project_balance', {
-          p_project_id:      projectId,
-          p_reference_month:  currentMonth,
-          p_reference_year:   currentYear,
-          p_initial_balance:  initialBalance ?? 0,
-          p_yield_amount:     yieldAmount ?? 0,
-          p_balance_date:     resolvedDate,
-        })
-      );
+      if (initialBalance === null && !temLinha) {
+        problemas.push(`${nome}: informe o saldo. Deixar em branco gravaria R$ 0,00, que o sistema lê como conta zerada e usa nas projeções.`);
+        return;
+      }
+
+      // A data tem que cair no mês de referência — é o
+      // chk_balance_date_matches_month da migração 017. Sem esta checagem o
+      // constraint estoura no banco e o toast mostra o erro cru do Postgres
+      // (acontece toda vez que o saldo de junho é informado em 3 de julho).
+      if (balanceDate) {
+        const [ano, mes] = balanceDate.split('-').map(Number);
+        if (mes !== currentMonth || ano !== currentYear) {
+          problemas.push(`${nome}: a data ${formatDate(balanceDate)} está fora de ${MONTH_NAMES[currentMonth - 1]}/${currentYear}. Informe uma data do mês de referência ou troque o mês no seletor acima.`);
+          return;
+        }
+      }
+
+      payloads.push({
+        p_project_id:      projectId,
+        p_reference_month: currentMonth,
+        p_reference_year:  currentYear,
+        // Vazio + linha existente = preserva o que está salvo (editar só o
+        // rendimento não pode zerar o saldo). Vazio + linha nova só chega
+        // aqui no rendimento, cujo zero é semanticamente correto.
+        p_initial_balance: initialBalance ?? Number(stored?.initial_balance ?? 0),
+        p_yield_amount:    yieldAmount ?? Number(stored?.yield_amount ?? 0),
+        p_balance_date:    balanceDate || `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`,
+      });
     });
 
-    const results = await Promise.allSettled(promises);
+    if (problemas.length > 0) {
+      const extra = problemas.length > 1 ? ` (e mais ${problemas.length - 1})` : '';
+      showToast(problemas[0] + extra, 'error');
+      return;
+    }
+
+    if (payloads.length === 0) {
+      showToast('Nenhuma alteração para salvar.', 'info');
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      payloads.map(p => supabaseClient.rpc('upsert_project_balance', p))
+    );
     const failures = results.filter(r => r.status === 'rejected' || r.value?.error);
 
     if (failures.length > 0) {

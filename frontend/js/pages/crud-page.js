@@ -4,6 +4,7 @@
    Supports server-side pagination, search, and CSV export.
    ============================================================ */
 
+/* exported CrudPage -- global de script clássico: consumido por funding.js, monitoramento.js e usuarios.js. */
 function CrudPage(config) {
   const {
     tableName,
@@ -208,8 +209,15 @@ function CrudPage(config) {
       .select(selectClause)
       .order(dateField, { ascending: false });
 
-    if (error || !data) {
+    // `error` e `!data` são casos diferentes: sem esta separação, uma
+    // resposta sem erro e sem linhas caía no `error.message` e lançava
+    // TypeError — o botão Exportar quebrava em vez de avisar.
+    if (error) {
       showToast('Erro ao exportar: ' + error.message, 'error');
+      return;
+    }
+    if (!data || data.length === 0) {
+      showToast('Nada a exportar.', 'info');
       return;
     }
 

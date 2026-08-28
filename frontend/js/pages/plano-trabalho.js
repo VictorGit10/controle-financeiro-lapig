@@ -728,14 +728,18 @@ const PlanoTrabalhoPage = (() => {
   async function excluir(planoId) {
     const ok = await confirmAction('Excluir esta versão do plano? Esta ação não pode ser desfeita.');
     if (!ok) return;
-    // Apaga arquivo do storage se houver
     const { data: row } = await supabaseClient
       .from('planos_trabalho').select('arquivo_storage_path').eq('id', planoId).maybeSingle();
+
+    // O registro sai primeiro, o arquivo depois. Na ordem inversa, um delete
+    // que falhe (RLS, FK) deixa a linha viva apontando para um arquivo que
+    // não existe mais, e o botão Baixar quebra sem forma de recuperar.
+    // Falhar aqui só custa um órfão no bucket, que não quebra tela nenhuma.
+    const { error } = await supabaseClient.from('planos_trabalho').delete().eq('id', planoId);
+    if (error) { showToast('Erro ao excluir: ' + error.message, 'error'); return; }
     if (row?.arquivo_storage_path) {
       await supabaseClient.storage.from(STORAGE_BUCKET).remove([row.arquivo_storage_path]);
     }
-    const { error } = await supabaseClient.from('planos_trabalho').delete().eq('id', planoId);
-    if (error) { showToast('Erro ao excluir: ' + error.message, 'error'); return; }
     showToast('Versão excluída.', 'success');
     await refresh();
   }
@@ -811,11 +815,15 @@ const PlanoTrabalhoPage = (() => {
     if (!ok) return;
     const { data: row } = await supabaseClient
       .from('balancetes').select('arquivo_storage_path').eq('id', balanceteId).maybeSingle();
+
+    // Mesma ordem do excluir() acima, pelo mesmo motivo: registro primeiro,
+    // arquivo depois. Órfão no bucket é reparável; registro apontando para
+    // arquivo inexistente não é.
+    const { error } = await supabaseClient.from('balancetes').delete().eq('id', balanceteId);
+    if (error) { showToast('Erro ao excluir: ' + error.message, 'error'); return; }
     if (row?.arquivo_storage_path) {
       await supabaseClient.storage.from(BALANCETE_STORAGE_BUCKET).remove([row.arquivo_storage_path]);
     }
-    const { error } = await supabaseClient.from('balancetes').delete().eq('id', balanceteId);
-    if (error) { showToast('Erro ao excluir: ' + error.message, 'error'); return; }
     showToast('Balancete excluído.', 'success');
     await refresh();
   }
