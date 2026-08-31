@@ -100,10 +100,20 @@ Planilha XLSX com 8 formulários (`FOR-001` a `FOR-007`). É semanticamente um
 | `5_Custeio FOR 005` | coluna `RUBRICA` com vocabulário FAPEG | `Pessoal` → `a` · `Outros Serviços de Terceiros - PJ` → `b` · `Passagens e Despesas com Locomoção` → `c` · `Hospedagem e Alimentação` → `d` · `Material de Consumo` → `e` |
 | `6_Bens Duráveis FOR 006` | itens de investimento | `f — Investimento` |
 | `7_Remanej_ Financeiro FOR 007` | totais Custeio + Bens Duráveis | `valor_total_plano` |
-| `3.1_Equipe Executora Bolsistas` | roster com CPF, modalidade, valor mensal e nº de meses | sobrepõe-se à reconciliação de bolsas |
+| `3.1_Equipe Executora Bolsistas` | roster com CPF, modalidade, valor mensal e nº de meses | **ignorar** — ver a regra abaixo |
 
 O item `DAO Funape`, que aparece como linha dentro de "Outros Serviços de
 Terceiros - PJ", vai para `dao`.
+
+> **De plano de trabalho só se aproveita rubrica.** A aba
+> `3.1_Equipe Executora Bolsistas` traz nome e CPF, mas **não é fonte de
+> bolsista** — nem aqui nem em nenhum outro modelo. A lista de bolsistas vem da
+> **planilha de bolsas da FUNAPE** (`bolsa-parser.js` → reconciliação), e só dela.
+> O roster do plano é o que foi *previsto* quando o documento foi escrito; quem
+> está de fato com bolsa hoje só o arquivo da FUNAPE sabe. Tratar os dois como a
+> mesma coisa cadastraria bolsista que nunca entrou e manteria vivo quem já saiu.
+> Consequência prática: ao ler um plano, extraia rubricas e desembolsos e **pare
+> aí** — o CPF que estiver no documento não tem para onde ir.
 
 **Sem leitor automático** — cadastro manual. Vale escrever um parser se o
 volume de projetos FAPEG crescer: as abas são tabelas regulares e o vocabulário
