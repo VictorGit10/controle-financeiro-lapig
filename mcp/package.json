@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node scripts/offline.js",
+    "test": "node scripts/offline.js && node scripts/login-concorrente.js",
     "smoke": "node scripts/smoke.js"
   },
   "license": "ISC",

@@ -240,6 +240,18 @@ esquece as `CF_*`. Ele funciona sem segredo porque o login é **preguiçoso** �
 `config()` só é lida na primeira chamada de tool, então handshake e `listTools`
 não tocam no Supabase. É o que o CI roda (job `mcp` em `.github/workflows/ci.yml`).
 
+Junto dele roda o `scripts/login-concorrente.js`, que cobre uma regressão de
+protocolo e não de contrato: o cliente MCP chama tools **em paralelo**, e
+`entrar()` publicava o cliente em `cliente` antes de autenticar — a segunda
+chamada pegava esse cliente ainda anônimo e seguia com ele. O efeito não era
+erro: policy `to authenticated` devolve **zero linha** para anon, então
+`listar_centros_de_custo` respondia `total: 0` para um admin que enxerga 17
+centros, indistinguível de "esse login não vê nada". Hoje o login é
+*single-flight*: quem chega durante um login em voo espera a mesma promessa.
+O teste não usa mock — sobe um GoTrue/PostgREST dublê que **atrasa** o login e
+devolve `[]` a quem chega com a anon key, porque sem esse atraso a corrida não
+acontece. Rodado contra o código antigo, ele falha; é o que o torna útil.
+
 O `npm run smoke` é o que exige banco:
 
 Sobe o servidor como um cliente MCP de verdade (subprocesso via stdio) e

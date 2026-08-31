@@ -14,6 +14,7 @@ const OBRIGATORIAS = ['CF_SUPABASE_URL', 'CF_SUPABASE_ANON_KEY', 'CF_EMAIL', 'CF
 
 let cliente = null;
 let usuario = null;
+let login = null; // login em voo, compartilhado por quem chegar durante ele
 
 function config() {
   const faltando = OBRIGATORIAS.filter((k) => !process.env[k]);
@@ -33,25 +34,40 @@ function config() {
 
 async function entrar() {
   const { url, anonKey, email, senha } = config();
-  cliente = createClient(url, anonKey, {
+  // O cliente só é publicado em `cliente` DEPOIS de autenticado. Publicá-lo antes
+  // (o que se fazia aqui) deixava uma chamada concorrente ler com a anon key, e
+  // policy `to authenticated` devolve zero linha em vez de erro — uma lista vazia
+  // com cara de resposta, indistinguível de "esse login não vê nada".
+  const sb = createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false },
   });
-  const { data, error } = await cliente.auth.signInWithPassword({ email, password: senha });
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: senha });
   if (error) {
-    cliente = null;
     throw new Error(
       `Não foi possível entrar como ${email}: ${error.message}. ` +
         'Confira CF_EMAIL/CF_PASSWORD e se o usuário existe no Supabase.'
     );
   }
   usuario = data.user;
+  cliente = sb;
   console.error(`[cf-mcp] logado como ${email}`);
   return cliente;
 }
 
+/**
+ * Um login por vez. O cliente MCP chama tools em paralelo, e sem isso duas
+ * chamadas simultâneas abriam dois logins — a segunda seguindo com o cliente
+ * ainda anônimo da primeira. Quem chega durante um login em voo espera a mesma
+ * promessa; se ele falhar, `login` volta a null e a próxima chamada tenta de novo.
+ */
 async function conectado() {
-  if (!cliente) await entrar();
-  return cliente;
+  if (cliente) return cliente;
+  if (!login) {
+    login = entrar().finally(() => {
+      login = null;
+    });
+  }
+  return login;
 }
 
 /** Sessão morta (expirada ou revogada): vale uma única tentativa de relogin. */
