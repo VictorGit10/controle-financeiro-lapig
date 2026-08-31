@@ -233,6 +233,14 @@ npm test        # contrato, sem credencial nenhuma  (roda no CI)
 npm run smoke   # ponta a ponta, com login de verdade
 ```
 
+**Node 22+.** Não é prejuízo de estilo: o `@supabase/supabase-js` 2.112 usa
+WebSocket nativo, que só existe a partir do 22 — em Node 20 o `createClient()`
+lança *"native WebSocket not found"* na primeira chamada de tool. O CI rodava
+Node 20 e não via isso porque o teste offline nunca chega a `createClient` (o
+login é preguiçoso e a falta das `CF_*` interrompe antes); quem revelou foi o
+`login-concorrente.js`, que loga de verdade contra o dublê. Declarado em
+`engines` do `package.json`.
+
 O `npm test` sobe o servidor como cliente MCP real e confere o que não depende de
 dado: as 9 tools, as regras transversais no `instructions` do handshake, o
 `readOnlyHint`, os campos obrigatórios do schema e a mensagem de erro de quem
