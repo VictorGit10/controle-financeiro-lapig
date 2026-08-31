@@ -1122,6 +1122,34 @@ const PlanoTrabalhoPage = (() => {
         ? null
         : (extracted.raw_extraction || extracted.data);
 
+      // Remanejamento redistribui entre rubricas — não muda o total. Quando
+      // muda, é digitação errada ou aporte, e os dois merecem uma pergunta
+      // antes de virar orçamento. Foi assim que a Adequação 08 do 30.068
+      // entrou com 9.000 a menos em bolsas: o número era plausível e ninguém
+      // tinha como notar. A conferência é aqui, antes do upload, para um
+      // cancelamento não deixar arquivo órfão no bucket.
+      if (tipo === 'remanejamento') {
+        const { data: ativo, error: errAtivo } = await supabaseClient
+          .rpc('get_plano_ativo', { p_project_id: targetProjectId });
+        const anterior = errAtivo ? NaN : Number(ativo?.valor_total_plano);
+        const novo = Number(payload.valor_total_plano);
+        // Falha na consulta não vira alerta falso nem silêncio: sem o plano
+        // anterior simplesmente não há o que comparar.
+        if (Number.isFinite(anterior) && Number.isFinite(novo) && Math.abs(novo - anterior) >= 0.01) {
+          const dif = novo - anterior;
+          // Mensagem em parágrafo corrido: confirmAction escapa o texto dentro
+          // de um <p>, então quebra de linha viraria espaço.
+          const ok = await confirmAction(
+            'Este remanejamento muda o valor TOTAL do plano: o plano ativo hoje é ' +
+            `${formatBRL(anterior)} e este documento traz ${formatBRL(novo)} ` +
+            `(diferença de ${dif > 0 ? '+' : ''}${formatBRL(dif)}). ` +
+            'Um remanejamento normalmente mantém o total e só troca dinheiro de rubrica — ' +
+            'confira se algum valor foi digitado errado. Salvar assim mesmo?'
+          );
+          if (!ok) throw new Error('Salvamento cancelado: o total diverge do plano ativo em ' + formatBRL(dif) + '.');
+        }
+      }
+
       const safeName = file.name.replace(/[^\w.-]/g, '_');
       const path = `${targetProjectId}/${Date.now()}_${safeName}`;
       const upload = await supabaseClient.storage
