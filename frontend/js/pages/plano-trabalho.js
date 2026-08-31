@@ -65,6 +65,9 @@ const PlanoTrabalhoPage = (() => {
   let historico         = [];
   let balancetes        = [];     // lista de balancetes do projeto
   let prevReal          = null;   // resultado de get_previsto_vs_realizado
+  let saldoLivre        = null;   // resultado de get_saldo_livre (compromissos)
+  let saldoLivreErro    = null;   // consulta que falhou NUNCA vira zero (ver CLAUDE.md)
+  let rubricasAbertas   = {};     // { [rubrica_code]: true } — detalhamento expandido
   let contaRubricaMap   = [];     // [{ conta_prefix, rubrica_code }] — carregado do banco
 
   /* ── Mapeamento conta → rubrica (espelha resolve_rubrica_for_conta) ── */
@@ -127,11 +130,15 @@ const PlanoTrabalhoPage = (() => {
   async function refresh() {
     if (!selectedProjectId) { renderEmpty(); return; }
 
-    const [ativoRes, histRes, balRes, prevRes] = await Promise.all([
+    // get_saldo_livre entra aqui em vez de a tela recalcular compromisso:
+    // a conta mora na migração 038 e é a mesma que o Dashboard, o MCP e o
+    // Assistente leem. Segunda implementação divergiria em silêncio.
+    const [ativoRes, histRes, balRes, prevRes, livreRes] = await Promise.all([
       supabaseClient.rpc('get_plano_ativo',           { p_project_id: selectedProjectId }),
       supabaseClient.rpc('get_planos_historico',      { p_project_id: selectedProjectId }),
       supabaseClient.rpc('get_balancetes_by_project', { p_project_id: selectedProjectId }),
       supabaseClient.rpc('get_previsto_vs_realizado', { p_project_id: selectedProjectId }),
+      supabaseClient.rpc('get_saldo_livre',           { p_project_id: selectedProjectId }),
     ]);
 
     if (ativoRes.error) { showToast('Erro: ' + ativoRes.error.message, 'error'); return; }
@@ -143,6 +150,13 @@ const PlanoTrabalhoPage = (() => {
     historico  = histRes.data  || [];
     balancetes = balRes.data   || [];
     prevReal   = prevRes.data  || null;
+
+    // Falha aqui não derruba a aba: sem compromisso ela ainda informa
+    // previsto x realizado. Mas também não vira zero — a tela diz que
+    // não conseguiu perguntar, em vez de exibir "nada comprometido".
+    saldoLivre     = livreRes.error ? null : (livreRes.data || null);
+    saldoLivreErro = livreRes.error ? (livreRes.error.message || 'falha ao consultar') : null;
+
     renderPage();
   }
 
@@ -405,6 +419,76 @@ const PlanoTrabalhoPage = (() => {
 
   /* ── Tab: Previsto x Realizado ───────────────────────────── */
 
+  /**
+   * A linha expandida de uma rubrica: de onde vem o previsto (linhas do
+   * plano) e de onde vem o realizado (contas do balancete).
+   *
+   * O bloco de contas não é enfeite — é auditoria. Foi exatamente a sua
+   * ausência que deixou "PASSAGENS E DESPESAS COM LOCOMOÇÃO" somar dentro de
+   * Serviços de Terceiros por meses sem ninguém ver: número agregado não se
+   * confere, número com a conta ao lado sim (ver migração 047).
+   */
+  function renderDetalheRubrica(r, detalhes, contas, temCompromisso) {
+    const somaDet = detalhes.reduce((acc, d) => acc + Number(d.previsto || 0), 0);
+    // O plano pode ter linha sem descrição: ela soma no total da rubrica mas
+    // não vira item. Declarar o resto evita a subtração silenciosa.
+    const restoSemDescricao = Number(r.previsto || 0) - somaDet;
+
+    const linhaDet = (rotulo, valor) => `
+      <div style="display:flex;justify-content:space-between;gap:16px;padding:3px 0;border-bottom:1px solid var(--border-subtle);">
+        <span>${rotulo}</span>
+        <span class="currency" style="white-space:nowrap;">${formatBRL(valor)}</span>
+      </div>`;
+
+    const secao = (titulo, cor, corpo) => `
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:${cor};margin-bottom:4px;">${titulo}</div>
+        ${corpo}
+      </div>`;
+
+    const blocoPrevisto = detalhes.length === 0 ? '' : secao(
+      'Previsto — linhas do plano', 'var(--text-secondary)',
+      detalhes.map(d => linhaDet(escapeAttr(d.descricao), d.previsto)).join('') +
+      (restoSemDescricao > 0.005
+        ? `<div style="display:flex;justify-content:space-between;gap:16px;padding:3px 0;color:var(--text-secondary);font-style:italic;">
+             <span>Sem descrição no plano</span>
+             <span class="currency" style="white-space:nowrap;">${formatBRL(restoSemDescricao)}</span>
+           </div>`
+        : '')
+    );
+
+    const blocoRealizado = contas.length === 0 ? '' : secao(
+      'Realizado — contas do balancete', 'var(--text-secondary)',
+      contas.map(c => linhaDet(
+        `<code style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);">${escapeAttr(c.conta_codigo)}</code>&nbsp;${escapeAttr(c.conta_descricao || '—')}`,
+        c.realizado
+      )).join('')
+    );
+
+    const bolsas = (saldoLivre && Array.isArray(saldoLivre.bolsas_ativas))
+      ? saldoLivre.bolsas_ativas : [];
+    const blocoCompromisso = (!temCompromisso || bolsas.length === 0) ? '' : secao(
+      `Compromissos até ${formatDate(saldoLivre.compromissos_fim)} — já contratados`,
+      'var(--warning)',
+      bolsas.map(b => linhaDet(
+        `${escapeAttr(b.bolsista)} <span style="color:var(--text-secondary);">— ${b.meses} × ${formatBRL(b.valor_mensal)}</span>`,
+        b.compromisso
+      )).join('')
+    );
+
+    return `
+      <tr>
+        <td colspan="5" style="background:var(--bg-elevated);padding:12px 16px 12px 40px;font-size:13px;">
+          ${blocoPrevisto}${blocoRealizado}${blocoCompromisso}
+        </td>
+      </tr>`;
+  }
+
+  function toggleRubrica(code) {
+    rubricasAbertas[code] = !rubricasAbertas[code];
+    renderPage();
+  }
+
   function renderPrevistoRealTab() {
     if (!prevReal || prevReal.has_plano === false) {
       return `
@@ -435,6 +519,19 @@ const PlanoTrabalhoPage = (() => {
 
     const totalDespesasNM = naoMapeados.reduce((s, x) => s + Number(x.saldo_atual || 0), 0);
 
+    // Compromissos por rubrica, vindos de get_saldo_livre (mig. 038). A tela
+    // não soma nada: só indexa o que a RPC devolveu. A conta de compromisso
+    // mora no banco e é a mesma que o Dashboard, o MCP e o Assistente leem.
+    const compromissoPorRubrica = {};
+    if (saldoLivre && Array.isArray(saldoLivre.rubricas)) {
+      saldoLivre.rubricas.forEach(x => {
+        compromissoPorRubrica[x.rubrica_code] = {
+          compromissos: Number(x.compromissos || 0),
+          saldoLivre:   Number(x.saldo_livre  || 0),
+        };
+      });
+    }
+
     const rubricaRows = rubricasArr.map(r => {
       const perc = r.perc_executado;
       const saldo = Number(r.saldo || 0);
@@ -443,15 +540,57 @@ const PlanoTrabalhoPage = (() => {
                         : perc > 100 ? 'var(--danger)'
                         : perc > 90  ? 'var(--warning)'
                         : 'var(--success)';
-      return `
+
+      // `detalhes`/`contas` só existem a partir da migração 047. Ausentes, a
+      // linha renderiza como sempre — o frontend é publicado ANTES de a
+      // migração rodar e não pode quebrar no intervalo.
+      const detalhes = Array.isArray(r.detalhes) ? r.detalhes : [];
+      const contas   = Array.isArray(r.contas)   ? r.contas   : [];
+      const temDetalhe = detalhes.length > 0 || contas.length > 0;
+      const aberta = !!rubricasAbertas[r.rubrica_code];
+
+      const comp = compromissoPorRubrica[r.rubrica_code];
+      const temCompromisso = !!comp && comp.compromissos > 0;
+
+      const nomeCell = temDetalhe
+        ? `<button class="btn btn--ghost btn--sm" style="padding:0 6px;margin-right:4px;"
+             onclick="PlanoTrabalhoPage.toggleRubrica('${escapeAttrJs(r.rubrica_code)}')"
+             title="${aberta ? 'Recolher' : 'Ver detalhamento'}" aria-expanded="${aberta}"
+           ><i data-lucide="${aberta ? 'chevron-down' : 'chevron-right'}"></i></button>${escapeAttr(r.rubrica_name)}`
+        : escapeAttr(r.rubrica_name);
+
+      // Saldo de rubrica com bolsa contratada NÃO é dinheiro livre. Mostrar só
+      // o saldo é o que fazia "R$ 175.000" parecer disponível quando o que
+      // sobrava, descontado o já contratado, era bem menos.
+      const saldoCell = temCompromisso
+        ? `${formatBRL(saldo)}
+           <div style="font-size:11px;font-weight:400;color:var(--warning);line-height:1.35;margin-top:2px;">
+             −${formatBRL(comp.compromissos)} comprometido<br>
+             <strong>livre ${formatBRL(comp.saldoLivre)}</strong>
+           </div>`
+        : formatBRL(saldo);
+
+      const linhaPrincipal = `
         <tr>
-          <td style="${r.parent_code ? 'padding-left:24px;color:var(--text-secondary);' : 'font-weight:600;'}">${escapeAttr(r.rubrica_name)}</td>
+          <td style="${r.parent_code ? 'padding-left:24px;color:var(--text-secondary);' : 'font-weight:600;'}">${nomeCell}</td>
           <td style="text-align:right;" class="currency">${formatBRL(r.previsto)}</td>
           <td style="text-align:right;" class="currency">${formatBRL(r.realizado)}</td>
-          <td style="text-align:right;color:${isOverbudget ? 'var(--danger)' : 'var(--text-primary)'};" class="currency">${formatBRL(saldo)}</td>
+          <td style="text-align:right;color:${isOverbudget ? 'var(--danger)' : 'var(--text-primary)'};" class="currency">${saldoCell}</td>
           <td style="text-align:right;color:${percColor};font-weight:500;">${perc == null ? '—' : perc.toFixed(1) + '%'}</td>
         </tr>`;
+
+      if (!temDetalhe || !aberta) return linhaPrincipal;
+      return linhaPrincipal + renderDetalheRubrica(r, detalhes, contas, temCompromisso);
     }).join('');
+
+    const avisoCompromisso = !saldoLivreErro ? '' : `
+      <div class="card" style="margin-bottom:16px;border-left:3px solid var(--warning);">
+        <p style="margin:0;color:var(--text-secondary);font-size:13px;">
+          <i data-lucide="alert-triangle"></i>
+          Não foi possível consultar os compromissos já assumidos (bolsas contratadas).
+          Os saldos abaixo são <strong>previsto − realizado</strong> e não descontam nada.
+        </p>
+      </div>`;
 
     const naoMapeadosCard = naoMapeados.length === 0 ? '' : `
       <div class="card" style="margin-top:16px;">
@@ -484,6 +623,8 @@ const PlanoTrabalhoPage = (() => {
         <i data-lucide="info"></i>
         <span>Balancete de <strong>${formatDate(prevReal.data_referencia)}</strong></span>
       </div>
+
+      ${avisoCompromisso}
 
       <div class="stats-grid" style="margin-bottom:24px;">
         ${kpiCard('Saldo disponível (PÓS IR/IOF)', prevReal.saldo_disponivel,   'wallet',     'success')}
@@ -1548,6 +1689,7 @@ const PlanoTrabalhoPage = (() => {
     load, onProjectChange, switchTab, onImportClick, getImportHandlers,
     visualizar, ativar, excluir, baixar,
     verBalancete, excluirBalancete, baixarBalancete,
+    toggleRubrica,
     _addRubrica, _addDesembolso,
   };
 })();
