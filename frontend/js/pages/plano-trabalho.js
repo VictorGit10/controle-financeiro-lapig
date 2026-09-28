@@ -596,7 +596,8 @@ const PlanoTrabalhoPage = (() => {
       <div class="card" style="margin-top:16px;">
         <h3 class="card__title"><i data-lucide="alert-circle"></i> Lançamentos não mapeados (${formatBRL(totalDespesasNM)})</h3>
         <p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px;">
-          Despesas que não correspondem a nenhuma rubrica do plano (geralmente tributárias/bancárias).
+          Contas de despesa sem rubrica do plano. Valor negativo é estorno da FUNAPE
+          (recuperação de despesa) ainda sem regra — o gasto que ele desfaz continua contado.
           Configure mapeamentos em <code>conta_rubrica_map</code> se quiser incluí-las.
         </p>
         <table class="data-table" style="width:100%;">

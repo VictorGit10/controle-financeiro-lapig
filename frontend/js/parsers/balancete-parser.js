@@ -15,6 +15,9 @@
        },
        warnings: string[]
      }
+
+   `saldo_atual` é a CONTRIBUIÇÃO AO GASTO (mig. 049): redutoras "( - )"
+   de 7.1.3 e recuperações de despesa (7.1.1.08) entram negativas.
    ============================================================ */
 
 import { parseBRL } from '../pure-fns.js';
@@ -54,6 +57,43 @@ const PREFIXOS_IGNORAR = [
 
 function deveIgnorar(conta) {
   return PREFIXOS_IGNORAR.some((p) => conta.startsWith(p));
+}
+
+// ── Sinal ──────────────────────────────────────────────────
+// `saldo_atual` é gravado como CONTRIBUIÇÃO AO GASTO: é o que as RPCs
+// somam por rubrica (mig. 026/038/047). Duas famílias de conta entram
+// com o sinal trocado em relação ao que o PDF imprime na linha:
+//
+// 1. Redutoras "( - )" dentro de 7.1.3. O PDF imprime o valor SEM
+//    parênteses na linha-folha, mas a conta-mãe as desconta — no 30.068,
+//    7.1.3.05 fecha em 314.560,17 só se os fretes/despesas acessórias
+//    "( - )" de importação forem subtraídos. Somados, inflavam `b` em
+//    R$ 80.737,60 (mig. 049).
+// 2. Recuperação de despesa (7.1.1.08). É o estorno com que a FUNAPE
+//    reclassifica o gasto: equipamento sai de 7.1.3.20 e volta como
+//    doação de bens em 7.1.3.50. Sem o estorno negativo, o mesmo
+//    equipamento contava duas vezes.
+const RE_REDUTORA = /^\(\s*-\s*\)/;
+
+function ehRedutora(conta, descricao) {
+  return conta.startsWith('7.1.3.') && RE_REDUTORA.test(descricao);
+}
+
+function ehRecuperacao(conta) {
+  return conta.startsWith('7.1.1.08.');
+}
+
+// Conta-mãe de 4 níveis (7.1.3.05). O total que o PDF imprime nela é o
+// árbitro: se a soma das folhas não bate, algum valor ou sinal foi lido
+// errado — é assim que o defeito da mig. 049 teria aparecido na importação.
+const RE_GRUPO_7 = /^7\.\d+\.\d+\.\d+$/;
+
+function grupoDe(conta) {
+  return conta.split('.').slice(0, 4).join('.');
+}
+
+function formatarValor(n) {
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // ── Helpers ────────────────────────────────────────────────
@@ -128,25 +168,38 @@ export function parseBalanceteText(text) {
   // ── Lançamentos (apenas folhas 7.X.X.X.XXXXX) ───────────
   const lancamentos = [];
   const seen = new Set();
+  const totaisGrupo = new Map();   // conta-mãe de 4 níveis → total impresso
+  const somaFolhas  = new Map();   // conta-mãe de 4 níveis → soma das folhas lidas
   for (const line of lines) {
     const m = line.match(RE_LANCAMENTO);
     if (!m) continue;
     const [, conta, /*reduzido*/, descricao, , debitos, creditos, /*movimento*/, saldo] = m;
+    if (RE_GRUPO_7.test(conta)) {
+      if (!totaisGrupo.has(conta)) totaisGrupo.set(conta, parseNum(saldo));
+      continue;
+    }
     if (!RE_FOLHA_GASTO.test(conta)) continue;
-    if (deveIgnorar(conta)) continue;
     if (seen.has(conta)) continue;     // proteção contra duplicatas
     seen.add(conta);
 
+    const desc    = descricao.replace(/\s+/g, ' ').trim();
     const debito  = parseNum(debitos);
     const credito = parseNum(creditos);
-    const saldoAt = parseNum(saldo);
+    const lido    = parseNum(saldo) ?? 0;
+    // Valor na convenção do PDF — como a conta-mãe o soma…
+    const noPdf   = ehRedutora(conta, desc) ? -Math.abs(lido) : lido;
+    const g = grupoDe(conta);
+    somaFolhas.set(g, (somaFolhas.get(g) || 0) + noPdf);
+
+    if (deveIgnorar(conta)) continue;
 
     lancamentos.push({
       conta_codigo:    conta,
-      conta_descricao: descricao.replace(/\s+/g, ' ').trim() || null,
+      conta_descricao: desc || null,
       valor_debito:    debito  == null ? 0 : Math.abs(debito),
       valor_credito:  credito == null ? 0 : Math.abs(credito),
-      saldo_atual:    saldoAt == null ? 0 : saldoAt,
+      // …e como contribuição ao gasto, que é o que se grava.
+      saldo_atual:    ehRecuperacao(conta) ? -Math.abs(noPdf) : noPdf,
     });
   }
 
@@ -165,6 +218,15 @@ export function parseBalanceteText(text) {
   }
   if (rendimento_liquido == null) {
     warnings.push('RENDIMENTO LÍQUIDO APURADO não encontrado no rodapé.');
+  }
+  // Só confere a conta-mãe cujas folhas foram lidas: um extrato parcial
+  // (sem a linha-mãe, ou sem as folhas) não tem com o que comparar.
+  for (const [g, impresso] of totaisGrupo) {
+    if (impresso == null || !somaFolhas.has(g)) continue;
+    const soma = Math.round(somaFolhas.get(g) * 100) / 100;
+    if (Math.abs(soma - impresso) > 0.01) {
+      warnings.push(`Conta ${g}: as contas-folha somam ${formatarValor(soma)}, mas o balancete imprime ${formatarValor(impresso)} — algum valor ou sinal foi lido errado. Confira antes de salvar.`);
+    }
   }
   if (total_debitos != null && total_creditos != null) {
     const diff = Math.abs(total_debitos - total_creditos);
