@@ -1385,20 +1385,44 @@ const PlanoTrabalhoPage = (() => {
       </div>`;
 
     const lancs = Array.isArray(d.lancamentos) ? d.lancamentos : [];
-    const despesaLancs = lancs.filter(l => l.conta_codigo && l.conta_codigo.startsWith('7.'));
+    const despesaLancs = lancs
+      .map((l, idx) => ({ l, idx }))
+      .filter(({ l }) => l.conta_codigo && l.conta_codigo.startsWith('7.'));
+    const nomeRubrica = (code) => RUBRICAS.find(r => r.code === code)?.name || code;
 
-    const lancRows = despesaLancs.map((l, idx) => {
-      const resolved = resolveRubricaForConta(l.conta_codigo);
+    const lancRows = despesaLancs.map(({ l, idx }) => {
+      // Código cortado no PDF e fora da tabela de reduzidos (funape-contas.js):
+      // a rubrica é PERGUNTADA, nunca pré-selecionada. Uma regra salva a
+      // partir do código cortado capturaria as contas vizinhas — "salvar"
+      // fica bloqueado.
+      // Receita (7.1.1.01) não leva rubrica: código cortado ali não pergunta nada.
+      const incompleta = !!l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.');
+      const resolved = incompleta ? '' : resolveRubricaForConta(l.conta_codigo);
       const isUnmapped = !resolved;
-      const optsHTML = `<option value="">— Não mapeado —</option>` +
+      let dica = '';
+      if (incompleta) {
+        const c = typeof classificarContaCortada === 'function'
+          ? classificarContaCortada(l.conta_codigo, contaRubricaMap)
+          : { rubrica: null, ambigua: true };
+        dica = c.ambigua
+          ? 'Código cortado no PDF e conta nova: o trecho que falta decide a rubrica. Escolha.'
+          : c.rubrica
+            ? `Código cortado no PDF e conta nova. Pelo trecho visível seria <strong>${escapeAttr(nomeRubrica(c.rubrica))}</strong> — confirme ou troque.`
+            : 'Código cortado no PDF e conta nova, sem regra no mapa. Escolha.';
+      }
+      const optsHTML = `<option value="">${incompleta ? '— Escolha a rubrica —' : '— Não mapeado —'}</option>` +
         RUBRICAS.map(r => `<option value="${r.code}" ${r.code === resolved ? 'selected' : ''}>${escapeAttr(r.name)}</option>`).join('');
-      const rowStyle = isUnmapped
-        ? 'background:rgba(234,179,8,0.10);'
-        : '';
+      const rowStyle = incompleta
+        ? 'background:rgba(234,88,12,0.12);'
+        : isUnmapped ? 'background:rgba(234,179,8,0.10);' : '';
+      const podeSalvar = isUnmapped && !incompleta;
       return `
-      <tr data-bal-row="${idx}" data-conta="${escapeAttr(l.conta_codigo)}" style="${rowStyle}">
-        <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);">${escapeAttr(l.conta_codigo)}</td>
-        <td style="font-size:12px;">${escapeAttr(l.conta_descricao || '—')}</td>
+      <tr data-bal-row="${idx}" data-conta="${escapeAttr(l.conta_codigo)}" data-bal-auto="${escapeAttr(resolved || '')}"
+          ${incompleta ? 'data-bal-obrigatoria="1"' : ''} style="${rowStyle}">
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);">${escapeAttr(l.conta_codigo)}${incompleta ? '…' : ''}
+          ${l.conta_reduzido ? `<div style="font-size:10px;">red. ${escapeAttr(l.conta_reduzido)}</div>` : ''}</td>
+        <td style="font-size:12px;">${escapeAttr(l.conta_descricao || '—')}
+          ${dica ? `<div style="font-size:11px;color:var(--warning,#d97706);margin-top:2px;">${dica}</div>` : ''}</td>
         <td style="text-align:right;font-size:12px;" class="currency">${formatBRL(l.saldo_atual)}</td>
         <td>
           <select class="form-input" data-bal-rubrica style="font-size:12px;padding:4px 6px;width:100%;min-width:160px;">
@@ -1406,21 +1430,29 @@ const PlanoTrabalhoPage = (() => {
           </select>
         </td>
         <td style="text-align:center;font-size:11px;color:var(--text-secondary);">
-          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;${isUnmapped ? '' : 'opacity:0.4;'}">
-            <input type="checkbox" data-bal-save-mapping ${isUnmapped ? '' : 'disabled'}>
+          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;${podeSalvar ? '' : 'opacity:0.4;'}"
+                 ${incompleta ? 'title="Código incompleto: uma regra feita com ele capturaria outras contas."' : ''}>
+            <input type="checkbox" data-bal-save-mapping ${podeSalvar ? '' : 'disabled'}>
             <span>salvar</span>
           </label>
         </td>
       </tr>`;
     }).join('');
 
-    const unmappedCount = despesaLancs.filter(l => !resolveRubricaForConta(l.conta_codigo)).length;
-    const unmappedNote = unmappedCount > 0
+    const perguntar = (l) => !!l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.');
+    const incompletasCount = despesaLancs.filter(({ l }) => perguntar(l)).length;
+    const unmappedCount = despesaLancs.filter(({ l }) => !perguntar(l) && !resolveRubricaForConta(l.conta_codigo)).length;
+    const unmappedNote = (incompletasCount > 0
+      ? `<p style="font-size:12px;color:var(--warning,#d97706);margin:0 0 8px 0;">
+           <i data-lucide="alert-triangle" style="width:14px;height:14px;vertical-align:-2px;"></i>
+           ${incompletasCount} conta(s) com código cortado no PDF e fora da tabela da FUNAPE — escolha a rubrica de cada uma (obrigatório).
+         </p>`
+      : '') + (unmappedCount > 0
       ? `<p style="font-size:12px;color:var(--warning,#d97706);margin:0 0 8px 0;">
            <i data-lucide="alert-triangle" style="width:14px;height:14px;vertical-align:-2px;"></i>
            ${unmappedCount} lançamento(s) sem rubrica — classifique e marque "salvar" para registrar o mapeamento.
          </p>`
-      : '';
+      : '');
 
     return `
       <div id="bal-review-form">
@@ -1493,7 +1525,29 @@ const PlanoTrabalhoPage = (() => {
     };
 
     const d = extracted?.data || {};
-    const lancamentos = Array.isArray(d.lancamentos) ? d.lancamentos : [];
+    // Cópia rasa: a rubrica escolhida vai no lançamento sem alterar o
+    // extraído, que é reaproveitado se o salvamento falhar.
+    const lancamentos = (Array.isArray(d.lancamentos) ? d.lancamentos : []).map(l => ({ ...l }));
+
+    // Rubrica escolhida na revisão vai no próprio lançamento quando difere
+    // do que o mapa resolveria (mig. 050: upsert_balancete a respeita; o
+    // gatilho só preenche rubrica nula). Antes, escolher sem marcar
+    // "salvar" não tinha efeito nenhum. Linha de código cortado é
+    // obrigatória: sem resposta, não salva.
+    const faltando = [];
+    overlay.querySelectorAll('[data-bal-row]').forEach((tr) => {
+      const idx = Number(tr.getAttribute('data-bal-row'));
+      const escolhida = tr.querySelector('[data-bal-rubrica]')?.value || '';
+      const auto = tr.getAttribute('data-bal-auto') || '';
+      const obrigatoria = tr.hasAttribute('data-bal-obrigatoria');
+      if (obrigatoria && !escolhida) faltando.push(tr.getAttribute('data-conta'));
+      if (lancamentos[idx] && escolhida && (obrigatoria || escolhida !== auto)) {
+        lancamentos[idx].rubrica_code = escolhida;
+      }
+    });
+    if (faltando.length > 0) {
+      throw new Error(`Escolha a rubrica das ${faltando.length} conta(s) com código cortado no PDF (destacadas em laranja) antes de salvar.`);
+    }
 
     // Coleta mapeamentos a salvar: linhas com checkbox marcado e rubrica selecionada.
     // O usuário só vê o checkbox em linhas que estavam não-mapeadas.
@@ -1503,7 +1557,7 @@ const PlanoTrabalhoPage = (() => {
       const sel = tr.querySelector('[data-bal-rubrica]');
       const save = tr.querySelector('[data-bal-save-mapping]');
       const rubrica = sel?.value || '';
-      if (save && save.checked && rubrica && conta) {
+      if (save && !save.disabled && save.checked && rubrica && conta) {
         new_mappings.push({
           conta_prefix: conta,
           rubrica_code: rubrica,

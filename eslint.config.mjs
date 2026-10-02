@@ -53,6 +53,7 @@ export default [
         summarizeRendimento: "readonly",
         // parsers + components (window-bridged via <script type="module">)
         parseBalanceteText: "readonly",
+        classificarContaCortada: "readonly",
         parsePtFromHtml: "readonly",
         PtFormatError: "readonly",
         detectPtModel: "readonly",

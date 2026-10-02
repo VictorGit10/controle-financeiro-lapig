@@ -21,6 +21,7 @@
    ============================================================ */
 
 import { parseBRL } from '../pure-fns.js';
+import { FUNAPE_CONTAS } from './funape-contas.js';
 
 // ── Regexes ────────────────────────────────────────────────
 
@@ -30,9 +31,10 @@ const RE_DATA_REFERENCIA = /\b(\d{2})\/(\d{2})\/(\d{4})\s+a\s+(\d{2})\/(\d{2})\/
 const RE_DATA_EMISSAO    = /Emiss[ãa]o\s*:\s*(\d{2})\/(\d{2})\/(\d{4})/i;
 // Linhas de banco com project code, ex: "1.1.1.02.02.97404 97404 30.099 22813-3 BB/FU PROJETO ACE …"
 const RE_PROJECT_CODE    = /^1\.1\.1\.02\.0[2-4]\.\d+\s+\S+\s+(\d{2}\.\d{3})\b/;
-// Rodapé
-const RE_SALDO_DISPONIVEL = /SALDO\s+DISPON[IÍ]VEL[\s\S]{0,200}?R\$\s*([\d.,]+)/i;
-const RE_RENDIMENTO_LIQ   = /RENDIMENTO\s+L[IÍ]QUIDO\s+APURADO[\s\S]{0,80}?R\$\s*([\d.,]+)/i;
+// Rodapé. O número termina nos centavos: o layout de 2026-09 fecha a
+// frase com ponto ("R$ 1.107.372,93.") e `[\d.,]+` levaria o ponto junto.
+const RE_SALDO_DISPONIVEL = /SALDO\s+DISPON[IÍ]VEL[\s\S]{0,200}?R\$\s*([\d.]*\d,\d{2})/i;
+const RE_RENDIMENTO_LIQ   = /RENDIMENTO\s+L[IÍ]QUIDO\s+APURADO[\s\S]{0,80}?R\$\s*([\d.]*\d,\d{2})/i;
 const RE_TOTAL_DEBITOS    = /TOTAL\s+DE\s+D[ÉE]BITOS\s*:\s*([\d.,()]+)/i;
 const RE_TOTAL_CREDITOS   = /TOTAL\s+DE\s+CR[ÉE]DITOS\s*:\s*([\d.,()]+)/i;
 
@@ -61,22 +63,25 @@ function deveIgnorar(conta) {
 
 // ── Sinal ──────────────────────────────────────────────────
 // `saldo_atual` é gravado como CONTRIBUIÇÃO AO GASTO: é o que as RPCs
-// somam por rubrica (mig. 026/038/047). Duas famílias de conta entram
-// com o sinal trocado em relação ao que o PDF imprime na linha:
+// somam por rubrica (mig. 026/038/047).
 //
-// 1. Redutoras "( - )" dentro de 7.1.3. O PDF imprime o valor SEM
-//    parênteses na linha-folha, mas a conta-mãe as desconta — no 30.068,
-//    7.1.3.05 fecha em 314.560,17 só se os fretes/despesas acessórias
-//    "( - )" de importação forem subtraídos. Somados, inflavam `b` em
-//    R$ 80.737,60 (mig. 049).
-// 2. Recuperação de despesa (7.1.1.08). É o estorno com que a FUNAPE
-//    reclassifica o gasto: equipamento sai de 7.1.3.20 e volta como
-//    doação de bens em 7.1.3.50. Sem o estorno negativo, o mesmo
-//    equipamento contava duas vezes.
-const RE_REDUTORA = /^\(\s*-\s*\)/;
-
-function ehRedutora(conta, descricao) {
-  return conta.startsWith('7.1.3.') && RE_REDUTORA.test(descricao);
+// O valor sai das colunas Débitos e Créditos, NÃO da coluna Saldo: na
+// linha-folha, a conta redutora imprime o Saldo sem parênteses, e só a
+// conta-mãe revela que ele é subtraído. Despesa (7.1.3) é débito −
+// crédito; receita (7.1.1) é crédito − débito. Assim:
+//   • "( - ) FRETES S/ IMPORTAÇÕES" (débito 0, crédito 19.531,30) entra
+//     negativo — somado, inflava `b` do 30.068 em R$ 80.737,60;
+//   • "( - ) FÉRIAS" de pessoal CLT (débito 15.258,33) entra POSITIVO. O
+//     "( - )" no nome não quer dizer redutora — a mig. 049 usava o nome e
+//     errou o sinal desses encargos; a 050 conserta.
+//
+// Recuperação de despesa (7.1.1.08) é receita que estorna gasto: a
+// FUNAPE reclassifica o equipamento (sai de 7.1.3.20, volta como doação
+// em 7.1.3.50). Grava-se com sinal de gasto, ou seja, negativa.
+function valorNoPdf(conta, debito, credito) {
+  const d = Math.abs(debito ?? 0);
+  const c = Math.abs(credito ?? 0);
+  return conta.startsWith('7.1.1.') ? c - d : d - c;
 }
 
 function ehRecuperacao(conta) {
@@ -84,12 +89,43 @@ function ehRecuperacao(conta) {
 }
 
 // Conta-mãe de 4 níveis (7.1.3.05). O total que o PDF imprime nela é o
-// árbitro: se a soma das folhas não bate, algum valor ou sinal foi lido
-// errado — é assim que o defeito da mig. 049 teria aparecido na importação.
+// árbitro: se a soma das folhas não bate, alguma linha foi lida errado ou
+// ficou de fora.
 const RE_GRUPO_7 = /^7\.\d+\.\d+\.\d+$/;
 
 function grupoDe(conta) {
   return conta.split('.').slice(0, 4).join('.');
+}
+
+// ── Código cortado ─────────────────────────────────────────
+// Conta-folha tem 5 dígitos no último nível (7.1.3.05.01.00042). Menos
+// que isso é corte do PDF, não código curto — ver funape-contas.js.
+function ehCortada(conta) {
+  return conta.split('.').pop().length < 5;
+}
+
+/**
+ * Rubrica de uma conta cujo código veio cortado e cujo reduzido não está
+ * na tabela. `mapa` é o conta_rubrica_map ativo ([{ conta_prefix,
+ * rubrica_code }]).
+ *
+ * Se nenhuma regra é MAIS ESPECÍFICA que o pedaço visível, o
+ * longest-prefix-match dá o mesmo resultado qualquer que seja o resto do
+ * código — a rubrica é certa, não palpite (7.1.3.03.01.0… é `e` sempre).
+ * Se existe regra escondida no pedaço cortado (7.1.3.05.01.0… pode ser
+ * passagens, DAO ou `b`), a resposta é `ambigua` e a revisão pergunta.
+ */
+export function classificarContaCortada(conta, mapa) {
+  const regras = Array.isArray(mapa) ? mapa : [];
+  const ambigua = regras.some(m =>
+    m.conta_prefix.length > conta.length && m.conta_prefix.startsWith(conta));
+  if (ambigua) return { rubrica: null, ambigua: true };
+  let melhor = null;
+  for (const m of regras) {
+    if (conta.startsWith(m.conta_prefix)
+        && (!melhor || m.conta_prefix.length > melhor.conta_prefix.length)) melhor = m;
+  }
+  return { rubrica: melhor ? melhor.rubrica_code : null, ambigua: false };
 }
 
 function formatarValor(n) {
@@ -170,24 +206,45 @@ export function parseBalanceteText(text) {
   const seen = new Set();
   const totaisGrupo = new Map();   // conta-mãe de 4 níveis → total impresso
   const somaFolhas  = new Map();   // conta-mãe de 4 níveis → soma das folhas lidas
+  const desconhecidas = [];        // código cortado + reduzido fora da tabela
   for (const line of lines) {
     const m = line.match(RE_LANCAMENTO);
     if (!m) continue;
-    const [, conta, /*reduzido*/, descricao, , debitos, creditos, /*movimento*/, saldo] = m;
-    if (RE_GRUPO_7.test(conta)) {
-      if (!totaisGrupo.has(conta)) totaisGrupo.set(conta, parseNum(saldo));
+    const [, contaPdf, reduzido, descricao, , debitos, creditos, /*movimento*/, saldo] = m;
+    if (RE_GRUPO_7.test(contaPdf)) {
+      if (!totaisGrupo.has(contaPdf)) totaisGrupo.set(contaPdf, parseNum(saldo));
       continue;
     }
-    if (!RE_FOLHA_GASTO.test(conta)) continue;
-    if (seen.has(conta)) continue;     // proteção contra duplicatas
-    seen.add(conta);
+    if (!RE_FOLHA_GASTO.test(contaPdf)) continue;
+    // Duplicata é a mesma linha repetida na quebra de página. A chave é o
+    // reduzido: com o código cortado, contas diferentes ficam com o mesmo
+    // "7.1.3.05.01.00" e a segunda seria descartada como repetida.
+    const chave = /^\d+$/.test(reduzido) ? reduzido : contaPdf;
+    if (seen.has(chave)) continue;
+    seen.add(chave);
 
     const desc    = descricao.replace(/\s+/g, ' ').trim();
+
+    let conta = contaPdf;
+    let incompleta = false;
+    const daTabela = FUNAPE_CONTAS[reduzido];
+    if (ehCortada(contaPdf)) {
+      if (daTabela && daTabela[0].startsWith(contaPdf)) {
+        conta = daTabela[0];
+      } else {
+        incompleta = true;
+        // Receita (7.1.1.01) não leva rubrica: fica marcada, mas não vira pergunta.
+        if (!contaPdf.startsWith('7.1.1.01.')) {
+          desconhecidas.push(`${contaPdf}… (reduzido ${reduzido}, ${desc})`);
+        }
+      }
+    } else if (daTabela && daTabela[0] !== contaPdf) {
+      warnings.push(`Reduzido ${reduzido} aparece como ${contaPdf}, mas a tabela da FUNAPE o registra como ${daTabela[0]}. Confira a linha "${desc}".`);
+    }
     const debito  = parseNum(debitos);
     const credito = parseNum(creditos);
-    const lido    = parseNum(saldo) ?? 0;
     // Valor na convenção do PDF — como a conta-mãe o soma…
-    const noPdf   = ehRedutora(conta, desc) ? -Math.abs(lido) : lido;
+    const noPdf   = Math.round(valorNoPdf(conta, debito, credito) * 100) / 100;
     const g = grupoDe(conta);
     somaFolhas.set(g, (somaFolhas.get(g) || 0) + noPdf);
 
@@ -200,7 +257,12 @@ export function parseBalanceteText(text) {
       valor_credito:  credito == null ? 0 : Math.abs(credito),
       // …e como contribuição ao gasto, que é o que se grava.
       saldo_atual:    ehRecuperacao(conta) ? -Math.abs(noPdf) : noPdf,
+      conta_reduzido: reduzido,
+      conta_incompleta: incompleta,
     });
+  }
+  if (desconhecidas.length > 0) {
+    warnings.push(`Código de conta cortado no PDF e fora da tabela da FUNAPE: ${desconhecidas.join('; ')}. A rubrica dessas linhas é conferida na revisão.`);
   }
 
   // ── Sanity checks → warnings ─────────────────────────────
@@ -268,4 +330,5 @@ function emptyData() {
 // ── Browser bridge ─────────────────────────────────────────
 if (typeof window !== 'undefined') {
   window.parseBalanceteText = parseBalanceteText;
+  window.classificarContaCortada = classificarContaCortada;
 }

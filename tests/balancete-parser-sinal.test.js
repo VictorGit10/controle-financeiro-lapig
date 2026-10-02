@@ -118,11 +118,51 @@ describe('parseBalanceteText — conferência contra a conta-mãe', () => {
   });
 
   it('avisa quando uma folha não fecha com a mãe', () => {
-    // Sem o "( - )" na descrição, a redutora é lida como gasto — foi o
-    // defeito real. A conferência tem de apontar a conta-mãe.
-    const quebrado = FIX_30068.replace('( - ) FRETES E TRANSP', 'FRETES E TRANSP');
+    // Uma linha que não casa com o padrão some da soma — a conferência
+    // tem de apontar a conta-mãe em vez de gravar o total menor calado.
+    const quebrado = FIX_30068.replace(
+      '7.1.3.05.01.00129 2599524 ( - ) FRETES E TRANSP S/ IMPORTA 0,00 0,00 19.531,30 19.531,30 19.531,30',
+      '7.1.3.05.01.00129 2599524 ( - ) FRETES E TRANSP S/ IMPORTA 0,00 0,00 19.531,30');
     const { warnings } = parseBalanceteText(quebrado);
     expect(warnings.some(w => w.startsWith('Conta 7.1.3.05:'))).toBe(true);
+  });
+});
+
+describe('parseBalanceteText — "( - )" no nome não é redutora', () => {
+  // Pessoal CLT do 30.111 (2026-09): "( - ) 13º SALARIO", "( - ) FÉRIAS"
+  // e os encargos "( - )" são DÉBITOS — gasto normal, somado pela mãe.
+  // A mig. 049 decidia pelo nome e os gravava negativos.
+  const FIX_CLT = `FUNDACAO DE APOIO A PESQUISA Balancete Contábil Analítico 01/01/2000 a 07/09/2026 Pág.: 1
+00.799.205/0001-89 Emissão: 09/09/2026 10:55
+1.1.1.02.02.99999 99999 30.111 00000-0 BB/FU PROJETO 0,00 1,00 (1,00) 0,00 0,00
+7.1.1.01 2592170 ( + ) RECEITAS DE RECURSOS C/ RE 0,00 (45.670,75) 45.670,75 0,00 0,00
+7.1.1.01.09.91281 2591281 ( + ) TRANSF. NUM ENTRE CENTRO D 0,00 0,00 45.670,75 45.670,75 45.670,75
+7.1.1.01.09.91282 2591282 ( - ) TRANSF. NUM ENTRE CENTRO D 0,00 45.670,75 0,00 45.670,75 45.670,75
+7.1.3.01 7.1.3.01 CUSTOS C/ PESSOAL - REC. RESTRI 0,00 15.811,44 (10,01) 15.801,43 15.801,43
+7.1.3.01.01.00001 2501001 SALARIOS 0,00 9.110,00 0,00 9.110,00 9.110,00
+7.1.3.01.01.00007 2501007 ( - ) 13º SALARIO 0,00 759,16 0,00 759,16 759,16
+7.1.3.01.01.00016 2501016 ( - ) FÉRIAS 0,00 1.012,23 0,00 1.012,23 1.012,23
+7.1.3.01.02.00001 2502001 DESPESA C/ FGTS S/FOLHA (PRJ) 0,00 870,50 0,00 870,50 870,50
+7.1.3.01.02.00002 2502002 CONTRIBUIÇÃO PREVIDENCIARIA - IN 0,00 2.910,53 0,00 2.910,53 2.910,53
+7.1.3.01.02.00004 2502004 ( - ) PIS S/ FOLHA 0,00 108,82 (0,01) 108,81 108,81
+7.1.3.01.02.00010 2502010 ( - ) FGTS S/FÉRIAS PRJ 0,00 0,02 0,00 0,02 0,02
+7.1.3.01.02.00014 2502014 ( - ) INSS S/FÉRIAS PRJ 0,00 0,01 0,00 0,01 0,01
+7.1.3.01.02.00015 2502015 ( - ) INSS S/13º SALARIO PRJ 0,00 0,01 0,00 0,01 0,01
+7.1.3.01.03.00005 2503005 VALE ALIMENTAÇÃO FUNCIONÁRIOS 0,00 1.040,16 (10,00) 1.030,16 1.030,16
+TOTAL DE DÉBITOS : 1,00
+TOTAL DE CRÉDITOS: 1,00
+SALDO DISPONÍVEL PÓS IR/IOF ESTIMADO S/ REND. APL. FINANCEIRA == >> R$ 469.259,97
+RENDIMENTO LÍQUIDO APURADO ==>> R$ 21.637,70`;
+
+  it('encargo "( - )" com débito entra positivo', () => {
+    const l = parseBalanceteText(FIX_CLT).data.lancamentos;
+    expect(l.find(x => x.conta_codigo === '7.1.3.01.01.00016').saldo_atual).toBeCloseTo(1012.23, 2);
+    expect(l.find(x => x.conta_codigo === '7.1.3.01.02.00004').saldo_atual).toBeCloseTo(108.81, 2);
+  });
+
+  it('as contas-mãe de pessoal e de receita fecham', () => {
+    const { warnings } = parseBalanceteText(FIX_CLT);
+    expect(warnings.filter(w => w.startsWith('Conta 7.'))).toEqual([]);
   });
 
   it('a despesa financeira ignorada também é conferida, mas não é gravada', () => {
