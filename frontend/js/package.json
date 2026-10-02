@@ -1,0 +1,4 @@
+{
+  "//": "Só para o Node (MCP e testes): os parsers são módulos ES e o MCP importa os mesmos arquivos do site. O navegador ignora este arquivo.",
+  "type": "module"
+}

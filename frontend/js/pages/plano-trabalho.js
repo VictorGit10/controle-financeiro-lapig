@@ -1273,16 +1273,9 @@ const PlanoTrabalhoPage = (() => {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      // Preserva quebras de linha aproximadas usando a coordenada Y
-      let lastY = null;
-      const lineParts = [];
-      content.items.forEach(it => {
-        const y = it.transform?.[5];
-        if (lastY !== null && Math.abs(y - lastY) > 2) lineParts.push('\n');
-        lineParts.push(it.str);
-        lastY = y;
-      });
-      full += lineParts.join(' ') + '\n';
+      // Mesma montagem que o Buriti usa no MCP (parsers/pdf-texto.js).
+      if (typeof textoDaPagina !== 'function') throw new Error('pdf-texto.js não carregado.');
+      full += textoDaPagina(content.items) + '\n';
     }
     full = full.trim();
     if (full.length < 100) throw new Error('Texto extraído do PDF muito curto.');

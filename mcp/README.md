@@ -128,6 +128,73 @@ Vale a mesma regra do Claude Code, e pelo mesmo motivo: o Codex também aceita u
 ficaria versionado, com a senha dentro. Use o de usuário. O servidor só aparece
 depois de reiniciar o cliente.
 
+## Buriti — o agente que propõe (mig. 051)
+
+O **Buriti** é o mesmo pacote rodando com **outra credencial**: um usuário de
+papel `agente`. Com esse login, as tools de leitura enxergam só o escopo dele
+(`user_projects`) e as três tools do Buriti funcionam:
+
+| Tool | Faz |
+|---|---|
+| `propor_balancete` | lê um PDF da FUNAPE com o mesmo leitor do site e cria uma **proposta** (com as perguntas de classificação, sugestão e justificativa de cada uma) |
+| `listar_propostas` | propostas e a decisão humana sobre cada uma — inclusive a resposta de uma pergunta e o motivo de uma rejeição |
+| `perguntar` | deixa uma pergunta na página Buriti do site |
+
+**Nada disso grava dado financeiro.** O papel `agente` é barrado por gatilho em
+toda tabela de `public` e confinado ao bucket `propostas-agente` (mig. 051) — a
+garantia é do banco, não da disciplina do agente. Quem aplica é um humano, no
+site. Com um login que não é `agente`, as tools de proposta respondem
+"Só o agente cria propostas".
+
+Teste sem banco, nos PDFs de uma pasta:
+
+```bash
+node scripts/propor-balancetes-local.js "C:/caminho/da/pasta"
+```
+
+### Instalar o Buriti (passo do Victor)
+
+A senha do Buriti **nunca** passa pelo chat nem por comando que o Claude rode —
+ela ficaria no transcript. Os passos 1 e 4 são feitos por você, à mão.
+
+1. **Criar o usuário** no painel do Supabase → Authentication → Users → *Add
+   user* → *Create new user*. E-mail próprio para o agente (ex.:
+   `buriti@…`), senha forte gerada por gerenciador de senhas, *Auto Confirm
+   User* marcado. Copie o UUID do usuário criado.
+2. **Cadastrar como agente** e dar o escopo, no SQL Editor (troque o UUID e os
+   códigos **no editor**, não neste arquivo):
+
+   ```sql
+   insert into public.app_users (user_id, role, display_name, email)
+   values ('<UUID-DO-BURITI>', 'agente', 'Buriti', '<email-do-buriti>')
+   on conflict (user_id) do update set role = 'agente';
+
+   insert into public.user_projects (user_id, project_id)
+   select '<UUID-DO-BURITI>', id from public.projects
+    where code in ('30.068', '30.076' /* …os centros que ele acompanha */)
+   on conflict do nothing;
+   ```
+
+   Ou pela tela **Usuários & Centros de Custo** do site, para o escopo.
+3. **Registrar o segundo servidor**, sem a senha:
+
+   ```bash
+   claude mcp add buriti -s local \
+     -e CF_SUPABASE_URL=https://SEU-PROJETO.supabase.co \
+     -e CF_SUPABASE_ANON_KEY=<anon key> \
+     -e CF_EMAIL=<email-do-buriti> \
+     -e CF_PASSWORD=TROQUE-NO-ARQUIVO \
+     -- node "<caminho absoluto>/mcp/src/index.js"
+   ```
+4. **Pôr a senha à mão**: abra `~/.claude.json` num editor, procure o bloco
+   `"buriti"` e troque `TROQUE-NO-ARQUIVO` pela senha. Reinicie o cliente.
+5. Conferir: na sessão, `quem_sou_eu` tem de responder `papel: agente`. Se
+   responder `professor` ou `admin`, **pare**: o servidor está com a credencial
+   errada, e um login humano nas mãos do agente desfaz a barreira.
+
+O servidor `controle-financeiro` (o seu login) continua como está: são dois
+servidores do mesmo pacote, um por pessoa.
+
 ## Tools
 
 | Tool | Para quê |

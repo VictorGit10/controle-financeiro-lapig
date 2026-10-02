@@ -6,6 +6,13 @@
 // e-mail e senha, e o RLS decide o que ela vê. Não há papel, permissão ou regra
 // de negócio codificada aqui.
 
+// stdout é o canal do protocolo. Biblioteca que use console.log (o pdf.js
+// avisa assim ao carregar) corromperia a sessão: tudo vai para stderr. O SDK
+// escreve o protocolo direto em process.stdout, sem passar por aqui.
+console.log = (...args) => console.error(...args);
+console.info = (...args) => console.error(...args);
+console.warn = (...args) => console.error(...args);
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -21,6 +28,7 @@ import {
   projecaoDeCaixa,
   planoDeTrabalho,
 } from './tools.js';
+import { proporBalancete, listarPropostas, perguntar } from './buriti.js';
 
 // Enquadramento que vale para TODAS as tools. Fica aqui, e não repetido dentro
 // de cada descrição, por dois motivos: o cliente lê isto uma vez no handshake —
@@ -292,6 +300,82 @@ tool(
     inputSchema: {},
   },
   quemSouEu
+);
+
+// ── Buriti: as únicas tools que escrevem — e só PROPOSTAS ──────────────────
+// Registradas com `buriti(...)` e não `tool(...)` de propósito: existem só no
+// MCP, nunca no Assistente do site (tests/ai-tools.test.js confere as duas
+// coisas). Só funcionam com login de papel `agente` (mig. 051); com outro
+// login, criar_proposta responde "Só o agente cria propostas".
+const PROPOE = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+
+function buriti(nome, config, handler, annotations = PROPOE) {
+  servidor.registerTool(nome, { ...config, annotations }, async (args) => {
+    try {
+      const resultado = await handler(args ?? {});
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    } catch (erro) {
+      return { content: [{ type: 'text', text: `Erro: ${erro.message}` }], isError: true };
+    }
+  });
+}
+
+buriti(
+  'propor_balancete',
+  {
+    title: 'Propor balancete (Buriti)',
+    description:
+      'Lê um balancete da FUNAPE em PDF (caminho local) com o MESMO leitor da ' +
+      'importação do site, identifica o centro de custo pelo código no PDF e cria ' +
+      'uma PROPOSTA para um humano revisar e aplicar. Não grava nada no balancete.\n\n' +
+      'A proposta leva as perguntas de classificação (conta com código cortado no PDF ' +
+      'e fora da tabela de reduzidos), cada uma com sugestão e justificativa, e os ' +
+      'avisos da conferência das contas-mãe. Refazer a proposta do mesmo balancete ' +
+      'substitui a pendente anterior. `simular: true` mostra a proposta sem criá-la.',
+    inputSchema: {
+      caminho_pdf: z.string().describe('Caminho do PDF no computador onde o MCP roda.'),
+      simular: z.boolean().optional().describe('Só mostra a proposta, sem subir o PDF nem criá-la. Padrão: false.'),
+    },
+  },
+  proporBalancete
+);
+
+buriti(
+  'listar_propostas',
+  {
+    title: 'Listar propostas do Buriti',
+    description:
+      'Propostas e perguntas do Buriti e a decisão humana sobre cada uma. `status` ' +
+      'rejeitada traz o motivo em `motivo`; pergunta respondida traz a resposta ' +
+      'em `motivo`. Leia antes de propor de novo: motivo de rejeição é o que não ' +
+      'pode se repetir.',
+    inputSchema: {
+      status: z
+        .enum(['pendente', 'aplicada', 'rejeitada', 'respondida', 'obsoleta', 'todas'])
+        .optional()
+        .describe('Padrão: pendente.'),
+      centro_de_custo: z.string().optional().describe('Código do centro de custo (ex.: 30.068).'),
+      limite: z.number().int().positive().optional().describe('Padrão: 50, máximo 200.'),
+    },
+  },
+  listarPropostas,
+  SO_LEITURA
+);
+
+buriti(
+  'perguntar',
+  {
+    title: 'Perguntar ao Victor (Buriti)',
+    description:
+      'Deixa uma pergunta na página Buriti do site — o canal do agente com quem ' +
+      'decide. Use quando a dúvida muda um número ou uma classificação e nenhuma ' +
+      'tabela responde. A resposta volta em listar_propostas (status respondida).',
+    inputSchema: {
+      texto: z.string().describe('A pergunta, com o contexto necessário para responder sem abrir outro lugar.'),
+      centro_de_custo: z.string().optional().describe('Código do centro de custo, se a pergunta for sobre um.'),
+    },
+  },
+  perguntar
 );
 
 const transporte = new StdioServerTransport();

@@ -54,6 +54,7 @@ export default [
         // parsers + components (window-bridged via <script type="module">)
         parseBalanceteText: "readonly",
         classificarContaCortada: "readonly",
+        textoDaPagina: "readonly",
         parsePtFromHtml: "readonly",
         PtFormatError: "readonly",
         detectPtModel: "readonly",

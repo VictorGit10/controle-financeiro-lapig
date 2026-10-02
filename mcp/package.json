@@ -19,6 +19,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@supabase/supabase-js": "^2.112.3",
+    "pdfjs-dist": "3.11.174",
     "zod": "^4.4.3"
   }
 }

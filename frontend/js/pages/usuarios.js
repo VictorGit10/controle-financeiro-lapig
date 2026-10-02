@@ -1,6 +1,6 @@
 /* ============================================================
    Usuários & Centros de Custo (admin-only)
-   Define o papel (admin/professor) e quais centros de custo
+   Define o papel (admin/professor/agente) e quais centros de custo
    (projects) cada usuário autenticado enxerga. A criação do
    login (e-mail/senha) continua no painel do Supabase — o
    trigger on_auth_user_created (mig. 033) cria a linha em
@@ -85,7 +85,9 @@ const UsuariosPage = (() => {
       const projCount  = u._projectIds.size;
       const roleBadge  = u.role === 'admin'
         ? '<span class="badge badge--active">Administrador</span>'
-        : '<span class="badge badge--info">Professor</span>';
+        : u.role === 'agente'
+          ? '<span class="badge badge--warning">Agente (Buriti)</span>'
+          : '<span class="badge badge--info">Professor</span>';
       const name = u.display_name || nameFromEmail(u.email) || '—';
       return `
         <tr>
@@ -158,10 +160,12 @@ const UsuariosPage = (() => {
       bodyHTML: `
         <div class="form-group">
           <label class="form-label">Papel</label>
-          <select class="form-input" id="user-role-sel">
+          <select class="form-input" id="user-role-sel" ${user.role === 'agente' ? 'disabled' : ''}>
             <option value="professor" ${user.role === 'professor' ? 'selected' : ''}>Professor — vê apenas os centros de custo atribuídos</option>
             <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador — acesso total</option>
+            <option value="agente" ${user.role === 'agente' ? 'selected' : ''}>Agente (Buriti) — lê os centros atribuídos e só cria propostas</option>
           </select>
+          ${user.role === 'agente' ? '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;">Papel travado: tirar alguém do papel de agente dá a uma IA poder de gravar, e só se faz no SQL Editor, de propósito (mig. 051). Aqui se ajusta só o escopo.</p>' : ''}
           ${isSelf ? '<p style="font-size:0.8rem;color:var(--warning);margin-top:4px;">Você não pode remover seu próprio acesso de administrador por aqui.</p>' : ''}
         </div>
         <div class="form-group">
@@ -178,7 +182,9 @@ const UsuariosPage = (() => {
       `,
       saveLabel: 'Salvar',
       onSave: async () => {
-        const role = document.getElementById('user-role-sel').value;
+        // Agente: o seletor está travado; manda o próprio papel (a RPC recusa
+        // mudá-lo de qualquer forma — mig. 051).
+        const role = user.role === 'agente' ? 'agente' : document.getElementById('user-role-sel').value;
         // Evita lockout: o admin não pode rebaixar a si mesmo por aqui.
         if (isSelf && role !== 'admin') {
           throw new Error('Você não pode remover seu próprio acesso de administrador. Peça a outro administrador para alterar seu papel.');

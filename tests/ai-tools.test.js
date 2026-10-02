@@ -71,6 +71,16 @@ describe('lista de tools', () => {
     const nomes = TOOLS.map((t) => t.nome);
     expect(new Set(nomes).size).toBe(nomes.length);
   });
+
+  // As tools do Buriti (mig. 051) criam propostas e só funcionam com login de
+  // papel agente. São do MCP e NUNCA do Assistente do site: quem conversa no
+  // site é o humano, que aplica — não propõe para si mesmo.
+  it('as tools do Buriti existem no MCP e não no site', () => {
+    const doBuriti = [...fonteMcp.matchAll(/\bburiti\(\s*'([a-z_]+)'/g)].map((m) => m[1]).sort();
+    expect(doBuriti).toEqual(['listar_propostas', 'perguntar', 'propor_balancete']);
+    const noSite = TOOLS.map((t) => t.nome);
+    for (const nome of doBuriti) expect(noSite).not.toContain(nome);
+  });
 });
 
 describe('enquadramento', () => {

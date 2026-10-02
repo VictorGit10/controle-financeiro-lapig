@@ -127,6 +127,23 @@ export async function consultar(contexto, montaQuery) {
   return data;
 }
 
+/**
+ * Sobe um arquivo no storage. Usado só pelo Buriti, e só no bucket
+ * `propostas-agente`: o papel agente é confinado a ele por policy
+ * restritiva (mig. 051) — outro bucket volta erro do banco, não daqui.
+ */
+export async function armazenar(bucket, caminho, bytes, contentType) {
+  let sb = await conectado();
+  let { error } = await sb.storage.from(bucket).upload(caminho, bytes, { contentType, upsert: false });
+  if (sessaoMorta(error)) {
+    cliente = null;
+    sb = await conectado();
+    ({ error } = await sb.storage.from(bucket).upload(caminho, bytes, { contentType, upsert: false }));
+  }
+  if (error) throw new Error(`Upload de ${caminho}: ${error.message}`);
+  return caminho;
+}
+
 export async function quemSouEu() {
   await conectado();
   const perfil = await consultar('perfil do usuário', (sb) =>

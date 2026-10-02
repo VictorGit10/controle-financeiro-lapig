@@ -39,6 +39,11 @@ const ESPERADAS = [
   'quem_sou_eu',
 ];
 
+// Buriti (mig. 051): as únicas que escrevem — e só PROPOSTAS. Duas declaram
+// escrita sem ser destrutivas; listar_propostas é leitura.
+const BURITI_ESCRITA = ['propor_balancete', 'perguntar'];
+const BURITI = [...BURITI_ESCRITA, 'listar_propostas'];
+
 // Sem herdar as CF_* do ambiente: se elas vazassem para cá, o teste "sem
 // credencial" viraria um teste com credencial em qualquer máquina de quem usa
 // o servidor de verdade — inclusive a do desenvolvedor.
@@ -57,10 +62,10 @@ await cliente.connect(transporte);
 
 const { tools } = await cliente.listTools();
 const nomes = tools.map((t) => t.name).sort();
-const faltando = ESPERADAS.filter((n) => !nomes.includes(n));
+const faltando = [...ESPERADAS, ...BURITI].filter((n) => !nomes.includes(n));
 conferir(
-  'servidor anuncia exatamente as 9 tools',
-  faltando.length === 0 && tools.length === ESPERADAS.length,
+  'servidor anuncia exatamente as 9 tools de leitura + 3 do Buriti',
+  faltando.length === 0 && tools.length === ESPERADAS.length + BURITI.length,
   faltando.length ? `faltando: ${faltando.join(', ')}` : `${tools.length} tools`
 );
 
@@ -71,11 +76,19 @@ conferir(
   semDescricao.length ? semDescricao.map((t) => t.name).join(', ') : ''
 );
 
-const semHint = tools.filter((t) => t.annotations?.readOnlyHint !== true);
+const semHint = tools.filter((t) => !BURITI_ESCRITA.includes(t.name) && t.annotations?.readOnlyHint !== true);
 conferir(
-  'toda tool se declara somente-leitura',
+  'toda tool que não é de proposta se declara somente-leitura',
   semHint.length === 0,
   semHint.length ? `sem readOnlyHint: ${semHint.map((t) => t.name).join(', ')}` : ''
+);
+
+const escritaMal = tools.filter((t) => BURITI_ESCRITA.includes(t.name)
+  && (t.annotations?.readOnlyHint !== false || t.annotations?.destructiveHint !== false));
+conferir(
+  'tools de proposta declaram escrita não destrutiva',
+  escritaMal.length === 0,
+  escritaMal.map((t) => t.name).join(', ')
 );
 
 // O enquadramento transversal (não calcule, não recomende, panorama descreve,

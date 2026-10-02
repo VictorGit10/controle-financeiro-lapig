@@ -186,6 +186,25 @@ begin
 end $$;
 
 -- ------------------------------------------------------------
+-- BLOCO 4b — a tela de usuários não tira o agente do papel sem querer
+-- ------------------------------------------------------------
+do $$
+declare x uuid := (select id from public.projects where code = '51.X');
+begin
+  -- ainda logado como admin (a1)
+  perform public.save_user_assignments('00000000-0000-0000-0000-0000000000c1', 'agente', array[x]);
+  begin
+    perform public.save_user_assignments('00000000-0000-0000-0000-0000000000c1', 'professor', array[x]);
+    raise exception 'BLOCO 4b FALHOU: a tela rebaixou o agente a professor';
+  exception when insufficient_privilege then null;
+  end;
+  if (select role from public.app_users where user_id = '00000000-0000-0000-0000-0000000000c1') <> 'agente' then
+    raise exception 'BLOCO 4b FALHOU: papel do agente mudou';
+  end if;
+  raise notice 'BLOCO 4b ok: escopo do agente editável, papel travado';
+end $$;
+
+-- ------------------------------------------------------------
 -- BLOCO 5 — RLS: quem vê o quê, e ninguém escreve direto na tabela
 -- ------------------------------------------------------------
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000c1', false);

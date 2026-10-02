@@ -471,6 +471,59 @@ comment on function public.upsert_balancete is
   'Cria ou atualiza um balancete a partir do JSON revisado. Guard: assert_project_allowed. Aceita new_mappings opcional (catálogo permissivo), rubrica_code por lançamento (mig. 050) e proposta_id (mig. 051: marca a proposta do agente como aplicada na mesma transação).';
 
 -- ------------------------------------------------------------
+-- save_user_assignments: a tela Usuários & Centros de Custo não pode
+-- tirar o agente do papel sem querer.
+-- O seletor da tela só tinha admin/professor; para um agente, o navegador
+-- mostraria "professor" selecionado, e um "Salvar" desavisado devolveria a
+-- ele o poder de gravar — a barreira de (B) cairia sem ninguém notar.
+-- Aceita 'agente'; tirar alguém do papel agente só pelo SQL Editor.
+-- Corpo da 033 + as duas regras.
+-- ------------------------------------------------------------
+create or replace function public.save_user_assignments(
+  p_user_id     uuid,
+  p_role        text,
+  p_project_ids uuid[]
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_atual text;
+begin
+  if not public.is_admin() then
+    raise exception 'Apenas administradores podem gerenciar atribuições de usuários.';
+  end if;
+
+  if p_role not in ('admin', 'professor', 'agente') then
+    raise exception 'Papel inválido: %', p_role;
+  end if;
+
+  select role into v_atual from public.app_users where user_id = p_user_id;
+  if v_atual = 'agente' and p_role <> 'agente' then
+    raise exception 'Este usuário é o agente (Buriti). Mudar o papel dele dá a uma IA poder de gravar: faça isso no SQL Editor, de propósito.'
+      using errcode = '42501';
+  end if;
+
+  update public.app_users
+     set role = p_role
+   where user_id = p_user_id;
+
+  delete from public.user_projects where user_id = p_user_id;
+
+  if p_project_ids is not null then
+    insert into public.user_projects (user_id, project_id)
+    select p_user_id, id from unnest(p_project_ids) as id
+    on conflict (user_id, project_id) do nothing;
+  end if;
+end;
+$$;
+
+comment on function public.save_user_assignments is
+  'Define o papel (admin/professor/agente) e os centros de custo permitidos de um usuário. Admin-only. Recusa tirar alguém do papel agente (mig. 051). Usada pela página Usuários & Centros de Custo.';
+
+-- ------------------------------------------------------------
 -- ACL (funções novas nascem fechadas pela 035)
 -- ------------------------------------------------------------
 revoke all on function public.is_agente()                                       from public, anon;
