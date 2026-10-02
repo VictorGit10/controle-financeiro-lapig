@@ -38,6 +38,7 @@ const FechamentoPage = (() => {
   let reconSet     = new Set();   // project_ids com reconciliação na competência
   let planoSet     = new Set();   // project_ids com plano de trabalho ativo
   let reconError   = null;   // erro ao ler `reconciliacoes` (ex.: migração 031)
+  let propostas    = [];     // propostas pendentes do Buriti (mig. 051), best-effort
 
   // Competência default = mês anterior (o fechamento cuida do mês que passou).
   function defaultCompetencia() {
@@ -64,12 +65,13 @@ const FechamentoPage = (() => {
     containerEl.innerHTML = '<div class="skeleton skeleton--card" style="height:280px;"></div>';
     const { start, end } = monthBounds(competencia);
 
-    const [projRes, balRes, planoRes, reconRes] = await Promise.all([
+    const [projRes, balRes, planoRes, reconRes, propRes] = await Promise.all([
       supabaseClient.from('projects').select('id, name, code, active').order('name'),
       supabaseClient.from('balancetes').select('project_id, data_referencia')
         .gte('data_referencia', start).lte('data_referencia', end),
       supabaseClient.from('planos_trabalho').select('project_id').eq('ativo', true),
       supabaseClient.from('reconciliacoes').select('project_id, competencia').eq('competencia', start),
+      supabaseClient.from('propostas_agente').select('project_id, tipo').eq('status', 'pendente'),
     ]);
 
     if (projRes.error) { showToast('Erro ao carregar projetos: ' + projRes.error.message, 'error'); return; }
@@ -89,6 +91,9 @@ const FechamentoPage = (() => {
       reconError = null;
       reconSet = new Set((reconRes.data || []).map(r => r.project_id));
     }
+
+    // Sem a mig. 051 a tabela não existe: o checklist segue igual, sem o Buriti.
+    propostas = propRes.error ? [] : (propRes.data || []);
 
     renderPage();
   }
@@ -130,7 +135,10 @@ const FechamentoPage = (() => {
           <td style="text-align:center;">${planoSet.has(p.id)
             ? '<span class="badge badge--active">Ativo</span>'
             : '<span class="badge badge--ended" title="Nenhum plano de trabalho ativo — importe o DOCX">—</span>'}</td>
-          <td style="text-align:center;">${statusBadge(balSet.has(p.id), 'Recebido', 'Pendente')}</td>
+          <td style="text-align:center;">${statusBadge(balSet.has(p.id), 'Recebido', 'Pendente')}${
+            propostas.some(x => x.project_id === p.id && x.tipo === 'balancete')
+              ? `<div style="margin-top:4px;"><button class="btn btn--ghost btn--sm" onclick="Router.navigate('buriti')" title="O Buriti já conferiu um balancete deste projeto e espera revisão"><i data-lucide="palmtree" style="width:14px;height:14px;"></i> proposta</button></div>`
+              : ''}</td>
           <td style="text-align:center;">${statusBadge(reconSet.has(p.id), 'Conferida', 'Pendente')}</td>
         </tr>`;
     }).join('');
@@ -155,8 +163,18 @@ const FechamentoPage = (() => {
            </table>
          </div>`;
 
+    const buritiHTML = propostas.length === 0 ? '' : `
+      <div class="alert-banner alert-banner--info" style="margin-bottom:var(--sp-3);">
+        <i data-lucide="palmtree" class="alert-banner__icon"></i>
+        <div class="alert-banner__body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span><strong>${propostas.length} proposta(s) do Buriti</strong> esperando revisão.</span>
+          <button class="btn btn--primary btn--sm" onclick="Router.navigate('buriti')">Abrir caixa do Buriti</button>
+        </div>
+      </div>`;
+
     containerEl.innerHTML = `
       ${reconWarnHTML}
+      ${buritiHTML}
 
       <div style="display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin-bottom:var(--sp-4);">
         <div class="form-group" style="margin:0;">

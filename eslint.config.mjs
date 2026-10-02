@@ -29,6 +29,7 @@ export default [
         MonitoramentoPage: "writable",
         PlanoTrabalhoPage: "writable",
         FechamentoPage: "writable",
+        BuritiPage: "writable",
         HubPage: "writable",
         AssistentePage: "writable",
         UsuariosPage: "writable",

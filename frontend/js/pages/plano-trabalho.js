@@ -1217,32 +1217,7 @@ const PlanoTrabalhoPage = (() => {
       }
     },
     async save(hostEl, extracted, file) {
-      const targetProjectId = hostEl.querySelector('#bali-project-sel')?.value;
-      if (!targetProjectId) throw new Error('Selecione o projeto.');
-
-      const payload = collectBalanceteReview(hostEl, extracted);
-      payload.project_id     = targetProjectId;
-      payload.arquivo_nome   = file.name;
-      payload.raw_extraction = extracted.raw_extraction || extracted.data;
-
-      const safeName = file.name.replace(/[^\w.-]/g, '_');
-      const path = `${targetProjectId}/${Date.now()}_${safeName}`;
-      const up = await supabaseClient.storage
-        .from(BALANCETE_STORAGE_BUCKET)
-        .upload(path, file, { contentType: 'application/pdf' });
-      if (up.error) throw new Error('Falha no upload do PDF: ' + up.error.message);
-      payload.arquivo_storage_path = path;
-
-      const { error } = await supabaseClient.rpc('upsert_balancete', { p_payload: payload });
-      if (error) {
-        await supabaseClient.storage.from(BALANCETE_STORAGE_BUCKET).remove([path]).catch(() => {});
-        throw new Error('Erro ao salvar balancete: ' + error.message);
-      }
-      const newMappings = Array.isArray(payload.new_mappings) ? payload.new_mappings.length : 0;
-      return {
-        label: payload.data_referencia ? formatDate(payload.data_referencia) : file.name,
-        newMappings,
-      };
+      return salvarBalancete(hostEl, extracted, file, null);
     },
     afterAllSaved() {
       // Após importar balancetes, a aba mais útil é Previsto x Realizado.
@@ -1250,6 +1225,101 @@ const PlanoTrabalhoPage = (() => {
       localStorage.setItem(LS_TAB_KEY, currentTab);
     },
   };
+
+  /**
+   * Gravação do balancete revisado. `propostaId` vem quando a origem é uma
+   * proposta do Buriti: upsert_balancete marca a proposta como aplicada na
+   * MESMA transação (mig. 051) — se ela já não estiver pendente, nada grava.
+   */
+  async function salvarBalancete(hostEl, extracted, file, propostaId) {
+    const targetProjectId = hostEl.querySelector('#bali-project-sel')?.value;
+    if (!targetProjectId) throw new Error('Selecione o projeto.');
+
+    const payload = collectBalanceteReview(hostEl, extracted);
+    payload.project_id     = targetProjectId;
+    payload.arquivo_nome   = file.name;
+    payload.raw_extraction = extracted.raw_extraction || extracted.data;
+    if (propostaId) payload.proposta_id = propostaId;
+
+    const safeName = file.name.replace(/[^\w.-]/g, '_');
+    const path = `${targetProjectId}/${Date.now()}_${safeName}`;
+    const up = await supabaseClient.storage
+      .from(BALANCETE_STORAGE_BUCKET)
+      .upload(path, file, { contentType: 'application/pdf' });
+    if (up.error) throw new Error('Falha no upload do PDF: ' + up.error.message);
+    payload.arquivo_storage_path = path;
+
+    const { error } = await supabaseClient.rpc('upsert_balancete', { p_payload: payload });
+    if (error) {
+      await supabaseClient.storage.from(BALANCETE_STORAGE_BUCKET).remove([path]).catch(() => {});
+      throw new Error('Erro ao salvar balancete: ' + error.message);
+    }
+    const newMappings = Array.isArray(payload.new_mappings) ? payload.new_mappings.length : 0;
+    return {
+      label: payload.data_referencia ? formatDate(payload.data_referencia) : file.name,
+      newMappings,
+    };
+  }
+
+  /**
+   * Handler para revisar uma PROPOSTA do Buriti (mig. 051) na mesma fila e
+   * na mesma tela de revisão da importação comum. Diferenças, e só elas:
+   *   • não lê o PDF de novo — usa `payload.extraido`, que o Buriti produziu
+   *     com o MESMO parser (mcp/src/buriti-proposta.js);
+   *   • as sugestões de rubrica vêm pré-selecionadas, com a justificativa à
+   *     vista (salvar = o humano confirmar);
+   *   • grava com `proposta_id`, que marca a proposta como aplicada na
+   *     mesma transação.
+   * O `file` é o PDF da proposta, baixado do bucket propostas-agente: é o
+   * comprovante que a gravação anexa, como numa importação comum.
+   */
+  function buritiBalanceteHandler(proposta) {
+    const payload = proposta.payload || {};
+    const sugestoes = {};
+    (payload.perguntas || []).forEach(q => { if (q.sugestao) sugestoes[q.reduzido] = q.sugestao; });
+    return {
+      ...BALANCETE_HANDLER,
+      title: 'Revisar proposta do Buriti',
+      validExt: () => true,
+      async parse() {
+        const ex = payload.extraido || { data: {}, warnings: [] };
+        const data = {
+          ...ex.data,
+          lancamentos: (ex.data?.lancamentos || []).map(l => {
+            const s = l.conta_incompleta ? sugestoes[l.conta_reduzido] : null;
+            return s ? { ...l, sugestao_buriti: s } : { ...l };
+          }),
+        };
+        const extras = (payload.avisos || []).filter(a => !(ex.warnings || []).includes(a));
+        return { data, warnings: [...(ex.warnings || []), ...extras] };
+      },
+      async save(hostEl, extracted, file) {
+        return salvarBalancete(hostEl, extracted, file, proposta.id);
+      },
+    };
+  }
+
+  /** Nome da rubrica pelo código — a página do Buriti mostra as sugestões por extenso. */
+  function rubricaNome(code) {
+    return RUBRICAS.find(r => r.code === code)?.name || code;
+  }
+
+  /** Abre a revisão de uma proposta de balancete. `onFinished(summary)` como na fila. */
+  async function revisarPropostaBalancete(proposta, onFinished) {
+    await getImportHandlers();   // projetos + mapa conta → rubrica
+    if (!proposta.arquivo_path) throw new Error('A proposta não tem o PDF anexado.');
+    const { data: blob, error } = await supabaseClient.storage
+      .from('propostas-agente').download(proposta.arquivo_path);
+    if (error) throw new Error('Não foi possível baixar o PDF da proposta: ' + error.message);
+    const nome = proposta.payload?.arquivo_nome || proposta.arquivo_path.split('/').pop();
+    const file = new File([blob], nome, { type: 'application/pdf' });
+    ImportQueue.open({
+      title: 'Revisar proposta do Buriti',
+      handlers: [buritiBalanceteHandler(proposta)],
+      files: [file],
+      onFinished,
+    });
+  }
 
   // A extração de DOCX migrou para parsePtFromHtml (parser determinístico,
   // sem IA). Veja frontend/js/parsers/pt-parser.js e a integração em
@@ -1390,10 +1460,15 @@ const PlanoTrabalhoPage = (() => {
       // fica bloqueado.
       // Receita (7.1.1.01) não leva rubrica: código cortado ali não pergunta nada.
       const incompleta = !!l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.');
-      const resolved = incompleta ? '' : resolveRubricaForConta(l.conta_codigo);
+      // Proposta do Buriti: a sugestão dele vem pré-selecionada, com o porquê.
+      // Salvar é o humano confirmar — o agente nunca grava (mig. 051).
+      const sugestao = incompleta ? l.sugestao_buriti : null;
+      const resolved = incompleta ? (sugestao?.rubrica || '') : resolveRubricaForConta(l.conta_codigo);
       const isUnmapped = !resolved;
       let dica = '';
-      if (incompleta) {
+      if (sugestao) {
+        dica = `Sugestão do Buriti: <strong>${escapeAttr(nomeRubrica(sugestao.rubrica))}</strong> — ${escapeAttr(sugestao.justificativa || '')} Confirme ou troque.`;
+      } else if (incompleta) {
         const c = typeof classificarContaCortada === 'function'
           ? classificarContaCortada(l.conta_codigo, contaRubricaMap)
           : { rubrica: null, ambigua: true };
@@ -1762,7 +1837,7 @@ const PlanoTrabalhoPage = (() => {
   }
 
   return {
-    load, onProjectChange, switchTab, onImportClick, getImportHandlers,
+    load, onProjectChange, switchTab, onImportClick, getImportHandlers, revisarPropostaBalancete, rubricaNome,
     visualizar, ativar, excluir, baixar,
     verBalancete, excluirBalancete, baixarBalancete,
     toggleRubrica,

@@ -42,13 +42,16 @@
        title,                 // opcional (default: handler único ou genérico)
        handlers: [h1, h2],
        onFinished(summary),   // { saved, skipped, errored, newMappings, savedByType }
+       files,                 // opcional: File[] já escolhidos — pula a seleção e
+                              // abre direto a revisão (ex.: proposta do Buriti,
+                              // cujo PDF vem do storage e não do disco)
      });
    ============================================================ */
 
 /* exported ImportQueue */
 const ImportQueue = (() => {
 
-  function open({ title, handlers, onFinished }) {
+  function open({ title, handlers, onFinished, files: preFiles }) {
     if (!Array.isArray(handlers) || handlers.length === 0) return;
 
     for (const h of handlers) {
@@ -89,7 +92,17 @@ const ImportQueue = (() => {
     const saveBtn = overlay.querySelector('#modal-save-btn');
     saveBtn.addEventListener('click', onSaveClick);
 
-    renderSelection();
+    if (Array.isArray(preFiles) && preFiles.length > 0) {
+      for (const f of preFiles) {
+        const h = handlerFor(f.name);
+        if (h) { files.push(f); fileHandlers.push(h); }
+      }
+      phase = 'review';
+      index = 0;
+      processIndex();
+    } else {
+      renderSelection();
+    }
 
     // Duas passadas: quem sabe ler o formato tem prioridade sobre quem
     // só o aceita para preenchimento manual.
