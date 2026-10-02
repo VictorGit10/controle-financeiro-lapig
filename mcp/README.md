@@ -176,9 +176,15 @@ ela ficaria no transcript. Os passos 1 e 4 são feitos por você, à mão.
    ```
 
    Ou pela tela **Usuários & Centros de Custo** do site, para o escopo.
-3. **Registrar o segundo servidor**, sem a senha:
+3. **Registrar o segundo servidor, de dentro da pasta do Buriti**, sem a senha.
+   O escopo `-s local` vale só para o diretório onde o comando roda: rodando
+   em `…\Antigravity\Buriti\`, a credencial de agente existe **só lá**, e o
+   servidor `controle-financeiro` (o seu login) continua só na pasta
+   ControleFinanceiro. Nenhum dos dois em escopo de usuário — senão o Buriti
+   alcançaria o login humano.
 
    ```bash
+   cd "<caminho da pasta do Buriti>"
    claude mcp add buriti -s local \
      -e CF_SUPABASE_URL=https://SEU-PROJETO.supabase.co \
      -e CF_SUPABASE_ANON_KEY=<anon key> \
@@ -188,12 +194,22 @@ ela ficaria no transcript. Os passos 1 e 4 são feitos por você, à mão.
    ```
 4. **Pôr a senha à mão**: abra `~/.claude.json` num editor, procure o bloco
    `"buriti"` e troque `TROQUE-NO-ARQUIVO` pela senha. Reinicie o cliente.
-5. Conferir: na sessão, `quem_sou_eu` tem de responder `papel: agente`. Se
-   responder `professor` ou `admin`, **pare**: o servidor está com a credencial
-   errada, e um login humano nas mãos do agente desfaz a barreira.
+5. Conferir, **numa sessão aberta na pasta Buriti**:
+   - `claude mcp list` mostra `buriti` e **não** mostra `controle-financeiro`.
+     Se mostrar, o login humano está ao alcance do agente: remova-o desse
+     escopo antes de qualquer outra coisa;
+   - `quem_sou_eu` responde `papel: agente`. Se responder `professor` ou
+     `admin`, **pare**: o servidor está com a credencial errada, e um login
+     humano nas mãos do agente desfaz a barreira.
 
 O servidor `controle-financeiro` (o seu login) continua como está: são dois
-servidores do mesmo pacote, um por pessoa.
+servidores do mesmo pacote, um por pessoa, cada um na sua pasta.
+
+`propor_balancete` aceita `sugestoes` (`[{ reduzido, rubrica, justificativa }]`):
+é o julgamento do próprio Buriti, tirado do `caderno/decisoes.md` dele, e vence a
+semente de `src/buriti-sugestoes.js`, que fica como reserva. A rotina dele
+(`rotinas/conferir-balancete.md`) roda primeiro com `simular: true` para ver as
+perguntas e depois propõe com as sugestões.
 
 ## Tools
 

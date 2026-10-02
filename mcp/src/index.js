@@ -335,6 +335,19 @@ buriti(
     inputSchema: {
       caminho_pdf: z.string().describe('Caminho do PDF no computador onde o MCP roda.'),
       simular: z.boolean().optional().describe('Só mostra a proposta, sem subir o PDF nem criá-la. Padrão: false.'),
+      sugestoes: z
+        .array(
+          z.object({
+            reduzido: z.string().describe('Código Reduzido da conta (2ª coluna do balancete).'),
+            rubrica: z.string().describe('Código da rubrica sugerida (ex.: "e").'),
+            justificativa: z.string().describe('Por quê — o humano lê isto na revisão.'),
+          })
+        )
+        .optional()
+        .describe(
+          'Sua classificação para as perguntas, tirada do caderno de decisões. Vence a ' +
+            'sugestão padrão. Rode antes com simular: true para ver as perguntas.'
+        ),
     },
   },
   proporBalancete

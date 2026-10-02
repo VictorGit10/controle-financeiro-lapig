@@ -50,6 +50,14 @@ describe('montarPropostaBalancete', () => {
     expect(p.payload.conferencias.contas_mae_fecham).toBe(true);
   });
 
+  it('a sugestão do próprio Buriti (caderno de decisões) vence a semente', () => {
+    const q = montarPropostaBalancete({
+      texto: TEXTO, arquivoNome: 'x.pdf', mapa: MAPA,
+      sugestoes: [{ reduzido: '2597096', rubrica: 'b', justificativa: 'Decisão do Victor em 2026-10-02: serviço gráfico contratado.' }],
+    }).payload.perguntas[0];
+    expect(q.sugestao).toEqual({ rubrica: 'b', fonte: 'buriti', justificativa: 'Decisão do Victor em 2026-10-02: serviço gráfico contratado.' });
+  });
+
   it('sem semente, a dica pelo prefixo só aparece quando não é ambígua', () => {
     const semSemente = TEXTO.replace(/2597096/g, '2599999');
     const q = montarPropostaBalancete({ texto: semSemente, arquivoNome: 'x.pdf', mapa: MAPA }).payload.perguntas[0];

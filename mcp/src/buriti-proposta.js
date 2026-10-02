@@ -42,8 +42,16 @@ export const DATA = (iso) => (iso ? iso.split('-').reverse().join('/') : '—');
  *
  * `mapa` é o conta_rubrica_map ativo; sem ele, a dica pelo prefixo some e
  * só ficam as sugestões da semente.
+ *
+ * `sugestoes` ([{ reduzido, rubrica, justificativa }]) é o julgamento do
+ * próprio Buriti — tirado do caderno de decisões dele — e vence a semente,
+ * que é só reserva. Ordem: agente > semente > prefixo > nenhuma.
  */
-export function montarPropostaBalancete({ texto, arquivoNome, mapa = [] }) {
+export function montarPropostaBalancete({ texto, arquivoNome, mapa = [], sugestoes = [] }) {
+  const doAgente = {};
+  (sugestoes || []).forEach((s) => {
+    if (s && s.reduzido && s.rubrica) doAgente[String(s.reduzido)] = s;
+  });
   const extraido = parseBalanceteText(texto);
   const d = extraido.data;
   const problemas = [];
@@ -55,10 +63,13 @@ export function montarPropostaBalancete({ texto, arquivoNome, mapa = [] }) {
   const perguntas = d.lancamentos
     .filter((l) => l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.'))
     .map((l) => {
+      const agente = doAgente[l.conta_reduzido];
       const semente = SUGESTOES[l.conta_reduzido];
       const dica = classificarContaCortada(l.conta_codigo, mapa);
       let sugestao = null;
-      if (semente) {
+      if (agente) {
+        sugestao = { rubrica: agente.rubrica, justificativa: agente.justificativa || '', fonte: 'buriti' };
+      } else if (semente) {
         sugestao = { rubrica: semente.rubrica, justificativa: semente.justificativa, fonte: 'semente' };
       } else if (!dica.ambigua && dica.rubrica) {
         sugestao = {

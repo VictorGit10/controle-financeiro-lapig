@@ -39,12 +39,12 @@ async function centroPorCodigo(codigo) {
   return centros[0];
 }
 
-export async function proporBalancete({ caminho_pdf, simular = false }) {
+export async function proporBalancete({ caminho_pdf, simular = false, sugestoes = [] }) {
   const bytes = await fs.readFile(caminho_pdf);
   const arquivoNome = path.basename(caminho_pdf);
   const texto = await textoDoPdf(bytes);
   const mapa = await mapaAtivo();
-  const p = montarPropostaBalancete({ texto, arquivoNome, mapa });
+  const p = montarPropostaBalancete({ texto, arquivoNome, mapa, sugestoes });
   if (!p.ok) {
     return { criada: false, motivo: p.problemas.join(' '), resumo: p.resumo };
   }
