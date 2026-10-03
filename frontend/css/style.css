@@ -2306,3 +2306,23 @@ img { max-width: 100%; display: block; }
   .bal-tabela td:nth-child(3) { min-width: 150px; }
 }
 .buriti-bloco > summary { cursor: pointer; list-style: revert; }
+
+/* Previsto × Realizado por item (mig. 053) — blocos que cabem no celular */
+.pxr-detalhe { padding: 12px 16px 12px 40px; }
+.pxr-itens { display: flex; flex-direction: column; }
+.pxr-item { padding: 6px 0; border-bottom: 1px solid var(--border-subtle, var(--border-color)); }
+.pxr-item__nome { overflow-wrap: anywhere; }
+.pxr-item__nums { display: flex; gap: 16px; justify-content: flex-end; flex-wrap: wrap; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pxr-item__nums small { display: block; font-size: 10px; color: var(--text-secondary); text-align: right; }
+.pxr-item__nums span { text-align: right; }
+.pxr-item__saldo { font-weight: 600; }
+.pxr-item__saldo--neg { color: var(--danger); }
+@media (max-width: 640px) {
+  .pxr-detalhe { padding: 10px 8px; }
+  .pxr-item__nums { justify-content: space-between; gap: 8px; }
+}
+@media (max-width: 640px) {
+  /* A tabela de rubricas rola na horizontal no celular; o detalhe por item
+     fica preso à esquerda, na largura da tela, para ser lido sem rolar. */
+  .pxr-detalhe > * { position: sticky; left: 8px; max-width: calc(100vw - 56px); }
+}

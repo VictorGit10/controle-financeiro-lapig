@@ -10,7 +10,10 @@
 
 export const SUGESTOES = {
   // 30.068
-  '2597096': { rubrica: 'e',     justificativa: 'Cartazes/brindes de divulgação: o plano do 30.068 prevê "Impressão de material gráfico para divulgação" em Material de Consumo.' },
+  // `item` (mig. 053) é o item do plano; só vale onde o plano tiver esse item —
+  // em outro projeto a revisão cai para a letra.
+  '2597096': { rubrica: 'e', item: 'Impressão de material gráfico para divulgação do CEMPA-Cerrado',
+               justificativa: 'Cartazes/brindes de divulgação: decisão do Victor de 01/10 — serviços gráficos e cartazes vão para impressão de material gráfico.' },
   // 30.076
   '2502012': { rubrica: 'a.enc', justificativa: 'PIS sobre férias é encargo da folha CLT, como as demais contas de 7.1.3.01.02.' },
   '2504019': { rubrica: 'e',     justificativa: 'Material de áudio, vídeo e foto é material de consumo (grupo 7.1.3.03).' },

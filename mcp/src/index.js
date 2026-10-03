@@ -228,10 +228,11 @@ tool(
   {
     title: 'Previsto × realizado por rubrica',
     description:
-      'Execução do centro de custo rubrica a rubrica: quanto o plano de trabalho ' +
-      'orçou, quanto o balancete mais recente mostra que saiu, o saldo e o ' +
-      'percentual executado. Responde "onde o dinheiro está sendo gasto?" e ' +
-      '"que rubrica está estourando ou parada?".\n\n' +
+      'Execução do centro de custo rubrica a rubrica e item a item do plano: ' +
+      'quanto o plano de trabalho orçou, quanto o balancete mais recente mostra ' +
+      'que saiu, o saldo e o percentual executado. Responde "onde o dinheiro ' +
+      'está sendo gasto?" e "que rubrica está estourando ou parada?". ' +
+      '`realizado_sem_item` é gasto ainda não atribuído a um item do plano.\n\n' +
       'Olha só para TRÁS: não desconta compromissos futuros já assumidos (bolsas ' +
       'que continuarão a ser pagas) — para decidir se cabe um gasto novo, use ' +
       'saldo_livre. `nao_mapeados` são lançamentos do balancete sem rubrica ' +
@@ -340,6 +341,10 @@ buriti(
           z.object({
             reduzido: z.string().describe('Código Reduzido da conta (2ª coluna do balancete).'),
             rubrica: z.string().describe('Código da rubrica sugerida (ex.: "e").'),
+            item: z
+              .string()
+              .optional()
+              .describe('Item do plano dentro da rubrica, como escrito no plano (ex.: "Impressão de material gráfico…"). Veja plano_de_trabalho.'),
             justificativa: z.string().describe('Por quê — o humano lê isto na revisão.'),
           })
         )

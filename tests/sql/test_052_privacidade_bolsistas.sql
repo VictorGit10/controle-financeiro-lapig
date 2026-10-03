@@ -135,6 +135,6 @@ begin
   -- números de balancete não podem disparar falso positivo
   perform public.criar_proposta('balancete', x, 'Balancete 30.068 até 02/09/2026 · saldo R$ 1.107.372,93',
     '{"lancamentos": [{"conta": "7.1.3.05.01.00042", "red": "71199553", "valor": 24543248.95}],
-      "project_id": "5109286a-4a2d-45fc-855a-28c93e48cced"}'::jsonb, null, '2026-09-02');
+      "project_id": "9f1c2d3e-4a5b-46c7-8d9e-0a1b2c3d4e5f"}'::jsonb, null, '2026-09-02');
   raise notice 'BLOCO 5 ok: CPF fora da proposta; balancete normal passa';
 end $$;

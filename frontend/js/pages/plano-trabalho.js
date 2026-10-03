@@ -446,6 +446,61 @@ const PlanoTrabalhoPage = (() => {
         ${corpo}
       </div>`;
 
+    // Por item (mig. 053): previsto, realizado e saldo de cada linha do plano,
+    // no formato da tabela que vai para o professor. Antes da 053 os itens
+    // não trazem `realizado` e a tela cai no bloco antigo, só com o previsto.
+    const temRealizadoPorItem = detalhes.some(d => d.realizado !== undefined);
+    if (temRealizadoPorItem) {
+      const semItem = Number(r.realizado_sem_item || 0);
+      const semDescricao = Number(r.previsto_sem_descricao || 0);
+      // Blocos em vez de tabela: nome do item numa linha, os três números
+      // embaixo — cabe no celular, onde a tabela de rubricas já é larga.
+      const linhaItem = (rotulo, prev, real, extraStyle = '') => {
+        const saldo = prev == null ? null : prev - real;
+        return `
+          <div class="pxr-item" style="${extraStyle}">
+            <div class="pxr-item__nome">${rotulo}</div>
+            <div class="pxr-item__nums">
+              <span><small>Previsto</small>${prev == null ? '—' : formatBRL(prev)}</span>
+              <span><small>Já gasto</small>${formatBRL(real)}</span>
+              <span class="pxr-item__saldo ${saldo != null && saldo < 0 ? 'pxr-item__saldo--neg' : ''}"><small>Saldo</small>${saldo == null ? '—' : formatBRL(saldo)}</span>
+            </div>
+          </div>`;
+      };
+      const linhas = detalhes.map(d => linhaItem(escapeAttr(d.descricao), Number(d.previsto || 0), Number(d.realizado || 0))).join('') +
+        (semItem !== 0
+          ? linhaItem('<em>Sem item atribuído</em> <span style="font-size:11px;">— classifique na revisão do próximo balancete</span>', null, semItem, 'color:var(--warning);')
+          : '') +
+        (semDescricao > 0.005
+          ? linhaItem('<em>Sem descrição no plano</em>', semDescricao, 0, 'color:var(--text-secondary);')
+          : '');
+      const blocoItens = secao('Por item do plano', 'var(--text-secondary)', `<div class="pxr-itens">${linhas}</div>`);
+      const blocoContas = contas.length === 0 ? '' : `
+        <details style="margin-bottom:12px;">
+          <summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);">Contas do balancete que compõem esta rubrica (${contas.length})</summary>
+          ${contas.map(c => linhaDet(
+            `<code style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);">${escapeAttr(c.conta_codigo)}</code>&nbsp;${escapeAttr(c.conta_descricao || '—')}` +
+            (c.item ? ` <span style="color:var(--text-secondary);font-size:11px;">› ${escapeAttr(c.item)}</span>` : ''),
+            c.realizado
+          )).join('')}
+        </details>`;
+      const bolsasI = (saldoLivre && Array.isArray(saldoLivre.bolsas_ativas)) ? saldoLivre.bolsas_ativas : [];
+      const blocoCompromissoI = (!temCompromisso || bolsasI.length === 0) ? '' : secao(
+        `Compromissos até ${formatDate(saldoLivre.compromissos_fim)} — já contratados`,
+        'var(--warning)',
+        bolsasI.map(b => linhaDet(
+          `${escapeAttr(b.bolsista)} <span style="color:var(--text-secondary);">— ${b.meses} × ${formatBRL(b.valor_mensal)}</span>`,
+          b.compromisso
+        )).join('')
+      );
+      return `
+        <tr>
+          <td colspan="5" class="pxr-detalhe" style="background:var(--bg-elevated);font-size:13px;">
+            ${blocoItens}${blocoContas}${blocoCompromissoI}
+          </td>
+        </tr>`;
+    }
+
     const blocoPrevisto = detalhes.length === 0 ? '' : secao(
       'Previsto — linhas do plano', 'var(--text-secondary)',
       detalhes.map(d => linhaDet(escapeAttr(d.descricao), d.previsto)).join('') +
@@ -1197,6 +1252,9 @@ const PlanoTrabalhoPage = (() => {
       return extractBalanceteFromText(text);   // { data, warnings } — detecta projeto pelo código
     },
     async renderReview(hostEl, extracted, file) {
+      const codigo = extracted?.data?.project_code;
+      const doCodigo = codigo ? allProjects.find(p => p.code && p.code.trim() === String(codigo).trim()) : null;
+      await carregarItensRevisao(doCodigo?.id || selectedProjectId);
       hostEl.innerHTML = renderBalanceteReviewForm(extracted, file.name);
       lucide.createIcons({ nodes: [hostEl] });
       const splitHost = hostEl.querySelector('#bal-splitview');
@@ -1428,6 +1486,77 @@ const PlanoTrabalhoPage = (() => {
     return parseBalanceteText(text);
   }
 
+  /* ── Itens do plano na revisão (mig. 053) ─────────────────── */
+
+  // Itens do plano ativo e regras de item do projeto em revisão. Carregados
+  // ao abrir a revisão; sem plano, ou sem a mig. 053 no banco, a revisão
+  // segue funcionando só pela letra.
+  let revisaoItens = { projeto: null, itens: {}, unico: {}, regras: [] };
+
+  // Mesma normalização de public.norm_item (053): sem acento, caixa,
+  // pontuação nem aspas. É assim que a regra casa com o plano.
+  function normItem(t) {
+    const n = String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    return n || null;
+  }
+
+  async function carregarItensRevisao(projectId) {
+    revisaoItens = { projeto: projectId, itens: {}, unico: {}, regras: [] };
+    if (!projectId) return;
+    const [planoRes, regrasRes] = await Promise.all([
+      supabaseClient.from('plano_rubricas')
+        .select('rubrica_code, descricao_livre, planos_trabalho!inner(project_id, ativo)')
+        .eq('planos_trabalho.project_id', projectId).eq('planos_trabalho.ativo', true),
+      supabaseClient.from('conta_item_map')
+        .select('conta_prefix, rubrica_code, item_descricao').eq('project_id', projectId),
+    ]);
+    if (!planoRes.error) {
+      const vistos = {}; const semDescricao = {};
+      (planoRes.data || []).forEach(r => {
+        const chave = normItem(r.descricao_livre);
+        if (!chave) { semDescricao[r.rubrica_code] = true; return; }
+        vistos[r.rubrica_code] = vistos[r.rubrica_code] || {};
+        if (!vistos[r.rubrica_code][chave]) {
+          vistos[r.rubrica_code][chave] = String(r.descricao_livre).replace(/^["\s]+|["\s]+$/g, '');
+        }
+      });
+      Object.entries(vistos).forEach(([rub, m]) => {
+        revisaoItens.itens[rub] = Object.values(m);
+        if (revisaoItens.itens[rub].length === 1 && !semDescricao[rub]) revisaoItens.unico[rub] = revisaoItens.itens[rub][0];
+      });
+    }
+    if (!regrasRes.error) {
+      revisaoItens.regras = (regrasRes.data || []).slice().sort((a, b) => b.conta_prefix.length - a.conta_prefix.length);
+    }
+  }
+
+  /** Descrição canônica do item no plano, se existir com essa letra. */
+  function itemDoPlano(rubrica, item) {
+    const chave = normItem(item);
+    return (revisaoItens.itens[rubrica] || []).find(i => normItem(i) === chave) || null;
+  }
+
+  /** O que o banco vai resolver para a conta (espelha o gatilho da 053). */
+  function resolverItem(conta, letra) {
+    const regra = revisaoItens.regras.find(r => conta.startsWith(r.conta_prefix));
+    if (regra) {
+      const item = itemDoPlano(regra.rubrica_code, regra.item_descricao);
+      if (item) return { rubrica: regra.rubrica_code, item, origem: 'regra' };
+    }
+    if (letra && revisaoItens.unico[letra]) return { rubrica: letra, item: revisaoItens.unico[letra], origem: 'unico' };
+    return { rubrica: letra || '', item: null, origem: null };
+  }
+
+  /** Valor do seletor: "letra" ou "letra::item". */
+  function valorRubricaItem(rubrica, item) {
+    if (!rubrica) return '';
+    const canon = item ? itemDoPlano(rubrica, item) : null;
+    if (canon) return `${rubrica}::${canon}`;
+    if (revisaoItens.unico[rubrica]) return `${rubrica}::${revisaoItens.unico[rubrica]}`;
+    return rubrica;
+  }
+
   /* ── Revisão de Balancete (usada pela fila em BALANCETE_HANDLER) ── */
 
   function renderBalanceteReviewForm(extracted, fileName) {
@@ -1498,16 +1627,21 @@ const PlanoTrabalhoPage = (() => {
         const receita = l.conta_codigo.startsWith('7.1.1.');
         const incompleta = !!l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.');
         const sugestao = incompleta ? l.sugestao_buriti : null;
-        const auto = incompleta ? '' : (resolveRubricaForConta(l.conta_codigo) || '');
+        // A letra vem do mapa global; a regra de item do projeto (mig. 053)
+        // pode trocá-la — é decisão humana daquele projeto.
+        const r = incompleta ? { rubrica: '', item: null, origem: null }
+                             : resolverItem(l.conta_codigo, resolveRubricaForConta(l.conta_codigo) || '');
+        const auto = valorRubricaItem(r.rubrica, r.item);
         let grupo = 'ok';
         if (incompleta) grupo = 'pergunta';
-        else if (!auto) grupo = receita ? 'fora' : 'pergunta';
-        return { l, idx, incompleta, sugestao, auto, grupo };
+        else if (!r.rubrica) grupo = receita ? 'fora' : 'pergunta';
+        return { l, idx, incompleta, sugestao, auto, grupo, letra: r.rubrica, item: r.item };
       });
 
     const dicaDe = (it) => {
       if (it.sugestao) {
-        return `Sugestão do Buriti: <strong>${escapeAttr(nomeRubrica(it.sugestao.rubrica))}</strong> — ${escapeAttr(it.sugestao.justificativa || '')}`;
+        const item = it.sugestao.item ? itemDoPlano(it.sugestao.rubrica, it.sugestao.item) : null;
+        return `Sugestão do Buriti: <strong>${escapeAttr(nomeRubrica(it.sugestao.rubrica))}${item ? ' › ' + escapeAttr(item) : ''}</strong> — ${escapeAttr(it.sugestao.justificativa || '')}`;
       }
       if (it.incompleta) {
         const c = typeof classificarContaCortada === 'function'
@@ -1520,10 +1654,22 @@ const PlanoTrabalhoPage = (() => {
       return 'Despesa sem regra no mapa. Classifique e marque "salvar regra" para as próximas, ou deixe sem rubrica.';
     };
 
+    // Rubrica › item do plano (mig. 053). Rubrica sem item descrito no plano
+    // aparece sozinha; com vários itens, há também "item a definir" — vira
+    // "Sem item atribuído" no Previsto × Realizado.
+    const opcao = (valor, rotulo, selecionada) =>
+      `<option value="${escapeAttr(valor)}" ${valor === selecionada ? 'selected' : ''}>${escapeAttr(rotulo)}</option>`;
     const selectHTML = (it, selecionada) => `
       <select class="form-input bal-rubrica-sel" data-bal-rubrica>
         <option value="">${it.incompleta ? '— Escolha a rubrica —' : '— Sem rubrica —'}</option>
-        ${RUBRICAS.map(r => `<option value="${r.code}" ${r.code === selecionada ? 'selected' : ''}>${escapeAttr(r.name)}</option>`).join('')}
+        ${RUBRICAS.map(r => {
+          const lista = revisaoItens.itens[r.code] || [];
+          if (lista.length === 0) return opcao(r.code, r.name, selecionada);
+          return `<optgroup label="${escapeAttr(r.name)}">` +
+            lista.map(i => opcao(`${r.code}::${i}`, `${r.name} › ${i}`, selecionada)).join('') +
+            (revisaoItens.unico[r.code] ? '' : opcao(r.code, `${r.name} › (item a definir)`, selecionada)) +
+            '</optgroup>';
+        }).join('')}
       </select>`;
 
     const atributos = (it) =>
@@ -1533,7 +1679,9 @@ const PlanoTrabalhoPage = (() => {
     // Grupo 1 — cartões: o seletor ocupa a largura toda e o rótulo cabe inteiro.
     const perguntas = itens.filter(it => it.grupo === 'pergunta');
     const cartoesHTML = perguntas.map(it => {
-      const selecionada = it.incompleta ? (it.sugestao?.rubrica || '') : '';
+      const selecionada = it.incompleta && it.sugestao
+        ? valorRubricaItem(it.sugestao.rubrica, it.sugestao.item)
+        : '';
       const salvar = it.incompleta
         ? '<label title="Código incompleto: uma regra feita com ele capturaria outras contas." style="opacity:0.4;"><input type="checkbox" data-bal-save-mapping disabled> salvar regra</label>'
         : '<label><input type="checkbox" data-bal-save-mapping> salvar regra</label>';
@@ -1554,11 +1702,15 @@ const PlanoTrabalhoPage = (() => {
 
     // Grupo 2 — já classificadas: recolhido, com o total de cada rubrica.
     const ok = itens.filter(it => it.grupo === 'ok');
-    const totais = {};
-    ok.forEach(it => { totais[it.auto] = (totais[it.auto] || 0) + Number(it.l.saldo_atual || 0); });
+    const totais = {}; const semItem = {};
+    ok.forEach(it => {
+      totais[it.letra] = (totais[it.letra] || 0) + Number(it.l.saldo_atual || 0);
+      if (!it.item && (revisaoItens.itens[it.letra] || []).length > 1) semItem[it.letra] = (semItem[it.letra] || 0) + 1;
+    });
     const totaisHTML = Object.entries(totais)
       .sort((a, b) => (RUBRICA_BY_CODE[a[0]]?.ordem || 999) - (RUBRICA_BY_CODE[b[0]]?.ordem || 999))
-      .map(([c, v]) => `<li><span>${escapeAttr(nomeRubrica(c))}</span><span class="currency">${formatBRL(v)}</span></li>`).join('');
+      .map(([c, v]) => `<li><span>${escapeAttr(nomeRubrica(c))}${semItem[c] ? ` <em class="bal-sem-item">· ${semItem[c]} sem item</em>` : ''}</span><span class="currency">${formatBRL(v)}</span></li>`).join('');
+    const totalSemItem = Object.values(semItem).reduce((a, b) => a + b, 0);
     const okLinhas = ok.map(it => `
       <tr ${atributos(it)}>
         <td>${escapeAttr(it.l.conta_descricao || '—')}<div class="bal-codigo">${escapeAttr(it.l.conta_codigo)}</div></td>
@@ -1587,7 +1739,7 @@ const PlanoTrabalhoPage = (() => {
         : `<p class="bal-grupo-sub">${subtitulo}</p><div class="bal-perguntas">${cartoesHTML}</div>`}
 
       <details class="bal-grupo">
-        <summary>Já classificadas (${ok.length})</summary>
+        <summary>Já classificadas (${ok.length})${totalSemItem ? ` · ${totalSemItem} sem item do plano — abra para escolher` : ''}</summary>
         <ul class="bal-totais">${totaisHTML}</ul>
         <div class="bal-tabela"><table class="data-table"><tbody>${okLinhas}</tbody></table></div>
       </details>
@@ -1678,7 +1830,9 @@ const PlanoTrabalhoPage = (() => {
       const obrigatoria = tr.hasAttribute('data-bal-obrigatoria');
       if (obrigatoria && !escolhida) faltando.push(tr.getAttribute('data-conta'));
       if (lancamentos[idx] && escolhida && (obrigatoria || escolhida !== auto)) {
-        lancamentos[idx].rubrica_code = escolhida;
+        const [rubrica, item] = escolhida.split('::');
+        lancamentos[idx].rubrica_code = rubrica;
+        lancamentos[idx].item_descricao = item || null;
       }
     });
     if (faltando.length > 0) {
@@ -1687,13 +1841,20 @@ const PlanoTrabalhoPage = (() => {
 
     // Coleta mapeamentos a salvar: linhas com checkbox marcado e rubrica selecionada.
     // O usuário só vê o checkbox em linhas que estavam não-mapeadas.
+    // Com item escolhido, a regra é do PROJETO (conta → item, mig. 053); só
+    // a letra, a regra é do mapa global, como antes.
     const new_mappings = [];
+    const new_item_mappings = [];
     overlay.querySelectorAll('[data-bal-row]').forEach((tr) => {
       const conta = tr.getAttribute('data-conta');
       const sel = tr.querySelector('[data-bal-rubrica]');
       const save = tr.querySelector('[data-bal-save-mapping]');
-      const rubrica = sel?.value || '';
-      if (save && !save.disabled && save.checked && rubrica && conta) {
+      const valor = sel?.value || '';
+      if (!(save && !save.disabled && save.checked && valor && conta)) return;
+      const [rubrica, item] = valor.split('::');
+      if (item) {
+        new_item_mappings.push({ conta_prefix: conta, rubrica_code: rubrica, item_descricao: item });
+      } else {
         new_mappings.push({
           conta_prefix: conta,
           rubrica_code: rubrica,
@@ -1712,6 +1873,7 @@ const PlanoTrabalhoPage = (() => {
       total_creditos:     num('total_creditos'),
       lancamentos,
       new_mappings,
+      new_item_mappings,
     };
   }
 

@@ -55,7 +55,18 @@ describe('montarPropostaBalancete', () => {
       texto: TEXTO, arquivoNome: 'x.pdf', mapa: MAPA,
       sugestoes: [{ reduzido: '2597096', rubrica: 'b', justificativa: 'Decisão do Victor em 2026-10-02: serviço gráfico contratado.' }],
     }).payload.perguntas[0];
-    expect(q.sugestao).toEqual({ rubrica: 'b', fonte: 'buriti', justificativa: 'Decisão do Victor em 2026-10-02: serviço gráfico contratado.' });
+    expect(q.sugestao).toEqual({ rubrica: 'b', item: null, fonte: 'buriti', justificativa: 'Decisão do Victor em 2026-10-02: serviço gráfico contratado.' });
+  });
+
+  it('a sugestão leva o item do plano (mig. 053)', () => {
+    const doAgente = montarPropostaBalancete({
+      texto: TEXTO, arquivoNome: 'x.pdf', mapa: MAPA,
+      sugestoes: [{ reduzido: '2597096', rubrica: 'e', item: 'Impressão de material gráfico', justificativa: 'caderno' }],
+    }).payload.perguntas[0];
+    expect(doAgente.sugestao.item).toBe('Impressão de material gráfico');
+    // a semente do 30.068 já traz o item decidido pelo Victor
+    const daSemente = montarPropostaBalancete({ texto: TEXTO, arquivoNome: 'x.pdf', mapa: MAPA }).payload.perguntas[0];
+    expect(daSemente.sugestao.item).toMatch(/^Impressão de material gráfico/);
   });
 
   it('sem semente, a dica pelo prefixo só aparece quando não é ambígua', () => {
