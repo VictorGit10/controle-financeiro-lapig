@@ -92,6 +92,26 @@ function emMeses(n) {
 // `truncado` avisa em vez de mentir por omissão.
 const LIMITE_BOLSAS = 500;
 
+/**
+ * A RPC bolsistas_nomes (mig. 052) existe neste banco? Pergunta uma vez por
+ * processo. "Função não encontrada" (PGRST202) = migração ainda não aplicada.
+ */
+let _temBolsistasNomes = null;
+async function bolsistasNomesDisponivel() {
+  if (_temBolsistasNomes !== null) return _temBolsistasNomes;
+  try {
+    await rpc('bolsistas_nomes', { p_ids: [], p_busca: null });
+    _temBolsistasNomes = true;
+  } catch (e) {
+    // Só o "função não existe" do PostgREST conta como migração pendente.
+    // Qualquer outro erro (rede, sessão) sobe: cair no embed antigo em silêncio
+    // daria lista VAZIA ao Buriti depois da 052, com cara de resposta.
+    if (/Could not find the function|PGRST202/i.test(String(e.message))) _temBolsistasNomes = false;
+    else throw e;
+  }
+  return _temBolsistasNomes;
+}
+
 export async function consultarBolsas({
   centro_de_custo,
   bolsista,
@@ -106,25 +126,45 @@ export async function consultarBolsas({
   const hoje = emMeses(0);
   const limiteFim = encerrando_em_meses ? emMeses(encerrando_em_meses) : null;
 
-  // Colunas explícitas: CPF e e-mail existem em scholarship_holders e nunca saem
-  // daqui. Ver a política de PII do projeto.
+  // O nome do bolsista NÃO vem por embed de scholarship_holders: desde a mig.
+  // 052 o papel agente (Buriti) não lê aquela tabela — ela tem CPF e e-mail —,
+  // e o embed `!inner` voltaria lista vazia, sem erro. O nome vem da RPC
+  // `bolsistas_nomes`, que devolve só (id, full_name) no escopo de quem pergunta.
+  // Antes da 052 a RPC não existe; aí o embed antigo (só full_name) segue valendo.
+  const nomesPorRpc = await bolsistasNomesDisponivel();
+
+  let idsDoBolsista = null;
+  if (bolsista && nomesPorRpc) {
+    const achados = await rpc('bolsistas_nomes', { p_ids: null, p_busca: bolsista });
+    idsDoBolsista = (achados || []).map((h) => h.id);
+    if (idsDoBolsista.length === 0) idsDoBolsista = ['00000000-0000-0000-0000-000000000000'];
+  }
+
   const bolsas = await consultar('consulta de bolsas', (sb) => {
     let q = sb
       .from('scholarships')
       .select(
-        'amount,start_date,end_date,status,scholarship_type,funding_source,' +
-          'projects!inner(name,code),scholarship_holders!inner(full_name)'
+        'holder_id,amount,start_date,end_date,status,scholarship_type,funding_source,' +
+          'projects!inner(name,code)' +
+          (nomesPorRpc ? '' : ',scholarship_holders!inner(full_name)')
       )
       .order('end_date', { ascending: true })
       .limit(LIMITE_BOLSAS);
     if (centro) q = q.eq('project_id', centro.id);
-    if (bolsista) q = q.ilike('scholarship_holders.full_name', `%${bolsista}%`);
+    if (bolsista && idsDoBolsista) q = q.in('holder_id', idsDoBolsista);
+    if (bolsista && !nomesPorRpc) q = q.ilike('scholarship_holders.full_name', `%${bolsista}%`);
     if (!incluir_encerradas) q = q.eq('status', 'active');
     // Janela de vencimento: já encerradas não interessam à pergunta "o que
     // vence?", então o piso é hoje mesmo quando incluir_encerradas é true.
     if (limiteFim) q = q.gte('end_date', hoje).lte('end_date', limiteFim);
     return q;
   });
+
+  const nomes = {};
+  if (nomesPorRpc && bolsas.length) {
+    const ids = [...new Set(bolsas.map((b) => b.holder_id))];
+    for (const h of (await rpc('bolsistas_nomes', { p_ids: ids, p_busca: null })) || []) nomes[h.id] = h.full_name;
+  }
 
   return {
     total: bolsas.length,
@@ -136,7 +176,7 @@ export async function consultarBolsas({
       encerrando_ate: limiteFim,
     },
     bolsas: bolsas.map((b) => ({
-      bolsista: b.scholarship_holders?.full_name ?? null,
+      bolsista: (nomesPorRpc ? nomes[b.holder_id] : b.scholarship_holders?.full_name) ?? null,
       centro_de_custo: b.projects?.name ?? null,
       codigo: b.projects?.code ?? null,
       valor_mensal: b.amount,
