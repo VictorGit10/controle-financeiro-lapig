@@ -1200,6 +1200,33 @@ const PlanoTrabalhoPage = (() => {
       hostEl.innerHTML = renderBalanceteReviewForm(extracted, file.name);
       lucide.createIcons({ nodes: [hostEl] });
       const splitHost = hostEl.querySelector('#bal-splitview');
+
+      // Celular: o PDF lado a lado tomava a tela inteira antes da lista. Lá ele
+      // fica recolhido atrás de "Ver PDF", e a revisão ocupa a largura toda.
+      if (window.matchMedia('(max-width: 900px)').matches) {
+        let view = null;
+        const barra = document.createElement('div');
+        barra.className = 'bal-pdf-mobile';
+        barra.innerHTML = `
+          <button type="button" class="btn btn--secondary btn--sm"><i data-lucide="file-text"></i> <span>Ver PDF</span></button>
+          <div class="bal-pdf-mobile__corpo" hidden></div>`;
+        hostEl.insertBefore(barra, hostEl.firstChild);
+        lucide.createIcons({ nodes: [barra] });
+        const corpo = barra.querySelector('.bal-pdf-mobile__corpo');
+        const rotulo = barra.querySelector('span');
+        barra.querySelector('button').addEventListener('click', async () => {
+          corpo.hidden = !corpo.hidden;
+          rotulo.textContent = corpo.hidden ? 'Ver PDF' : 'Esconder PDF';
+          if (!corpo.hidden && !view) {
+            try {
+              view = await mountPdfSplitView(corpo, { pdfData: await file.arrayBuffer(), rightHTML: '' });
+            } catch (e) {
+              corpo.textContent = 'Não foi possível abrir o PDF: ' + e.message;
+            }
+          }
+        });
+        return { destroy() { if (view) view.destroy(); } };
+      }
       const rightHTML = hostEl.querySelector('#bal-review-form')?.outerHTML || '';
       try {
         const pdfBuf = await file.arrayBuffer();
@@ -1423,10 +1450,9 @@ const PlanoTrabalhoPage = (() => {
 
     const detectMsg = d.project_code
       ? (autoMatch
-          ? `<div class="callout callout--success" style="margin-bottom:12px;">
-               <i data-lucide="check-circle"></i>
-               <div>Projeto detectado: <code>${escapeAttr(d.project_code)}</code> → <strong>${escapeAttr(autoMatch.name)}</strong>.</div>
-             </div>`
+          // Detectado: o resumo "Dados do balancete" já mostra o código — o
+          // aviso verde só ocupava a tela. Aviso aparece quando há problema.
+          ? ''
           : `<div class="callout callout--warning" style="margin-bottom:12px;">
                <i data-lucide="alert-triangle"></i>
                <div>Código <code>${escapeAttr(d.project_code)}</code> detectado, mas nenhum projeto cadastrado tem esse código.</div>
@@ -1436,91 +1462,141 @@ const PlanoTrabalhoPage = (() => {
            <div>Não foi possível detectar o código do projeto no PDF. Selecione manualmente.</div>
          </div>`;
 
-    const warningsHTML = warnings.length === 0 ? '' : `
+    // Avisos: o que muda a decisão fica à vista; a lista técnica de códigos
+    // cortados (o leitor resolve ou vira pergunta abaixo) vai para "detalhes".
+    const tecnicos = warnings.filter(w => w.startsWith('Código de conta cortado'));
+    const avisos   = warnings.filter(w => !w.startsWith('Código de conta cortado'));
+    const warningsHTML = (avisos.length === 0 ? '' : `
       <div class="callout callout--warning" style="margin-bottom:12px;">
         <i data-lucide="alert-triangle"></i>
         <div>
-          <strong>Avisos da extração</strong>
+          <strong>Atenção</strong>
           <ul style="margin:6px 0 0 16px;padding:0;">
-            ${warnings.map(w => `<li>${escapeAttr(w)}</li>`).join('')}
+            ${avisos.map(w => `<li>${escapeAttr(w)}</li>`).join('')}
           </ul>
         </div>
-      </div>`;
+      </div>`) + (tecnicos.length === 0 ? '' : `
+      <details class="bal-detalhes">
+        <summary>Detalhes técnicos da leitura do PDF</summary>
+        <ul>${tecnicos.map(w => `<li>${escapeAttr(w)}</li>`).join('')}</ul>
+      </details>`);
 
     const lancs = Array.isArray(d.lancamentos) ? d.lancamentos : [];
-    const despesaLancs = lancs
-      .map((l, idx) => ({ l, idx }))
-      .filter(({ l }) => l.conta_codigo && l.conta_codigo.startsWith('7.'));
     const nomeRubrica = (code) => RUBRICAS.find(r => r.code === code)?.name || code;
 
-    const lancRows = despesaLancs.map(({ l, idx }) => {
-      // Código cortado no PDF e fora da tabela de reduzidos (funape-contas.js):
-      // a rubrica é PERGUNTADA, nunca pré-selecionada. Uma regra salva a
-      // partir do código cortado capturaria as contas vizinhas — "salvar"
-      // fica bloqueado.
-      // Receita (7.1.1.01) não leva rubrica: código cortado ali não pergunta nada.
-      const incompleta = !!l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.');
-      // Proposta do Buriti: a sugestão dele vem pré-selecionada, com o porquê.
-      // Salvar é o humano confirmar — o agente nunca grava (mig. 051).
-      const sugestao = incompleta ? l.sugestao_buriti : null;
-      const resolved = incompleta ? (sugestao?.rubrica || '') : resolveRubricaForConta(l.conta_codigo);
-      const isUnmapped = !resolved;
-      let dica = '';
-      if (sugestao) {
-        dica = `Sugestão do Buriti: <strong>${escapeAttr(nomeRubrica(sugestao.rubrica))}</strong> — ${escapeAttr(sugestao.justificativa || '')} Confirme ou troque.`;
-      } else if (incompleta) {
-        const c = typeof classificarContaCortada === 'function'
-          ? classificarContaCortada(l.conta_codigo, contaRubricaMap)
-          : { rubrica: null, ambigua: true };
-        dica = c.ambigua
-          ? 'Código cortado no PDF e conta nova: o trecho que falta decide a rubrica. Escolha.'
-          : c.rubrica
-            ? `Código cortado no PDF e conta nova. Pelo trecho visível seria <strong>${escapeAttr(nomeRubrica(c.rubrica))}</strong> — confirme ou troque.`
-            : 'Código cortado no PDF e conta nova, sem regra no mapa. Escolha.';
+    // Três grupos, para a pessoa ver primeiro só o que depende dela:
+    //   pergunta — código cortado e conta nova (obrigatória), ou despesa sem
+    //              regra no mapa (opcional: classificar e salvar a regra);
+    //   ok       — já tem rubrica pelo mapa (inclusive estorno 7.1.1.08 com
+    //              regra: conta na rubrica desde a mig. 049);
+    //   fora     — receita, rendimento, transferência e estorno sem regra
+    //              (7.1.1.*): não é despesa, não leva rubrica e não gera alerta.
+    const itens = lancs
+      .map((l, idx) => ({ l, idx }))
+      .filter(({ l }) => l.conta_codigo && l.conta_codigo.startsWith('7.'))
+      .map(({ l, idx }) => {
+        const receita = l.conta_codigo.startsWith('7.1.1.');
+        const incompleta = !!l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.');
+        const sugestao = incompleta ? l.sugestao_buriti : null;
+        const auto = incompleta ? '' : (resolveRubricaForConta(l.conta_codigo) || '');
+        let grupo = 'ok';
+        if (incompleta) grupo = 'pergunta';
+        else if (!auto) grupo = receita ? 'fora' : 'pergunta';
+        return { l, idx, incompleta, sugestao, auto, grupo };
+      });
+
+    const dicaDe = (it) => {
+      if (it.sugestao) {
+        return `Sugestão do Buriti: <strong>${escapeAttr(nomeRubrica(it.sugestao.rubrica))}</strong> — ${escapeAttr(it.sugestao.justificativa || '')}`;
       }
-      const optsHTML = `<option value="">${incompleta ? '— Escolha a rubrica —' : '— Não mapeado —'}</option>` +
-        RUBRICAS.map(r => `<option value="${r.code}" ${r.code === resolved ? 'selected' : ''}>${escapeAttr(r.name)}</option>`).join('');
-      const rowStyle = incompleta
-        ? 'background:rgba(234,88,12,0.12);'
-        : isUnmapped ? 'background:rgba(234,179,8,0.10);' : '';
-      const podeSalvar = isUnmapped && !incompleta;
+      if (it.incompleta) {
+        const c = typeof classificarContaCortada === 'function'
+          ? classificarContaCortada(it.l.conta_codigo, contaRubricaMap)
+          : { rubrica: null, ambigua: true };
+        if (c.ambigua) return 'Conta nova (código cortado no PDF): o trecho que falta decide a rubrica.';
+        if (c.rubrica) return `Conta nova. Pelo início do código seria <strong>${escapeAttr(nomeRubrica(c.rubrica))}</strong>.`;
+        return 'Conta nova, sem regra no mapa.';
+      }
+      return 'Despesa sem regra no mapa. Classifique e marque "salvar regra" para as próximas, ou deixe sem rubrica.';
+    };
+
+    const selectHTML = (it, selecionada) => `
+      <select class="form-input bal-rubrica-sel" data-bal-rubrica>
+        <option value="">${it.incompleta ? '— Escolha a rubrica —' : '— Sem rubrica —'}</option>
+        ${RUBRICAS.map(r => `<option value="${r.code}" ${r.code === selecionada ? 'selected' : ''}>${escapeAttr(r.name)}</option>`).join('')}
+      </select>`;
+
+    const atributos = (it) =>
+      `data-bal-row="${it.idx}" data-conta="${escapeAttr(it.l.conta_codigo)}" data-bal-auto="${escapeAttr(it.auto)}"` +
+      (it.incompleta ? ' data-bal-obrigatoria="1"' : '');
+
+    // Grupo 1 — cartões: o seletor ocupa a largura toda e o rótulo cabe inteiro.
+    const perguntas = itens.filter(it => it.grupo === 'pergunta');
+    const cartoesHTML = perguntas.map(it => {
+      const selecionada = it.incompleta ? (it.sugestao?.rubrica || '') : '';
+      const salvar = it.incompleta
+        ? '<label title="Código incompleto: uma regra feita com ele capturaria outras contas." style="opacity:0.4;"><input type="checkbox" data-bal-save-mapping disabled> salvar regra</label>'
+        : '<label><input type="checkbox" data-bal-save-mapping> salvar regra</label>';
       return `
-      <tr data-bal-row="${idx}" data-conta="${escapeAttr(l.conta_codigo)}" data-bal-auto="${escapeAttr(resolved || '')}"
-          ${incompleta ? 'data-bal-obrigatoria="1"' : ''} style="${rowStyle}">
-        <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);">${escapeAttr(l.conta_codigo)}${incompleta ? '…' : ''}
-          ${l.conta_reduzido ? `<div style="font-size:10px;">red. ${escapeAttr(l.conta_reduzido)}</div>` : ''}</td>
-        <td style="font-size:12px;">${escapeAttr(l.conta_descricao || '—')}
-          ${dica ? `<div style="font-size:11px;color:var(--warning,#d97706);margin-top:2px;">${dica}</div>` : ''}</td>
-        <td style="text-align:right;font-size:12px;" class="currency">${formatBRL(l.saldo_atual)}</td>
-        <td>
-          <select class="form-input" data-bal-rubrica style="font-size:12px;padding:4px 6px;width:100%;min-width:160px;">
-            ${optsHTML}
-          </select>
-        </td>
-        <td style="text-align:center;font-size:11px;color:var(--text-secondary);">
-          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;${podeSalvar ? '' : 'opacity:0.4;'}"
-                 ${incompleta ? 'title="Código incompleto: uma regra feita com ele capturaria outras contas."' : ''}>
-            <input type="checkbox" data-bal-save-mapping ${podeSalvar ? '' : 'disabled'}>
-            <span>salvar</span>
-          </label>
-        </td>
-      </tr>`;
+        <div class="bal-pergunta ${it.incompleta ? 'bal-pergunta--obrigatoria' : ''}" ${atributos(it)}>
+          <div class="bal-pergunta__topo">
+            <strong>${escapeAttr(it.l.conta_descricao || '—')}</strong>
+            <span class="currency">${formatBRL(it.l.saldo_atual)}</span>
+          </div>
+          <div class="bal-pergunta__dica">${dicaDe(it)}</div>
+          ${selectHTML(it, selecionada)}
+          <div class="bal-pergunta__rodape">
+            <span>${escapeAttr(it.l.conta_codigo)}${it.incompleta ? '…' : ''}${it.l.conta_reduzido ? ` · red. ${escapeAttr(it.l.conta_reduzido)}` : ''}</span>
+            ${salvar}
+          </div>
+        </div>`;
     }).join('');
 
-    const perguntar = (l) => !!l.conta_incompleta && !l.conta_codigo.startsWith('7.1.1.01.');
-    const incompletasCount = despesaLancs.filter(({ l }) => perguntar(l)).length;
-    const unmappedCount = despesaLancs.filter(({ l }) => !perguntar(l) && !resolveRubricaForConta(l.conta_codigo)).length;
-    const unmappedNote = (incompletasCount > 0
-      ? `<p style="font-size:12px;color:var(--warning,#d97706);margin:0 0 8px 0;">
-           <i data-lucide="alert-triangle" style="width:14px;height:14px;vertical-align:-2px;"></i>
-           ${incompletasCount} conta(s) com código cortado no PDF e fora da tabela da FUNAPE — escolha a rubrica de cada uma (obrigatório).
-         </p>`
-      : '') + (unmappedCount > 0
-      ? `<p style="font-size:12px;color:var(--warning,#d97706);margin:0 0 8px 0;">
-           <i data-lucide="alert-triangle" style="width:14px;height:14px;vertical-align:-2px;"></i>
-           ${unmappedCount} lançamento(s) sem rubrica — classifique e marque "salvar" para registrar o mapeamento.
-         </p>`
-      : '');
+    // Grupo 2 — já classificadas: recolhido, com o total de cada rubrica.
+    const ok = itens.filter(it => it.grupo === 'ok');
+    const totais = {};
+    ok.forEach(it => { totais[it.auto] = (totais[it.auto] || 0) + Number(it.l.saldo_atual || 0); });
+    const totaisHTML = Object.entries(totais)
+      .sort((a, b) => (RUBRICA_BY_CODE[a[0]]?.ordem || 999) - (RUBRICA_BY_CODE[b[0]]?.ordem || 999))
+      .map(([c, v]) => `<li><span>${escapeAttr(nomeRubrica(c))}</span><span class="currency">${formatBRL(v)}</span></li>`).join('');
+    const okLinhas = ok.map(it => `
+      <tr ${atributos(it)}>
+        <td>${escapeAttr(it.l.conta_descricao || '—')}<div class="bal-codigo">${escapeAttr(it.l.conta_codigo)}</div></td>
+        <td class="currency bal-valor">${formatBRL(it.l.saldo_atual)}</td>
+        <td>${selectHTML(it, it.auto)}</td>
+      </tr>`).join('');
+
+    // Grupo 3 — fora de rubrica: só para conferência, sem seletor.
+    const fora = itens.filter(it => it.grupo === 'fora');
+    const foraLinhas = fora.map(it => `
+      <tr>
+        <td>${escapeAttr(it.l.conta_descricao || '—')}<div class="bal-codigo">${escapeAttr(it.l.conta_codigo)}</div></td>
+        <td class="currency bal-valor">${formatBRL(it.l.saldo_atual)}</td>
+      </tr>`).join('');
+
+    const obrigatorias = perguntas.filter(it => it.incompleta).length;
+    const opcionais = perguntas.length - obrigatorias;
+    const subtitulo = [
+      obrigatorias > 0 ? `${obrigatorias} obrigatória(s): conta nova, a rubrica precisa da sua confirmação.` : '',
+      opcionais > 0 ? `${opcionais} opcional(is): despesa sem regra no mapa.` : '',
+    ].filter(Boolean).join(' ');
+    const lancamentosHTML = `
+      <h4 class="bal-grupo-titulo">Precisa de você (${perguntas.length})</h4>
+      ${perguntas.length === 0
+        ? '<p class="bal-grupo-sub">Nada a decidir: todas as despesas já têm rubrica.</p>'
+        : `<p class="bal-grupo-sub">${subtitulo}</p><div class="bal-perguntas">${cartoesHTML}</div>`}
+
+      <details class="bal-grupo">
+        <summary>Já classificadas (${ok.length})</summary>
+        <ul class="bal-totais">${totaisHTML}</ul>
+        <div class="bal-tabela"><table class="data-table"><tbody>${okLinhas}</tbody></table></div>
+      </details>
+
+      ${fora.length === 0 ? '' : `
+      <details class="bal-grupo">
+        <summary>Não entram em rubrica (${fora.length}): receitas, rendimentos e transferências</summary>
+        <div class="bal-tabela"><table class="data-table"><tbody>${foraLinhas}</tbody></table></div>
+      </details>`}`;
 
     return `
       <div id="bal-review-form">
@@ -1530,51 +1606,43 @@ const PlanoTrabalhoPage = (() => {
         ${detectMsg}
         ${warningsHTML}
 
-        <div class="form-group" style="margin-bottom:10px;">
-          <label class="form-label" style="font-size:12px;">Projeto *</label>
-          <select id="bali-project-sel" class="form-input">${projOpts}</select>
-        </div>
-
-        <div class="form-row" style="gap:8px;">
-          <div class="form-group" style="margin-bottom:8px;">
-            <label class="form-label" style="font-size:12px;">Data de referência *</label>
-            <input type="date" class="form-input" data-bal-field="data_referencia" value="${toInputDate(d.data_referencia || '')}">
+        <!-- Dados do cabeçalho: vêm do PDF e raramente mudam. Recolhidos para a
+             lista do que depende da pessoa aparecer primeiro (no celular, os
+             campos empurravam as perguntas para baixo da dobra). Abrem sozinhos
+             quando o projeto não foi detectado. -->
+        <details class="bal-grupo bal-cabecalho" ${autoMatch ? '' : 'open'}>
+          <summary>Dados do balancete: ${escapeAttr(autoMatch ? (autoMatch.code || autoMatch.name) : 'projeto a escolher')}
+            · até ${d.data_referencia ? formatDate(d.data_referencia) : '—'}
+            · saldo ${d.saldo_disponivel != null ? formatBRL(d.saldo_disponivel) : '—'}</summary>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label" style="font-size:12px;">Projeto *</label>
+            <select id="bali-project-sel" class="form-input">${projOpts}</select>
           </div>
-          <div class="form-group" style="margin-bottom:8px;">
-            <label class="form-label" style="font-size:12px;">Data de emissão</label>
-            <input type="date" class="form-input" data-bal-field="data_emissao" value="${toInputDate(d.data_emissao || '')}">
-          </div>
-        </div>
 
-        <div class="form-row" style="gap:8px;">
-          <div class="form-group" style="margin-bottom:8px;">
-            <label class="form-label" style="font-size:12px;">Saldo disponível</label>
-            <input type="number" step="0.01" class="form-input" data-bal-field="saldo_disponivel" value="${d.saldo_disponivel ?? ''}">
+          <div class="form-row" style="gap:8px;">
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label" style="font-size:12px;">Data de referência *</label>
+              <input type="date" class="form-input" data-bal-field="data_referencia" value="${toInputDate(d.data_referencia || '')}">
+            </div>
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label" style="font-size:12px;">Data de emissão</label>
+              <input type="date" class="form-input" data-bal-field="data_emissao" value="${toInputDate(d.data_emissao || '')}">
+            </div>
           </div>
-          <div class="form-group" style="margin-bottom:8px;">
-            <label class="form-label" style="font-size:12px;">Rendimento líquido</label>
-            <input type="number" step="0.01" class="form-input" data-bal-field="rendimento_liquido" value="${d.rendimento_liquido ?? ''}">
+
+          <div class="form-row" style="gap:8px;">
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label" style="font-size:12px;">Saldo disponível</label>
+              <input type="number" step="0.01" class="form-input" data-bal-field="saldo_disponivel" value="${d.saldo_disponivel ?? ''}">
+            </div>
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label" style="font-size:12px;">Rendimento líquido</label>
+              <input type="number" step="0.01" class="form-input" data-bal-field="rendimento_liquido" value="${d.rendimento_liquido ?? ''}">
+            </div>
           </div>
-        </div>
+        </details>
 
-        <hr style="margin:12px 0;border:none;border-top:1px solid var(--border-color);">
-
-        <h4 style="margin:0 0 8px 0;font-size:14px;">Lançamentos de despesa — ${despesaLancs.length} linhas</h4>
-        ${unmappedNote}
-        <div style="border:1px solid var(--border-color);border-radius:6px;overflow:auto;">
-          <table class="data-table" style="width:100%;font-size:12px;">
-            <thead>
-              <tr>
-                <th style="text-align:left;width:130px;">Conta</th>
-                <th style="text-align:left;">Descrição</th>
-                <th style="text-align:right;width:90px;">Saldo</th>
-                <th style="text-align:left;width:170px;">Rubrica</th>
-                <th style="text-align:center;width:60px;">Salvar</th>
-              </tr>
-            </thead>
-            <tbody>${lancRows}</tbody>
-          </table>
-        </div>
+        ${lancamentosHTML}
 
         <!-- Campos hidden para totais (preservados, sem UI) -->
         <input type="hidden" data-bal-field="total_debitos"  value="${d.total_debitos ?? ''}">
@@ -1614,7 +1682,7 @@ const PlanoTrabalhoPage = (() => {
       }
     });
     if (faltando.length > 0) {
-      throw new Error(`Escolha a rubrica das ${faltando.length} conta(s) com código cortado no PDF (destacadas em laranja) antes de salvar.`);
+      throw new Error(`Escolha a rubrica das ${faltando.length} conta(s) nova(s) em "Precisa de você" antes de salvar.`);
     }
 
     // Coleta mapeamentos a salvar: linhas com checkbox marcado e rubrica selecionada.

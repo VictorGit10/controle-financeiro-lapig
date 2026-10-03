@@ -100,10 +100,12 @@ const BuritiPage = (() => {
   function perguntasHTML(p) {
     const qs = p.payload?.perguntas || [];
     if (qs.length === 0) return '';
+    // Recolhido: o cartão mostra o resumo e a contagem; a lista abre se a
+    // pessoa quiser ler antes de entrar na revisão (onde a resposta é dada).
     return `
-      <div class="buriti-bloco">
-        <div class="buriti-bloco__titulo"><i data-lucide="help-circle"></i> ${qs.length} pergunta(s) de classificação — a resposta é dada na revisão</div>
-        <ul class="buriti-lista">
+      <details class="buriti-bloco">
+        <summary class="buriti-bloco__titulo"><i data-lucide="help-circle"></i> ${qs.length} pergunta(s) para você — ver</summary>
+        <ul class="buriti-lista" style="margin-top:6px;">
           ${qs.map(q => `
             <li>
               <div><strong>${escapeAttr(q.descricao || q.conta)}</strong> · ${formatBRL(q.valor)}</div>
@@ -114,7 +116,7 @@ const BuritiPage = (() => {
               </div>
             </li>`).join('')}
         </ul>
-      </div>`;
+      </details>`;
   }
 
   function avisosHTML(p) {
