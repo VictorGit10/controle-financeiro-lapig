@@ -171,31 +171,29 @@ const DashboardPage = (() => {
     const repBalanceDate = selectedProjects
       .filter(p => p.balance_date).map(p => p.balance_date).sort().pop() || null;
 
-    // Monthly projection chart data
+    // Monthly projection and active holders are independent queries
     loadErrors = {};
     projecaoParcial = 0;
     let monthlyData = [];
-    if (selectedIds.size > 0) {
-      monthlyData = await calcAggregatedMonthly([...selectedIds]);
-    }
-
-    // Active holders in selected projects
     let activeHolders = [];
     if (selectedIds.size > 0) {
       const projectIdList = [...selectedIds];
-      const { data: scholarships, error: schError } = await supabaseClient
-        .from('scholarships')
-        .select(`
-          id, amount, start_date, end_date, status, project_id,
-          projects:project_id(name),
-          holder:holder_id(id, full_name)
-        `)
-        .in('project_id', projectIdList)
-        .eq('status', 'active')
-        .lte('start_date', localISODate())
-        .gte('end_date', localISODate())
-        .order('amount', { ascending: false });
+      const [projection, { data: scholarships, error: schError }] = await Promise.all([
+        calcAggregatedMonthly(projectIdList),
+        supabaseClient.from('scholarships')
+          .select(`
+            id, amount, start_date, end_date, status, project_id,
+            projects:project_id(name),
+            holder:holder_id(id, full_name)
+          `)
+          .in('project_id', projectIdList)
+          .eq('status', 'active')
+          .lte('start_date', localISODate())
+          .gte('end_date', localISODate())
+          .order('amount', { ascending: false }),
+      ]);
 
+      monthlyData = projection;
       if (schError) showToast('Erro ao carregar bolsistas ativos: ' + schError.message, 'error');
       loadErrors.bolsas = schError || null;
       activeHolders = scholarships || [];
