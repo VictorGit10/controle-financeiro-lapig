@@ -36,6 +36,13 @@ Antes de mexer em qualquer área coberta por uma migração, leia a linha dela e
 - Toda migração vem com roteiro autoconferido em `tests/sql/` (+ stub que prova o defeito antes da correção) e asserções no fim do próprio arquivo, dentro de `begin/commit`.
 - Acrescente a linha da migração em `docs/migracoes.md`, não aqui.
 
+**Como uma migração chega à produção:** pelo cofre (`CofreIA/cofre-lapig`, fora do alcance dos agentes), não colando no SQL Editor. Publique o commit no `master` e passe ao Victor o commit (40 caracteres) e o caminho `database/NNN_x.sql`; ele roda Actions → Migração → `ensaiar`, lê o relatório e, se for o esperado, roda `aplicar` com o código de aprovação. Para passar no cofre:
+- BEGIN só na primeira linha de comando e COMMIT só na última (o cofre os retira e controla a transação); nada de COMMIT/SAVEPOINT no meio, `CREATE INDEX CONCURRENTLY`, VACUUM, gatilho adiável;
+- nada de papéis, extensões, `ALTER DEFAULT PRIVILEGES`, COPY, `set role`/`search_path` de sessão, nem as palavras `net.`, `http(`, `dblink`, `cron.`, `vault.`, `password`, `service_role` no texto (recusa por leitura);
+- tabela nova: RLS ligado, `revoke ... from anon` (tabela e função) e o gatilho `trg_bloqueia_agente` **BEFORE INSERT OR UPDATE OR DELETE FOR EACH STATEMENT**, sem WHEN; SECURITY DEFINER sempre com `set search_path`;
+- não tocar `is_agente`, `is_admin`, `allowed_project_ids`, `assert_project_allowed`, `contem_cpf`, `bloqueia_escrita_do_agente` (o cofre recusa; mudança nelas é decisão à parte);
+- até 90 KB. Policy, view, SECURITY DEFINER ou DO/EXECUTE fazem o relatório pedir revisão técnica: rode a revisão do SQL do commit por outra IA e mande o resumo ao Victor junto.
+
 ## Detailed Documentation
 
 Detailed reference docs are in `docs/` — índice completo em **[docs/README.md](docs/README.md)**. Read them when working on the related area:
