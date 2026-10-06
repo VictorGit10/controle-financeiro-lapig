@@ -17,8 +17,9 @@ um acidente grave.
 |---|---|---|---|
 | **anon key** (`sb_publishable_…`) | `frontend/js/supabase-config.js`, repo público | o que o RLS permitir ao papel do JWT | **sim** |
 | **login de usuário** (e-mail + senha) | `~/.claude.json` (bloco `env` do MCP), painel do Supabase | o que as policies derem àquele papel | **sim** |
-| **senha do banco** (usada pela Supabase CLI em `--db-url`) | painel do Supabase | `DROP`, `TRUNCATE`, `ALTER` — schema inteiro | **não** |
+| **senha do banco** (usada pela Supabase CLI em `--db-url`) | **só** no secret `SUPABASE_DB_URL` do cofre (`CofreIA/cofre-lapig`); trocada em 06/10/2026, ninguém no PC a tem | `DROP`, `TRUNCATE`, `ALTER` — schema inteiro | **não** |
 | **service_role key** | painel do Supabase | leitura e escrita em tudo | **não** |
+| **chave do cofre** (`C:\Users\amara\cofre-token.txt`) | PC | dispara e lê execuções do cofre (ensaiar/aplicar migração); não lê código nem segredos | — |
 
 Duas leituras contraintuitivas que valem registrar:
 
@@ -31,8 +32,8 @@ Duas leituras contraintuitivas que valem registrar:
   dela é pelo `--db-url`, que **ignora o RLS por completo**. Um `db push` errado derruba tabela; nenhum
   guard `assert_project_allowed` roda ali. A CLI não substitui as regras abaixo: ela precisa mais delas.
 
-**O que a CLI de fato resolve** é o item 5 (recuperação): `supabase db dump` é o backup que o plano
-free não dá pronto. O comando já está escrito em [`tools/replica-local/README.md`](../tools/replica-local/README.md).
+**Desde 06/10/2026 a CLI com a senha do banco só roda dentro do cofre** (backup e aplicação de migração),
+nunca no PC. Ver [`aplicar-migracao.md`](./aplicar-migracao.md).
 
 ### O papel `admin` não é contido pelo RLS
 
@@ -64,9 +65,10 @@ Valem para pessoa e para IA. Não são preferências.
    (id **e** nome batem, coluna alvo ainda nula) e pula a linha em vez de gravar na dúvida.
 6. **`drop`, `truncate` e `delete` exigem confirmação nominal** da pessoa, na mesma conversa, dizendo
    qual objeto. "Pode limpar" não autoriza.
-7. **Mudança de schema só por migração numerada** em `database/`, nunca SQL avulso no editor. Ver a
-   lição da migração 036: `create or replace` reescreve os atributos da função junto com o corpo.
-8. **Dump antes de migração ou escrita em lote.**
+7. **Mudança de schema só por migração numerada** em `database/`, aplicada **pelo cofre** com o "ok" do
+   Victor no chat ([`aplicar-migracao.md`](./aplicar-migracao.md)); nunca SQL avulso nem colado no SQL
+   Editor. Ver a lição da migração 036: `create or replace` reescreve os atributos da função junto com o corpo.
+8. **Backup antes de migração ou escrita em lote.** Na migração, o cofre faz sozinho a cada execução.
 9. **Automação nunca usa o login de admin.** Ver seção 4.
 
 ---
@@ -121,9 +123,7 @@ O plano é o **free**, então não há point-in-time recovery. O que existe:
   Um valor sobrescrito é recuperável linha a linha. Mas cobre só **quatro** tabelas: `projects`,
   `scholarship_holders`, `scholarships` e `funding`. Estender às demais é um `create trigger` por tabela
   — a função `audit_trigger_function` já existe.
-- **`supabase db dump`** — o único backup do schema + dados. Comando em
-  [`tools/replica-local/README.md`](../tools/replica-local/README.md). Rodar antes de qualquer migração e
-  periodicamente.
-
-Antes de precisar, vale conferir no painel do Supabase o que o plano atual oferece de backup automático.
-Partindo do pior caso, um dump periódico é a diferença entre um susto e uma perda.
+- **Backups do cofre** (desde 06/10/2026): toda segunda às 06:00 e a cada execução de Migração, cifrados,
+  conferidos por restauração (contagens, estrutura e acesso), guardados 90 dias. Uma tarefa agendada no app do
+  Claude (segunda 10h) avisa se o semanal falhar. Como restaurar: `..\cofre-lapig\README.md` (num Supabase
+  novo, rodar `limpar-privilegios-padrao.sql` antes do schema). Detalhes em [`aplicar-migracao.md`](./aplicar-migracao.md).

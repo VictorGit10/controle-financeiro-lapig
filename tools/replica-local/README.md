@@ -45,7 +45,7 @@ Mesma forma, volume e distorções dos dados de produção — planos que orçam
 letra-mãe, balancetes atrasados, centros de custo sem balancete nenhum. É o que
 pega o caso que ninguém imaginaria escrever à mão.
 
-Precisa da senha do banco (só o Victor tem) e do Docker.
+Precisa de um dump da produção e do Docker. Desde 06/10/2026 a senha do banco só existe no cofre: o dump vem de um backup do cofre (Artifacts, decifrado pelo Victor com a senha dele, fora do PC; ver `docs/aplicar-migracao.md`). Os comandos abaixo valem para quem tiver a senha.
 
 ```bash
 # 1. Puxar schema e dados. A tabela de bolsistas fica FORA: é onde moram

@@ -26,7 +26,8 @@ Leia o documento da área antes de mexer nela.
 
 | Documento | Quando |
 |---|---|
-| [`acesso-ao-banco.md`](acesso-ao-banco.md) | **Antes de qualquer escrita no banco de produção.** As 4 credenciais e o alcance de cada uma, as regras duras, o protocolo de escrita e a recuperação |
+| [`aplicar-migracao.md`](aplicar-migracao.md) | **Antes de aplicar qualquer migração.** O caminho pelo cofre (`CofreIA/cofre-lapig`) com o ok do Victor no chat: comandos, relatório, erros, backup |
+| [`acesso-ao-banco.md`](acesso-ao-banco.md) | **Antes de qualquer escrita no banco de produção.** As credenciais e o alcance de cada uma, as regras duras, o protocolo de escrita e a recuperação |
 | [`seguranca-publicacao.md`](seguranca-publicacao.md) | Antes de tornar o repositório público ou publicar no GitHub Pages. Checklist obrigatório |
 | [`keep-alive-n8n.md`](keep-alive-n8n.md) | Importar o workflow que impede o Supabase gratuito de pausar por inatividade |
 
