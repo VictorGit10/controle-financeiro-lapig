@@ -104,9 +104,24 @@ var VigiaMain = (function () {
     ScriptApp.newTrigger('resumoDiario').timeBased().atHour(8).everyDays(1).inTimezone('America/Sao_Paulo').create();
     return 'Gatilhos instalados';
   }
-  return { executar: executar, testarConfiguracao: testarConfiguracao, instalarGatilhos: instalarGatilhos };
+  // Uma chamada com e-mail sintético: confirma chave e nome do modelo na API do ollama.com sem dado real.
+  function testarModelo() {
+    var config = configuracao(), modelo = VigiaOllama.criar(config), nome = config.OLLAMA_MODEL || 'glm-5.3-flash';
+    if (!modelo) { console.log('modelo: desligado (OLLAMA_API_KEY vazia)'); return 'desligado'; }
+    var msg = { assunto: 'Teste do vigia', corpo: 'Mensagem sintética de teste, sem pedido nem tarefa.' };
+    var inicio = Date.now(), raw;
+    try { raw = modelo(VigiaModelo.montarPrompt(msg, [])); } catch (e) {
+      console.log('modelo ' + nome + ': erro ' + (/^modelo_[a-z0-9_]+$/.test(e.message || '') ? e.message : 'inesperado'));
+      return 'erro';
+    }
+    var r = VigiaModelo.validarResposta(raw, msg, []);
+    console.log('modelo ' + nome + ': respondeu em ' + (Date.now() - inicio) + ' ms; ' + (r.fila === 'esclarecer' ? 'resposta recusada (' + r.motivo + ')' : 'resposta válida (' + r.classificacao + ')'));
+    return 'ok';
+  }
+  return { executar: executar, testarConfiguracao: testarConfiguracao, testarModelo: testarModelo, instalarGatilhos: instalarGatilhos };
 })();
 function checar() { return VigiaMain.executar('checagem'); }
 function resumoDiario() { return VigiaMain.executar('resumo_diario'); }
 function testarConfiguracao() { return VigiaMain.testarConfiguracao(); }
+function testarModelo() { return VigiaMain.testarModelo(); }
 function instalarGatilhos() { return VigiaMain.instalarGatilhos(); }
