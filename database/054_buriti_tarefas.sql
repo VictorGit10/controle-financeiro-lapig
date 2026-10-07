@@ -66,6 +66,53 @@ alter table public.propostas_agente add constraint propostas_agente_tipo_check
 create policy tarefa_payload_restrito on public.propostas_agente
   as restrictive for select to authenticated using(tipo<>'tarefa' or public.is_admin());
 
+-- decidir_proposta (051) com a única mudança: tipo 'tarefa' só admin. O resto do corpo é o da 051.
+create or replace function public.decidir_proposta(p_id uuid, p_decisao text, p_motivo text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  r public.propostas_agente;
+begin
+  if public.is_agente() then
+    raise exception 'O agente não decide proposta: só humano.' using errcode = '42501';
+  end if;
+  if p_decisao not in ('rejeitada', 'respondida') then
+    raise exception 'Decisão inválida: %. Use rejeitada ou respondida (aplicar é marcar_proposta_aplicada).', p_decisao;
+  end if;
+  select * into r from public.propostas_agente where id = p_id for update;
+  if not found then
+    raise exception 'Proposta % não existe.', p_id;
+  end if;
+  if r.status <> 'pendente' then
+    raise exception 'Proposta % está %, não pendente.', p_id, r.status;
+  end if;
+  -- 054: proposta de tarefa só o admin decide (o professor do centro nem a lê; ver tarefa_payload_restrito).
+  if r.tipo = 'tarefa' and not public.is_admin() then
+    raise exception 'Proposta de tarefa: só admin decide.' using errcode = '42501';
+  end if;
+  if r.project_id is not null then
+    perform public.assert_project_allowed(r.project_id);
+  elsif not public.is_admin() then
+    raise exception 'Proposta sem centro de custo: só admin decide.' using errcode = '42501';
+  end if;
+  if p_decisao = 'rejeitada' and coalesce(btrim(p_motivo), '') = '' then
+    raise exception 'Rejeitar exige o motivo: é o que o agente lê para não repetir o erro.';
+  end if;
+  if p_decisao = 'respondida' and r.tipo = 'pergunta' and coalesce(btrim(p_motivo), '') = '' then
+    raise exception 'Responder uma pergunta exige o texto da resposta.';
+  end if;
+
+  update public.propostas_agente
+     set status = p_decisao, decidida_por = auth.uid(), decidida_em = now(), motivo = p_motivo
+   where id = p_id;
+end;
+$$;
+revoke all on function public.decidir_proposta(uuid, text, text) from public, anon;
+grant execute on function public.decidir_proposta(uuid, text, text) to authenticated;
+
 -- Trava única da escrita do módulo no protótipo. Também protege inserções
 -- concorrentes de chaves idempotentes, sem exigir locks de linhas inexistentes.
 create function public._travar_modulo_tarefas() returns void
@@ -913,7 +960,8 @@ declare c jsonb; ultima timestamptz;
 begin
   perform public._exigir_vigia();
   c:=public._vigia_contexto_base();
-  select coalesce(max(terminada_em),max(iniciada_em)) into ultima from public.vigia_execucoes;
+  -- Saúde só pela última checagem concluída: execução só iniciada não conta como ok.
+  select max(terminada_em) into ultima from public.vigia_execucoes;
   return c||jsonb_build_object('versao_esquema',1,'cursor_em',c->'cursor','pendentes',c->'mensagens',
     'alertas_emitidos',coalesce((select jsonb_agg(chave) from public.tarefa_eventos where tipo='alerta_prazo'),'[]'),
     'esclarecer',(select count(*) from public.vigia_mensagens where fila='esclarecer'),

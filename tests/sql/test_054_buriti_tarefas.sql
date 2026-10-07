@@ -750,6 +750,9 @@ select set_config('test054.prop_resp',public.propor_tarefa(jsonb_build_object(
 select set_config('test054.prop_vizinha',public.propor_tarefa(jsonb_build_object(
  'project_id',current_setting('test054.x'),'titulo','Não delegada ao Arthur',
  'passos',jsonb_build_array(jsonb_build_object('descricao','Outro passo'))))::text,false);
+select set_config('test054.prop_pendente',public.propor_tarefa(jsonb_build_object(
+ 'project_id',current_setting('test054.x'),'titulo','Fica pendente',
+ 'passos',jsonb_build_array(jsonb_build_object('descricao','Passo'))))::text,false);
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
 -- Uma atribuição inválida desfaz a aplicação inteira, não só o vínculo.
 select pg_temp.invalido(format('select public.aplicar_proposta_tarefa(%L,%L)',current_setting('test054.prop_resp'),'00000000-0000-0000-0000-0000000000c1'));
@@ -808,13 +811,18 @@ begin
    format('select public.concluir_tarefa(%L)',t),format('select public.reabrir_tarefa(%L)',t),
    format('select public.cancelar_tarefa(%L)',t),format('select public.atualizar_prazo(%L,current_date)',t),
    format('select public.atribuir_tarefa(%L,null)',t),format('select public.aplicar_proposta_tarefa(%L)',current_setting('test054.prop_resp')),
-   format('select public.vincular_mensagem(''m1'',%L,true)',t),'select public.revisar_mensagem(''m1'',''rotina'')'
+   format('select public.vincular_mensagem(''m1'',%L,true)',t),'select public.revisar_mensagem(''m1'',''rotina'')',
+   format('select public.decidir_proposta(%L,''rejeitada'',''professor tentando'')',current_setting('test054.prop_pendente')),
+   format('select public.decidir_proposta(%L,''respondida'',''professor tentando'')',current_setting('test054.prop_pendente'))
   ] loop perform pg_temp.negado(comando); end loop;
  end loop;
 end $$;
 select pg_temp.negado(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),'Sou do projeto, mas não responsável'));
 select public.registrar_nota(current_setting('test054.resp')::uuid,'Professor do escopo ainda pode anotar.');
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
+select pg_temp.ok((select status='pendente' from public.propostas_agente where id=current_setting('test054.prop_pendente')::uuid),'professor não encerrou a proposta de tarefa');
+select public.decidir_proposta(current_setting('test054.prop_pendente')::uuid,'rejeitada','admin decide');
+select pg_temp.ok((select status='rejeitada' from public.propostas_agente where id=current_setting('test054.prop_pendente')::uuid),'admin decide proposta de tarefa');
 select public.confirmar_passo(current_setting('test054.resp_passo')::uuid);
 select public.dispensar_passo(current_setting('test054.resp_passo2')::uuid);
 select public.concluir_tarefa(current_setting('test054.resp')::uuid);
