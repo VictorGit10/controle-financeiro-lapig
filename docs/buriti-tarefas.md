@@ -33,7 +33,7 @@ módulo:
 - `automacoes(user_id pk → auth.users, nome text check in ('vigia'), criada_em)`; função
   `is_automacao(p_nome)`.
 - `tarefas`: id, project_id (nullable → só admin vê quando null), titulo, descricao, responsavel (texto),
-  status (`em_andamento`, `aguardando_terceiro`, `concluida`, `cancelada`), precisa_atencao bool +
+  responsavel_id (nullable → app_users; só admin/professor), status (`em_andamento`, `aguardando_terceiro`, `concluida`, `cancelada`), precisa_atencao bool +
   motivo_atencao, prazo date, prazo_motivo, proxima_checagem date, proposta_id, criada_por/em,
   atualizada_em, concluida_por/em.
 - `tarefa_passos`: id, tarefa_id, ordem, descricao, quem, evidencia jsonb (regra que o vigia sabe avaliar),
@@ -62,8 +62,8 @@ Vigia (`is_automacao('vigia')`):
 Agente (`is_agente()`):
 - `propor_tarefa(p jsonb)` → valida forma (título, passos ≥ 1, prazo opcional, chaves) e insere em
   `propostas_agente`.
-Humano (`not is_agente()` + `assert_project_allowed` / admin):
-- `aplicar_proposta_tarefa(p_id)`, `confirmar_passo(p_passo, p_nota)`, `dispensar_passo(p_passo, p_nota)`,
+Admin (`is_admin()`, recusando agente/automação):
+- `aplicar_proposta_tarefa(p_id,p_responsavel default null)`, `confirmar_passo(p_passo, p_nota)`, `dispensar_passo(p_passo, p_nota)`,
   `vincular_mensagem(p_msg, p_tarefa, p_aceitar)` (aceitar acrescenta a thread em `tarefa_chaves`, para a
   próxima mensagem ligar por regra), `revisar_mensagem(p_msg, p_fila)`, `registrar_nota(p_tarefa, p_texto)`,
   `concluir_tarefa(p_tarefa, p_nota)`, `reabrir_tarefa`, `cancelar_tarefa`, `atualizar_prazo`.
@@ -111,14 +111,15 @@ Barra de saúde: "última checagem do vigia: há 12 min".
    de dado de projeto (nem bolsistas/CPF). Ele só age pelas RPCs `vigia_*` (definer), que conferem
    `is_automacao('vigia')` e só tocam tarefas **com projeto**. A tabela `automacoes` registra o login; só
    admin cadastra/revoga (`set_automacao`).
-2. **Operações humanas recusam agente E automação:** guard `not is_agente() and not is_automacao(null)`
-   (qualquer automação), mais `assert_project_allowed(project_id)` da tarefa.
+2. **Operações humanas recusam agente E automação:** guard `not is_agente() and not is_automacao(null)`.
+   Decisões exigem `is_admin()`. Professor no escopo pode anotar; responsável pode ler e anotar a própria
+   tarefa mesmo fora do escopo e registrar feito. Ver seção Responsável.
 3. **Tarefa sempre tem projeto** no protótipo. `propor_tarefa` exige `project_id`, roda `contem_cpf` no
    payload inteiro (a mesma proteção da 052) e insere a proposta. `aplicar_proposta_tarefa` é atômica: trava
    a proposta, recusa se não estiver pendente, cria a tarefa uma vez só (`tarefas.proposta_id` unique) e
    marca a proposta aplicada.
 4. **Máquina de estados dos passos:** `pendente → sugerido → confirmado|dispensado`; `confirmado` e
-   `dispensado` só por humano e nunca regridem; o vigia só leva `pendente → sugerido`.
+   `dispensado` só por admin e nunca regridem; o vigia só leva `pendente → sugerido`.
 5. **Vínculo mensagem–tarefa é N:N:** `vigia_vinculos(gmail_message_id, tarefa_id, estado sugerido|
    confirmado|rejeitado, origem, criado_em)`, PK composta. Rejeição fica lembrada (o vigia não volta a
    sugerir o mesmo par). `vigia_mensagens` perde a coluna `tarefa_id`.
@@ -147,3 +148,32 @@ Barra de saúde: "última checagem do vigia: há 12 min".
 ## Fora do protótipo
 Ler anexos (marca `anexos > 0` e "anexo não conferido"); campo "Novo pedido" no site; executor em nuvem;
 bot de conversa.
+
+## Responsável
+
+A 054 continua inédita em produção e foi alterada diretamente. O admin atribui um login humano já
+existente por `atribuir_tarefa(p_tarefa,p_user)` (null desatribui) ou ao aplicar a proposta com
+`p_responsavel`. O rótulo `responsavel` passa a guardar o nome na atribuição, sem e-mail. O agente
+propõe apenas texto; não escolhe usuário nem consulta app_users. Atribuição e mudança de papel têm
+validação no banco para impedir agente/automação como responsável.
+
+O RLS permite ler a tarefa atribuída, seus passos, chaves e eventos fora do escopo; **não amplia
+user_projects nem libera projetos, saldos ou bolsistas**. A RPC `centros_das_tarefas(p_ids)` confere a
+mesma autorização e retorna só o código do centro necessário ao cartão. Regras de e-mail continuam
+restritas a admin/vigia; eventos públicos continuam recusando CPF/endereço eletrônico.
+
+O responsável ou admin chama `registrar_feito(p_passo,p_nota,p_link)`: nota obrigatória até 2000 caracteres,
+link opcional HTTPS até 500; passo pendente vira sugerido, ou acrescenta novo registro se já sugerido.
+O evento humano guarda nota/link/nome e autoria (criado_por); o resumo comporta a nota completa mais o
+nome. A tarefa pede confirmação ao Victor. `ultimo_feito_id` preserva o último registro por passo mesmo
+após confirmação e depois de dez outros eventos. Tarefas encerradas e passos decididos recusam feito.
+Todas as decisões e atribuições exigem admin; professor no escopo e responsável podem registrar nota.
+
+**Minhas tarefas** filtra pelo login, ordena por prazo e oferece Registrar que fiz e Nota. O menu some
+somente após consulta bem-sucedida sem atribuições; falhas têm banner. A aba Tarefas permite ao admin
+escolher o responsável e destaca nome, nota e link para confirmação. O MCP devolve o rótulo e `feito`
+(nota/link/por) por passo, sem ler perfis ou regras.
+
+Validação: `npm test`, `npm run lint` e `bash tools/replica-local/rodar-054.sh`.
+Sem Docker, `node tools/replica-local/rodar-054-pglite.mjs` executa o mesmo SQL sintético e asserções de
+RLS/ACL; instalação temporária e limites descritos em `tools/replica-local/README.md`.

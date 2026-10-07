@@ -166,7 +166,7 @@ const BuritiPage = (() => {
     const acoes = p.status !== 'pendente' ? '' : `
       <div class="buriti-acoes">
         ${p.tipo === 'balancete' ? `<button class="btn btn--primary" onclick="BuritiPage.revisar('${id}')"><i data-lucide="clipboard-check"></i> Revisar e aplicar</button>` : ''}
-        ${p.tipo === 'tarefa' ? `<button class="btn btn--primary" onclick="BuritiPage.criarTarefa('${id}')"><i data-lucide="list-checks"></i> Criar tarefa</button>` : ''}
+        ${p.tipo === 'tarefa' && Auth.isAdmin() ? `<button class="btn btn--primary" onclick="BuritiPage.criarTarefa('${id}')"><i data-lucide="list-checks"></i> Criar tarefa</button>` : ''}
         ${p.tipo === 'pergunta' || p.tipo === 'aviso' ? `<button class="btn btn--primary" onclick="BuritiPage.responder('${id}')"><i data-lucide="reply"></i> ${p.tipo === 'aviso' ? 'Ciente' : 'Responder'}</button>` : ''}
         <button class="btn btn--secondary" onclick="BuritiPage.rejeitar('${id}')"><i data-lucide="x-circle"></i> Rejeitar</button>
       </div>`;
@@ -223,13 +223,16 @@ const BuritiPage = (() => {
   }
 
   async function criarTarefa(id) {
-    if (ocupados.has(id)) return;
+    if (!Auth.isAdmin() || ocupados.has(id)) return;
     ocupados.add(id);
     try {
-      const { error } = await supabaseClient.rpc('aplicar_proposta_tarefa', { p_id: id });
-      if (error) throw new Error(error.message);
-      await atualizarProposta(id);
-      showToast('Tarefa criada. Acompanhe na aba Tarefas.', 'success');
+      await window.BuritiTarefasUI.escolherResponsavel(null, async usuario => {
+        const { error } = await supabaseClient.rpc('aplicar_proposta_tarefa', { p_id: id, p_responsavel: usuario });
+        if (error) { erroCartao(id, error); throw new Error(error.message); }
+        await atualizarProposta(id);
+        await window.BuritiTarefasUI.atualizarMenu();
+        showToast('Tarefa criada. Acompanhe na aba Tarefas.', 'success');
+      }, 'Criar tarefa — escolher responsável');
     } catch (e) { erroCartao(id, e); }
     finally { ocupados.delete(id); }
   }

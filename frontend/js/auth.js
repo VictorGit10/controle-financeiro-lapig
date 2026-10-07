@@ -134,7 +134,7 @@ const Auth = (() => {
 
     // Initialize the app
     if (typeof App !== 'undefined' && App.init) {
-      App.init();
+      await App.init({ novaSessao: true });
     }
   }
 

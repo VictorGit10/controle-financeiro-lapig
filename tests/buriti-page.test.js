@@ -47,7 +47,7 @@ beforeEach(() => {
   root = document.createElement('div'); document.body.append(root);
   window.BuritiTarefas = f;
   vi.stubGlobal('escapeAttr', escapeAttr); vi.stubGlobal('escapeAttrJs', escapeAttrJs);
-  vi.stubGlobal('Auth', { isAdmin: () => admin }); vi.stubGlobal('Router', { register: vi.fn() });
+  vi.stubGlobal('Auth', { isAdmin: () => admin, getUser: () => ({ id: 'arthur' }) }); vi.stubGlobal('Router', { register: vi.fn() });
   vi.stubGlobal('lucide', { createIcons: vi.fn() }); vi.stubGlobal('showToast', vi.fn());
   vi.stubGlobal('detalheTecnico', html => admin ? html : '');
   vi.stubGlobal('confirmAction', vi.fn().mockResolvedValue(true));
@@ -224,7 +224,8 @@ describe('Triagem, saúde e propostas', () => {
     expect(root.textContent).toContain('Criar tarefa');
     supabaseClient.rpc.mockImplementation(async () => { db.propostas_agente[0].status = 'aplicada'; return { error: null }; });
     await page.criarTarefa('prop');
-    expect(supabaseClient.rpc).toHaveBeenCalledWith('aplicar_proposta_tarefa', { p_id: 'prop' });
+    await modal.onSave();
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('aplicar_proposta_tarefa', { p_id: 'prop', p_responsavel: null });
     expect(root.querySelector('[data-proposta]')).toBeNull();
   });
 });
@@ -247,5 +248,158 @@ describe('triagem: rótulos e ligadas automaticamente', () => {
     expect(f.ligadaAutomaticamente({ motivo: 'regra', classificacao: 'exigencia', vigia_vinculos: v })).toBe(false);
     expect(f.ligadaAutomaticamente({ motivo: 'modelo', classificacao: 'informativo', vigia_vinculos: v })).toBe(false);
     expect(f.ligadaAutomaticamente({ motivo: 'regra', classificacao: 'informativo', vigia_vinculos: [] })).toBe(false);
+  });
+});
+
+
+describe('Minhas tarefas e atribuição', () => {
+  const atribuir = () => { admin = false; db.tarefas[0].responsavel_id = 'arthur'; db.tarefas[0].responsavel = 'Arthur Pietro'; };
+  it('filtra pelo usuário, mostra links e ações de execução sem decisões administrativas', async () => {
+    atribuir();
+    db.tarefas[0].descricao = 'Documento: https://exemplo.invalid/doc';
+    db.tarefas[0].tarefa_passos[0].descricao = 'Enviar https://exemplo.invalid/passo';
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    expect(root.querySelectorAll('[data-tarefa]')).toHaveLength(1);
+    expect(chamadas.find(c => c[0] === 'tarefas')).toContainEqual(['eq', 'responsavel_id', 'arthur']);
+    expect(root.querySelector('a[href="https://exemplo.invalid/doc"]')).not.toBeNull();
+    expect(root.querySelector('a[href="https://exemplo.invalid/passo"]')).not.toBeNull();
+    expect(root.querySelector('[data-acao="feito"]')).not.toBeNull();
+    expect(root.querySelector('[data-acao="nota"]')).not.toBeNull();
+    expect(root.querySelector('[data-acao="confirmar"], [data-acao="dispensar"], [data-acao="concluir"], [data-acao="responsavel"]')).toBeNull();
+  });
+  it('registra feito via modal, valida entrada e apresenta espera de confirmação', async () => {
+    atribuir();
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    root.querySelector('[data-acao="feito"]').click();
+    await expect(modal.onSave()).rejects.toThrow('nota');
+    document.getElementById('buriti-feito-nota').value = 'Enviei ao Conecta';
+    document.getElementById('buriti-feito-link').value = 'javascript:alert(1)';
+    await expect(modal.onSave()).rejects.toThrow('https://');
+    expect(supabaseClient.rpc).not.toHaveBeenCalled();
+    document.getElementById('buriti-feito-link').value = 'https://exemplo.invalid/doc';
+    supabaseClient.rpc.mockImplementation(async (nome, args) => {
+      db.tarefas[0].tarefa_passos[0].feito = { tipo: 'sugestao', origem: 'humano', detalhe: { nota: args.p_nota, link: args.p_link, por: 'Arthur Pietro' } };
+      return { error: null };
+    });
+    await modal.onSave();
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('registrar_feito', { p_passo: 'p-t1', p_nota: 'Enviei ao Conecta', p_link: 'https://exemplo.invalid/doc' });
+    expect(root.textContent).toContain('Feito — aguardando o Victor');
+    expect(root.textContent).toContain('Enviei ao Conecta');
+  });
+  it('modal de feito empilha rótulos e campos no formulário padrão, com largura total', async () => {
+    atribuir();
+    const style = document.createElement('style');
+    style.textContent = readFileSync(resolve('frontend/css/style.css'), 'utf8');
+    root.append(style);
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    // Modal fica fora de .buriti-pagina no site: precisa do estilo global do formulário.
+    document.head.append(style);
+    try {
+      root.querySelector('[data-acao="feito"]').click();
+      const nota = document.getElementById('buriti-feito-nota');
+      const link = document.getElementById('buriti-feito-link');
+      expect(nota.parentElement).not.toBe(link.parentElement);
+      for (const campo of [nota, link]) {
+        const grupo = campo.closest('.form-group');
+        expect(grupo.children).toHaveLength(2);
+        expect(grupo.firstElementChild.htmlFor).toBe(campo.id);
+        expect(getComputedStyle(grupo).display).toBe('flex');
+        expect(getComputedStyle(grupo).flexDirection).toBe('column');
+        expect(getComputedStyle(campo).width).toBe('100%');
+      }
+      expect(nota.parentElement.nextElementSibling).toBe(link.parentElement);
+    } finally { style.remove(); }
+  });
+  it.each([true, false])('Registrar que fiz só aparece em Minhas tarefas (admin=%s)', async perfilAdmin => {
+    atribuir(); admin = perfilAdmin;
+    await window.BuritiTarefasUI.tarefas(root);
+    expect(root.querySelector('[data-acao="feito"]')).toBeNull();
+    expect(Boolean(root.querySelector('[data-acao="confirmar"]'))).toBe(perfilAdmin);
+    expect(Boolean(root.querySelector('[data-acao="dispensar"]'))).toBe(perfilAdmin);
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    expect(root.querySelector('[data-acao="feito"]')).not.toBeNull();
+  });
+  it('professor do escopo que não é responsável apenas lê e anota', async () => {
+    admin = false;
+    await window.BuritiTarefasUI.tarefas(root);
+    expect(root.querySelector('[data-acao="feito"], [data-acao="confirmar"], [data-acao="concluir"]')).toBeNull();
+    expect(root.querySelector('[data-acao="nota"]')).not.toBeNull();
+  });
+  it('centro fora do escopo vem só da RPC restrita e falha não vira vazio', async () => {
+    atribuir(); db.tarefas[0].projects = null;
+    supabaseClient.rpc.mockResolvedValue({ data: [{ tarefa_id: 't1', centro_custo: '30.068' }] });
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    expect(root.textContent).toContain('30.068');
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('centros_das_tarefas', { p_ids: ['t1'] });
+    expect(chamadas.some(c => c[0] === 'projects')).toBe(false);
+    supabaseClient.rpc.mockResolvedValue({ error: { message: 'rede' } });
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    expect(root.querySelector('[role="alert"]')).not.toBeNull();
+    expect(root.textContent).not.toContain('Nenhuma tarefa');
+  });
+  it('responsável em tarefa encerrada pode anotar, mas não registrar feito', async () => {
+    atribuir(); db.tarefas[0].status = 'cancelada';
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    expect(root.textContent).toContain('Cancelada');
+    expect(root.querySelector('[data-acao="feito"]')).toBeNull();
+    expect(root.querySelector('[data-acao="nota"]')).not.toBeNull();
+  });
+  it('menu só some com consulta bem-sucedida sem atribuições e expõe falha em banner', async () => {
+    root.innerHTML = '<li data-minhas-tarefas hidden></li><li data-minhas-status hidden role="alert"></li>';
+    await window.BuritiTarefasUI.atualizarMenu();
+    expect(root.querySelector('[data-minhas-tarefas]').hidden).toBe(true);
+    atribuir();
+    await window.BuritiTarefasUI.atualizarMenu();
+    expect(root.querySelector('[data-minhas-tarefas]').hidden).toBe(false);
+    erros.tarefas = { message: 'falha' };
+    await window.BuritiTarefasUI.atualizarMenu();
+    expect(root.querySelector('[data-minhas-tarefas]').hidden).toBe(false);
+    expect(root.querySelector('[data-minhas-status]').hidden).toBe(false);
+    expect(root.textContent).toContain('Não foi possível consultar suas tarefas');
+  });
+  it('admin escolhe somente humanos e chama atribuir_tarefa; falha de usuários tem banner', async () => {
+    db.app_users = [{ user_id: 'arthur', display_name: 'Arthur Pietro', role: 'professor' }, { user_id: 'agente', display_name: 'Buriti', role: 'agente' }, { user_id: 'vigia', display_name: 'Vigia', role: 'automacao' }];
+    await window.BuritiTarefasUI.tarefas(root);
+    root.querySelector('[data-acao="responsavel"]').click();
+    await vi.waitFor(() => expect(document.getElementById('buriti-responsavel')).not.toBeNull());
+    const select = document.getElementById('buriti-responsavel');
+    expect([...select.options].map(o => o.value)).toEqual(['', 'arthur']);
+    select.value = 'arthur';
+    await modal.onSave();
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('atribuir_tarefa', { p_tarefa: 't1', p_user: 'arthur' });
+    erros.app_users = { message: 'Falha de usuários' };
+    root.querySelector('[data-acao="responsavel"]').click();
+    await vi.waitFor(() => expect(root.textContent).toContain('Falha de usuários'));
+  });
+  it('admin vê nome, nota e link do feito para confirmar', async () => {
+    db.tarefas[0].tarefa_passos[0].feito = { tipo: 'sugestao', origem: 'humano', detalhe: { por: 'Arthur Pietro', nota: 'Enviei', link: 'https://exemplo.invalid/doc' } };
+    await window.BuritiTarefasUI.tarefas(root);
+    expect(root.textContent).toContain('Feito por Arthur Pietro — confirmar?');
+    expect(root.querySelector('.buriti-evidencia').textContent).toContain('Enviei');
+    expect(root.querySelector('.buriti-evidencia a').href).toBe('https://exemplo.invalid/doc');
+  });
+  it('carrega encaminhamentos além dos dez recentes, com filtro por tarefa', async () => {
+    atribuir();
+    db.tarefa_eventos = Array.from({ length: 205 }, (_, i) => ({ id: String(i), tarefa_id: 't1', resumo: 'Nota ' + i, origem: 'humano' }));
+    db.tarefas[0].eventos = db.tarefa_eventos.slice(0, 10);
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    root.querySelector('[data-acao="historico"]').click();
+    await vi.waitFor(() => expect(root.querySelectorAll('[data-eventos] li')).toHaveLength(205));
+    expect(chamadas.filter(c => c[0] === 'tarefa_eventos')).toHaveLength(2);
+    expect(chamadas.find(c => c[0] === 'tarefa_eventos')).toContainEqual(['eq', 'tarefa_id', 't1']);
+  });
+  it('aplicação da proposta envia responsável escolhido; professor não vê nem aciona aplicação', async () => {
+    db.app_users = [{ user_id: 'arthur', role: 'professor', display_name: 'Arthur Pietro' }];
+    db.propostas_agente = [{ id: 'prop', tipo: 'tarefa', status: 'pendente', resumo: 'Delegar', payload: { passos: [] } }];
+    await page.load(root);
+    await page.criarTarefa('prop');
+    document.getElementById('buriti-responsavel').value = 'arthur';
+    await modal.onSave();
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('aplicar_proposta_tarefa', { p_id: 'prop', p_responsavel: 'arthur' });
+    supabaseClient.rpc.mockClear(); admin = false;
+    await page.load(root);
+    expect(root.textContent).not.toContain('Criar tarefa');
+    await page.criarTarefa('prop');
+    expect(supabaseClient.rpc).not.toHaveBeenCalled();
   });
 });

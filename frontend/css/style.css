@@ -2335,3 +2335,12 @@ img { max-width: 100%; display: block; }
      fica preso à esquerda, na largura da tela, para ser lido sem rolar. */
   .pxr-detalhe > * { position: sticky; left: 8px; max-width: calc(100vw - 56px); }
 }
+
+/* Tarefas no celular: URLs longas não alargam os cartões; alvos confortáveis. */
+.buriti-cartao { min-width: 0; overflow-wrap: anywhere; }
+.buriti-cartao__resumo, .buriti-evidencia p { white-space: pre-wrap; }
+.buriti-pagina .form-input { width: 100%; }
+@media (max-width: 600px) {
+  .buriti-acoes .btn { min-height: 44px; flex: 1 1 auto; }
+  .buriti-cartao__topo { align-items: flex-start; flex-wrap: wrap; }
+}

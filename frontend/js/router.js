@@ -38,8 +38,8 @@ const Router = (() => {
     return true;
   }
 
-  async function navigate(pageName) {
-    if (pageName === currentPage) return;
+  async function navigate(pageName, { reload = false } = {}) {
+    if (pageName === currentPage && !reload) return;
 
     const page = pages[pageName];
     if (!page) {

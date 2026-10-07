@@ -147,3 +147,22 @@ Com login de verdade, a matriz que importa passa a ser verificável ponta a pont
 E dá para conferir o contrato que a 039 promete a quem consome (`todos os itens
 têm o mesmo conjunto de chaves, inclusive os de curto-circuito`) contra o JSON
 que de fato sai pelo PostgREST, não contra o que o SQL devolve no psql.
+
+## Migração 054 — tarefas e responsável
+
+O roteiro `bash tools/replica-local/rodar-054.sh` monta um Postgres descartável com os
+helpers reais de escopo (stub-051), aplica 051/052/054 e roda `tests/sql/test_054_buriti_tarefas.sql`.
+Aqui **RLS, SET ROLE, guards e grants são testados**, incluindo responsável fora do
+escopo sem leitura financeira. Depois o Docker exercita duas conexões concorrentes.
+
+Sem Docker, use a alternativa PGlite, com dependência apenas em pasta ignorada:
+
+```bash
+npm install --prefix .cache/pglite-054 --cache .cache/npm --no-save --package-lock=false @electric-sql/pglite
+node tools/replica-local/rodar-054-pglite.mjs
+```
+
+Esse roteiro executa as mesmas migrações e a suíte SQL (remove só a diretiva do cliente
+psql). Usa banco em memória, sem credenciais, e fecha ao terminar. **Não testa concorrência
+entre conexões, GoTrue ou PostgREST**; para isso continuam necessários o roteiro Docker
+ou a stack completa. Não há instalação global nem mudança nas dependências do projeto.

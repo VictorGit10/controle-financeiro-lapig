@@ -30,7 +30,10 @@ The page `assistente` depende dos ES modules de `js/ai/` (bridge-ados ao `window
 
 ## Router Guards & Dirty Tracking
 
-`router.js` expõe além de `register/navigate/getCurrent`: `registerGuard(fn)`, `registerDirtyChecker(fn)` e `hasUnsavedChanges()`. Guards são funções `async (from, to) => boolean` consultadas antes de cada `navigate` (uma retornando `false` cancela a troca). Dirty checkers são funções `() => boolean` cuja união alimenta `hasUnsavedChanges()`. `projetos.js` registra ambos para o modo Editor (rascunhos não salvos); `saldos.js` registra ambos para linhas sujas (`dirtyRows`). `app.js` usa `hasUnsavedChanges()` no `beforeunload`. Navegar para a página corrente é no-op (evita re-render redundante).
+`router.js` expõe além de `register/navigate/getCurrent`: `registerGuard(fn)`, `registerDirtyChecker(fn)` e `hasUnsavedChanges()`. Guards são funções `async (from, to) => boolean` consultadas antes de cada `navigate` (uma retornando `false` cancela a troca). Dirty checkers são funções `() => boolean` cuja união alimenta `hasUnsavedChanges()`. `projetos.js` registra ambos para o modo Editor (rascunhos não salvos); `saldos.js` registra ambos para linhas sujas (`dirtyRows`). `app.js` usa `hasUnsavedChanges()` no `beforeunload`. Navegar para a página corrente é no-op (evita re-render redundante), exceto com
+`navigate(pagina, { reload: true })`: o login usa essa opção para recarregar os dados
+da sessão, inclusive ao trocar de usuário. O boot respeita `#minhas-tarefas` após
+a autenticação; a regra da página inicial está em [Minhas tarefas](pages.md#minhas-tarefas-minhas-tarefasjs).
 
 ## Frontend Module Pattern
 

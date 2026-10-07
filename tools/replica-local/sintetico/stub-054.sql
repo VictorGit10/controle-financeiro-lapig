@@ -53,3 +53,9 @@ insert into public.user_projects(user_id,project_id)
 -- A conversão deve remover uma atribuição prévia do login dedicado.
 insert into public.user_projects(user_id,project_id)
  select '00000000-0000-0000-0000-0000000000d1',id from public.projects where code='51.X';
+
+-- Coluna real da 033, necessária para rótulos sem e-mail.
+update public.app_users set display_name=case
+ when role='admin' then 'Victor'
+ when user_id='00000000-0000-0000-0000-0000000000e1' then 'Arthur Pietro'
+ else 'Professor do projeto' end;

@@ -160,6 +160,8 @@ create temp table financeiro054_antes as select jsonb_build_object(
   'lancamentos',(select coalesce(jsonb_agg(to_jsonb(l) order by id),'[]') from public.balancete_lancamentos l),
   'mapas',(select coalesce(jsonb_agg(to_jsonb(m) order by conta_prefix),'[]') from public.conta_rubrica_map m)) valor;
 set role authenticated;
+select pg_temp.negado(format('select public.aplicar_proposta_tarefa(%L)',current_setting('test054.proposta')));
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
 select set_config('test054.tarefa',public.aplicar_proposta_tarefa(current_setting('test054.proposta')::uuid)::text,false);
 select set_config('test054.tarefa2',public.aplicar_proposta_tarefa(current_setting('test054.proposta2')::uuid)::text,false);
 select pg_temp.invalido(format('select public.aplicar_proposta_tarefa(%L)',current_setting('test054.invalida')));
@@ -171,8 +173,11 @@ select pg_temp.ok((select status='aplicada' and objeto_id=current_setting('test0
 select set_config('test054.passo',(select id::text from public.tarefa_passos where tarefa_id=current_setting('test054.tarefa')::uuid and ordem=1),false);
 select set_config('test054.passo2',(select id::text from public.tarefa_passos where tarefa_id=current_setting('test054.tarefa')::uuid and ordem=2),false);
 select set_config('test054.passo3',(select id::text from public.tarefa_passos where tarefa_id=current_setting('test054.tarefa')::uuid and ordem=3),false);
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000b1',false);
 select pg_temp.ok((select count(*)=1 from public.scholarship_holders),'professor continua lendo o bolsista do escopo');
 select pg_temp.ok((select count(*)=1 from public.bolsistas_nomes()),'professor continua lendo nomes do escopo');
+select pg_temp.negado(format('select public.concluir_tarefa(%L)',current_setting('test054.tarefa')));
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
 select pg_temp.invalido(format('select public.concluir_tarefa(%L)',current_setting('test054.tarefa')));
 -- Achado 3: o humano autorizado também não pode aplicar uma tarefa pelo legado.
 select pg_temp.invalido(format('select public.marcar_proposta_aplicada(%L)',current_setting('test054.invalida')));
@@ -198,6 +203,7 @@ begin
     perform set_config('request.jwt.claim.sub',usuario,false);
     foreach sql in array array[
       format('select public.aplicar_proposta_tarefa(%L)',current_setting('test054.proposta')),
+      format('select public.atribuir_tarefa(%L,null)',t),format('select public.registrar_feito(%L,%L)',s,'feito'),
       format('select public.confirmar_passo(%L)',s),format('select public.dispensar_passo(%L)',s),
       format('select public.registrar_nota(%L,%L)',t,'nota'),format('select public.concluir_tarefa(%L)',t),
       format('select public.reabrir_tarefa(%L)',t),format('select public.cancelar_tarefa(%L)',t),
@@ -362,15 +368,16 @@ select pg_temp.negado(format('select public.concluir_tarefa(%L)',current_setting
 select pg_temp.negado(format('select public.registrar_nota(%L,''fora'')',current_setting('test054.tarefa')));
 reset role;
 
--- Revisão humana: professor confirma; apenas admin triagem; não regride.
+-- Revisão: professor não decide; apenas admin confirma e faz triagem.
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000b1',false);
 set role authenticated;
-select public.confirmar_passo(current_setting('test054.passo')::uuid,'Conferido.');
+select pg_temp.negado(format('select public.confirmar_passo(%L)',current_setting('test054.passo')));
 select pg_temp.negado(format('select public.vincular_mensagem(''m1'',%L,true)',current_setting('test054.tarefa')));
 select pg_temp.negado('select public.revisar_mensagem(''m1'',''rotina'')');
 reset role;
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
 set role authenticated;
+select public.confirmar_passo(current_setting('test054.passo')::uuid,'Conferido.');
 select public.vincular_mensagem('m1',current_setting('test054.tarefa')::uuid,true);
 select public.vincular_mensagem('m2',current_setting('test054.tarefa')::uuid,false);
 select public.revisar_mensagem('m1','rotina');
@@ -620,7 +627,7 @@ do $$ declare f record; t text;
 begin
   for f in select oid,proname from pg_proc where pronamespace='public'::regnamespace and proname in (
     'is_automacao','set_automacao','listar_propostas_tarefa_seguras','propor_tarefa','aplicar_proposta_tarefa','confirmar_passo','dispensar_passo',
-    'registrar_nota','concluir_tarefa','reabrir_tarefa','cancelar_tarefa','atualizar_prazo','vincular_mensagem',
+    'atribuir_tarefa','registrar_feito','centros_das_tarefas','registrar_nota','concluir_tarefa','reabrir_tarefa','cancelar_tarefa','atualizar_prazo','vincular_mensagem',
     'revisar_mensagem','vigia_contexto','vigia_capturar','vigia_registrar','vigia_expurgar') loop
     perform pg_temp.ok(not has_function_privilege('anon',f.oid,'EXECUTE'),'anon sem RPC '||f.proname);
   end loop;
@@ -725,3 +732,113 @@ select pg_temp.ok((select ultima_recebida_em=cursor_inicial from public.vigia_cu
 select pg_temp.ok(not exists(select 1 from public.vigia_mensagens where gmail_message_id='mutante-mascara'),
   'mutantes não deixam dados residuais');
 select set_config('request.jwt.claim.sub','',false);
+
+-- Responsável fora do escopo: usa identidades sintéticas reais e RLS como REST.
+begin;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
+insert into public.balancetes(project_id,data_referencia,saldo_disponivel)
+ values(current_setting('test054.x')::uuid,'2025-01-01',1234) on conflict do nothing;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000c1',false);
+set role authenticated;
+select pg_temp.invalido(format('select public.propor_tarefa(%L::jsonb)',jsonb_build_object(
+ 'project_id',current_setting('test054.x'),'titulo','Atribuição proibida','responsavel_id','00000000-0000-0000-0000-0000000000e1',
+ 'passos',jsonb_build_array(jsonb_build_object('descricao','Fazer')))));
+select set_config('test054.prop_resp',public.propor_tarefa(jsonb_build_object(
+ 'project_id',current_setting('test054.x'),'titulo','Delegada ao Arthur','responsavel','Arthur',
+ 'passos',jsonb_build_array(jsonb_build_object('descricao','Enviar documento','evidencia',jsonb_build_object('de','pessoa@exemplo.invalid')),
+ jsonb_build_object('descricao','Conferir documento'))))::text,false);
+select set_config('test054.prop_vizinha',public.propor_tarefa(jsonb_build_object(
+ 'project_id',current_setting('test054.x'),'titulo','Não delegada ao Arthur',
+ 'passos',jsonb_build_array(jsonb_build_object('descricao','Outro passo'))))::text,false);
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
+-- Uma atribuição inválida desfaz a aplicação inteira, não só o vínculo.
+select pg_temp.invalido(format('select public.aplicar_proposta_tarefa(%L,%L)',current_setting('test054.prop_resp'),'00000000-0000-0000-0000-0000000000c1'));
+select pg_temp.ok((select status='pendente' from public.propostas_agente where id=current_setting('test054.prop_resp')::uuid)
+ and not exists(select 1 from public.tarefas where proposta_id=current_setting('test054.prop_resp')::uuid),'atribuição inválida: aplicação atômica');
+select set_config('test054.resp',public.aplicar_proposta_tarefa(current_setting('test054.prop_resp')::uuid,'00000000-0000-0000-0000-0000000000e1')::text,false);
+select set_config('test054.vizinha',public.aplicar_proposta_tarefa(current_setting('test054.prop_vizinha')::uuid)::text,false);
+select set_config('test054.resp_passo',(select id::text from public.tarefa_passos where tarefa_id=current_setting('test054.resp')::uuid and ordem=1),false);
+select set_config('test054.resp_passo2',(select id::text from public.tarefa_passos where tarefa_id=current_setting('test054.resp')::uuid and ordem=2),false);
+select pg_temp.ok((select responsavel='Arthur Pietro' and responsavel_id='00000000-0000-0000-0000-0000000000e1' from public.tarefas where id=current_setting('test054.resp')::uuid),'nome e identidade atribuídos');
+select pg_temp.ok(exists(select 1 from public.tarefa_eventos where tarefa_id=current_setting('test054.resp')::uuid and tipo='status' and resumo='Responsável: Arthur Pietro'),'evento de atribuição');
+select pg_temp.invalido(format('select public.atribuir_tarefa(%L,%L)',current_setting('test054.resp'),'00000000-0000-0000-0000-0000000000c1'));
+select pg_temp.invalido(format('select public.atribuir_tarefa(%L,%L)',current_setting('test054.resp'),'00000000-0000-0000-0000-0000000000d1'));
+select pg_temp.invalido(format('select public.atribuir_tarefa(%L,%L)',current_setting('test054.resp'),'00000000-0000-0000-0000-000000000099'));
+select pg_temp.negado('select public.set_automacao(''00000000-0000-0000-0000-0000000000e1'',''vigia'',true)');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1',false);
+select pg_temp.ok((select count(*)=1 from public.tarefas) and exists(select 1 from public.tarefas where id=current_setting('test054.resp')::uuid),'responsável lê só sua tarefa fora do escopo');
+select pg_temp.ok((select count(*)=2 from public.tarefa_passos),'responsável lê só os passos da sua tarefa');
+select pg_temp.ok((select count(*)=2 from public.tarefa_eventos),'responsável lê criação e atribuição');
+select pg_temp.ok(not exists(select 1 from public.projects where id=current_setting('test054.x')::uuid)
+ and not exists(select 1 from public.balancetes where project_id=current_setting('test054.x')::uuid)
+ and not exists(select 1 from public.scholarships where project_id=current_setting('test054.x')::uuid)
+ and not exists(select 1 from public.scholarship_holders where full_name='Bolsista X Teste')
+ and not exists(select 1 from public.bolsistas_nomes() where full_name='Bolsista X Teste'),'atribuição não abre projeto, saldos nem bolsistas');
+select pg_temp.ok((select count(*)=1 and min(centro_custo)='51.X' from public.centros_das_tarefas(array[current_setting('test054.resp')::uuid,current_setting('test054.vizinha')::uuid])), 'centro retorna só código da tarefa autorizada');
+select pg_temp.ok(not exists(select 1 from public.tarefa_passos_regras) and not exists(select 1 from public.vigia_mensagens)
+ and not exists(select 1 from public.tarefa_passos p where to_jsonb(p)::text like '%@%')
+ and not exists(select 1 from public.tarefa_eventos e where to_jsonb(e)::text like '%@%'),'responsável não ganha regras, mensagens ou endereços');
+select public.registrar_nota(current_setting('test054.resp')::uuid,'Já comecei.');
+select public.registrar_feito(current_setting('test054.resp_passo')::uuid,'Enviei o documento.','https://exemplo.invalid/documento');
+select pg_temp.ok((select estado='sugerido' and confirmado_por is null and ultimo_feito_id=evento_id from public.tarefa_passos where id=current_setting('test054.resp_passo')::uuid),'feito sugere, não confirma');
+select pg_temp.ok((select precisa_atencao and motivo_atencao='Arthur registrou um passo; confirmar' from public.tarefas where id=current_setting('test054.resp')::uuid),'feito pede confirmação ao Victor');
+select pg_temp.ok(exists(select 1 from public.tarefa_eventos where tarefa_id=current_setting('test054.resp')::uuid
+ and tipo='sugestao' and origem='humano' and resumo='Feito por Arthur Pietro: Enviei o documento.'
+ and detalhe->>'por'='Arthur Pietro' and detalhe->>'link'='https://exemplo.invalid/documento'
+ and detalhe->>'passo_id'=current_setting('test054.resp_passo') and criado_por=auth.uid()),'evento de feito tem autoria, nota e link');
+select public.registrar_feito(current_setting('test054.resp_passo')::uuid,'Corrigi o documento.');
+select pg_temp.ok((select count(*)=2 from public.tarefa_eventos where tarefa_id=current_setting('test054.resp')::uuid and tipo='sugestao'),'repetição acrescenta evento');
+select pg_temp.ok((select e.detalhe->>'nota'='Corrigi o documento.' from public.tarefa_passos p join public.tarefa_eventos e on e.id=p.ultimo_feito_id where p.id=current_setting('test054.resp_passo')::uuid),'FK aponta ao último feito');
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L,%L)',current_setting('test054.resp_passo'),'nota','javascript:alert(1)'));
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L,%L)',current_setting('test054.resp_passo'),'nota','http://exemplo.invalid'));
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L,%L)',current_setting('test054.resp_passo'),'nota','https://'));
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L,%L)',current_setting('test054.resp_passo'),'nota','https://exemplo.invalid/'||repeat('a',500)));
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),' '));
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),repeat('a',2001)));
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),'Escrevi a pessoa@exemplo.invalid'));
+select public.registrar_feito(current_setting('test054.resp_passo')::uuid,repeat('a',2000));
+select pg_temp.negado(format('select public.registrar_nota(%L,%L)',current_setting('test054.vizinha'),'Não é minha'));
+-- Todos os poderes de decisão negados ao responsável e ao professor do centro.
+do $$ declare usuario text; comando text; t text:=current_setting('test054.resp'); s text:=current_setting('test054.resp_passo');
+begin
+ foreach usuario in array array['00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000b1'] loop
+  perform set_config('request.jwt.claim.sub',usuario,false);
+  foreach comando in array array[
+   format('select public.confirmar_passo(%L)',s),format('select public.dispensar_passo(%L)',s),
+   format('select public.concluir_tarefa(%L)',t),format('select public.reabrir_tarefa(%L)',t),
+   format('select public.cancelar_tarefa(%L)',t),format('select public.atualizar_prazo(%L,current_date)',t),
+   format('select public.atribuir_tarefa(%L,null)',t),format('select public.aplicar_proposta_tarefa(%L)',current_setting('test054.prop_resp')),
+   format('select public.vincular_mensagem(''m1'',%L,true)',t),'select public.revisar_mensagem(''m1'',''rotina'')'
+  ] loop perform pg_temp.negado(comando); end loop;
+ end loop;
+end $$;
+select pg_temp.negado(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),'Sou do projeto, mas não responsável'));
+select public.registrar_nota(current_setting('test054.resp')::uuid,'Professor do escopo ainda pode anotar.');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
+select public.confirmar_passo(current_setting('test054.resp_passo')::uuid);
+select public.dispensar_passo(current_setting('test054.resp_passo2')::uuid);
+select public.concluir_tarefa(current_setting('test054.resp')::uuid);
+select pg_temp.ok((select ultimo_feito_id is not null and ultimo_feito_id<>evento_id from public.tarefa_passos where id=current_setting('test054.resp_passo')::uuid),'último feito preservado após decisão');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1',false);
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),'Já concluída'));
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
+select public.reabrir_tarefa(current_setting('test054.resp')::uuid);
+select pg_temp.invalido(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),'Passo já confirmado'));
+select public.atribuir_tarefa(current_setting('test054.resp')::uuid,null);
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1',false);
+select pg_temp.ok(not exists(select 1 from public.tarefas) and not exists(select 1 from public.tarefa_passos)
+ and not exists(select 1 from public.tarefa_eventos),'desatribuição revoga leitura herdada');
+select pg_temp.negado(format('select public.registrar_feito(%L,%L)',current_setting('test054.resp_passo'),'Não sou mais responsável'));
+reset role;
+-- Prova antes/depois: restaurar a permissão antiga reabre confirmação ao professor.
+select pg_temp.provar_defeito(replace(pg_get_functiondef('public._humano_tarefa(uuid,boolean)'::regprocedure),
+ '  if p_decisao and not public.is_admin() then
+    raise exception ''Só admin decide tarefas.'' using errcode=''42501''; end if;', '')||';'||$mut$
+ select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000b1',true);
+ set local role authenticated;
+ select public.confirmar_passo((select id from public.tarefa_passos where tarefa_id=current_setting('test054.vizinha')::uuid));
+$mut$,$obs$
+ select estado='confirmado' from public.tarefa_passos where tarefa_id=current_setting('test054.vizinha')::uuid
+$obs$,'guard antigo deixava professor confirmar');
+select pg_temp.ok((select estado='pendente' from public.tarefa_passos where tarefa_id=current_setting('test054.vizinha')::uuid),'mutação desfeita, passo ainda pendente');
+rollback;

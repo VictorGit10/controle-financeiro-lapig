@@ -6,72 +6,72 @@
 const App = (() => {
   let initialized = false;
 
-  function init() {
-    if (initialized) {
-      // Volta para onde a pessoa estava; sem rota corrente, cai na mesma
-      // landing do primeiro boot. Antes o fallback era 'saldos', que desde a
-      // mig. 044 é um relatório somente leitura — reentrar no app por ali
-      // punha a pessoa numa tela onde não há nada a fazer.
-      Router.navigate(Router.getCurrent() || 'projetos');
-      Notifications.refresh();
-      return;
-    }
+  let inicializacao = 0;
 
-    initialized = true;
+  async function init({ novaSessao = false } = {}) {
+    const vez = ++inicializacao;
+    const usuario = Auth.getUser()?.id;
+    const paginaAtual = Router.getCurrent();
+    const primeiraPagina = novaSessao || !initialized || !paginaAtual;
+    const tarefas = window.BuritiTarefasUI.atualizarMenu();
 
-    // Esconde links administrativos para professores e bloqueia o acesso
-    // direto à rota admin (URL #usuarios). Fechamento Mensal e Gestão de
-    // Projetos agora são professor-acessíveis (escopados no banco pela mig.
-    // 034); só Usuários & Centros de Custo segue admin-only. O RLS no banco
-    // é a barreira real de segurança; isto é apenas UX.
-    if (typeof Auth !== 'undefined' && !Auth.isAdmin()) {
-      document.querySelectorAll('li[data-admin]').forEach(li => { li.style.display = 'none'; });
-    }
-    Router.registerGuard(async (_from, to) => {
-      if (to === 'usuarios' && !Auth.isAdmin()) {
-        showToast('Acesso restrito a administradores.', 'error');
-        return false;
-      }
-      return true;
+    // O perfil é carregado pelo Auth antes daqui, inclusive ao trocar de login.
+    document.querySelectorAll('li[data-admin]').forEach(li => {
+      li.style.display = Auth.isAdmin() ? '' : 'none';
     });
-
-    // Sidebar navigation
-    document.querySelectorAll('.sidebar__link').forEach(link => {
-      link.addEventListener('click', () => {
-        const page = link.dataset.page;
-        if (page && page !== Router.getCurrent()) Router.navigate(page);
+    if (!initialized) {
+      initialized = true;
+      Router.registerGuard(async (_from, to) => {
+        if (to === 'usuarios' && !Auth.isAdmin()) {
+          showToast('Acesso restrito a administradores.', 'error');
+          return false;
+        }
+        return true;
       });
-    });
 
-    // Sidebar toggle (mobile)
-    const sidebarToggle = document.getElementById('sidebar-toggle');
-    const sidebar = document.getElementById('sidebar');
-    
-    sidebarToggle?.addEventListener('click', () => {
-      sidebar.classList.toggle('sidebar--open');
-    });
+      // Sidebar navigation
+      document.querySelectorAll('.sidebar__link').forEach(link => {
+        link.addEventListener('click', () => {
+          const page = link.dataset.page;
+          if (page && page !== Router.getCurrent()) Router.navigate(page);
+        });
+      });
 
-    // Close sidebar when clicking outside on mobile
-    document.addEventListener('click', (e) => {
-      if (window.innerWidth <= 768 && 
-          sidebar.classList.contains('sidebar--open') && 
-          !sidebar.contains(e.target) && 
-          e.target !== sidebarToggle &&
-          !sidebarToggle.contains(e.target)) {
-        sidebar.classList.remove('sidebar--open');
-      }
-    });
+      // Sidebar toggle (mobile)
+      const sidebarToggle = document.getElementById('sidebar-toggle');
+      const sidebar = document.getElementById('sidebar');
 
-    // O sino de alertas vive no topbar, que aparece em todas as telas — então
-    // é montado no boot, não pela página que por acaso o alimentava (era o
-    // Dashboard, e como a tela inicial é "Projetos" o primeiro clique no sino
-    // não fazia nada). `refresh()` não é aguardado: alerta é informação
-    // secundária e não deve atrasar a primeira tela.
-    Notifications.init();
+      sidebarToggle?.addEventListener('click', () => {
+        sidebar.classList.toggle('sidebar--open');
+      });
+
+      // Close sidebar when clicking outside on mobile
+      document.addEventListener('click', (e) => {
+        if (window.innerWidth <= 768 &&
+            sidebar.classList.contains('sidebar--open') &&
+            !sidebar.contains(e.target) &&
+            e.target !== sidebarToggle &&
+            !sidebarToggle.contains(e.target)) {
+          sidebar.classList.remove('sidebar--open');
+        }
+      });
+
+      Notifications.init();
+    }
     Notifications.refresh();
 
-    // Navigate to projetos (default landing page)
-    Router.navigate('projetos');
+    // O link explícito prevalece sobre a página inicial. Só a entrada sem
+    // centros precisa aguardar a consulta do menu; os demais abrem já.
+    let destino = primeiraPagina ? null : paginaAtual;
+    if (!destino && window.location.hash === '#minhas-tarefas') destino = 'minhas-tarefas';
+    if (!destino) {
+      const semCentros = !Auth.isAdmin() && Auth.getAllowedProjectIds().length === 0;
+      destino = semCentros && await tarefas === true ? 'minhas-tarefas' : 'projetos';
+    }
+    // Uma resposta lenta não pode trocar a tela escolhida enquanto carregava,
+    // nem navegar com a sessão anterior depois de logout/troca de usuário.
+    if (vez !== inicializacao || usuario !== Auth.getUser()?.id || Router.getCurrent() !== paginaAtual) return;
+    await Router.navigate(destino, { reload: novaSessao });
 
     // Initialize icons
     lucide.createIcons();
@@ -126,10 +126,10 @@ document.addEventListener('DOMContentLoaded', () => {
           // Múltiplos pontos = separadores de milhar
           clean = clean.replace(/\./g, '');
         }
-        
+
         // Remove tudo que não for dígito, ponto ou sinal de menos
         clean = clean.replace(/[^\d.-]/g, '');
-        
+
         if (clean !== '' && !isNaN(parseFloat(clean))) {
           e.preventDefault();
           e.target.value = clean;

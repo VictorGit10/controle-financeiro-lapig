@@ -124,6 +124,9 @@ begin
     if TG_OP = 'UPDATE' and old.role = 'automacao' and new.role <> 'automacao' then
       raise exception 'Automação não pode virar humano.' using errcode='42501';
     end if;
+    if TG_OP='UPDATE' and new.role not in ('admin','professor') and exists(
+      select 1 from public.tarefas where responsavel_id=new.user_id) then
+      raise exception 'Desatribua as tarefas antes de mudar o papel do responsável.' using errcode='42501'; end if;
     if new.role = 'automacao' and exists (select 1 from public.user_projects where user_id = new.user_id) then
       raise exception 'Automação deve ter escopo vazio.' using errcode='42501';
     end if;
@@ -160,6 +163,7 @@ create table public.tarefas (
   project_id uuid not null references public.projects(id),
   titulo text not null check (length(btrim(titulo)) between 1 and 300),
   descricao text check(length(descricao)<=10000), responsavel text check(length(responsavel)<=300),
+  responsavel_id uuid references public.app_users(user_id),
   status text not null default 'em_andamento' check(status in ('em_andamento','aguardando_terceiro','concluida','cancelada')),
   precisa_atencao boolean not null default false, motivo_atencao text,
   prazo date, prazo_motivo text check(length(prazo_motivo)<=1000), proxima_checagem date,
@@ -171,12 +175,13 @@ create table public.tarefas (
   check ((concluida_por is null) = (concluida_em is null))
 );
 create index tarefas_projeto on public.tarefas(project_id,status);
+create index tarefas_responsavel on public.tarefas(responsavel_id,prazo);
 create table public.tarefa_eventos (
   id uuid primary key default gen_random_uuid(), tarefa_id uuid not null references public.tarefas(id),
   chave text not null unique check(length(chave) between 1 and 500),
   tipo text not null check(tipo in ('criada','mensagem','sugestao','confirmacao','nota','alerta_prazo','status','vinculo')),
   origem text not null check(origem in ('vigia','buriti','humano','sistema')),
-  resumo text not null check(length(resumo) between 1 and 2000), detalhe jsonb not null default '{}',
+  resumo text not null check(length(resumo) between 1 and 2400), detalhe jsonb not null default '{}',
   gmail_message_id text, gmail_thread_id text,
   ocorrido_em timestamptz not null default now(), criado_em timestamptz not null default now(),
   criado_por uuid not null default auth.uid()
@@ -188,6 +193,7 @@ create table public.tarefa_passos (
   quem text check(length(quem)<=300), evidencia jsonb not null default '{}' check(evidencia='{}'::jsonb),
   estado text not null default 'pendente' check(estado in ('pendente','sugerido','confirmado','dispensado')),
   evento_id uuid references public.tarefa_eventos(id), confirmado_por uuid, confirmado_em timestamptz,
+  ultimo_feito_id uuid references public.tarefa_eventos(id),
   unique(tarefa_id,ordem), check ((estado in ('confirmado','dispensado')) = (confirmado_em is not null)),
   check ((confirmado_por is null) = (confirmado_em is null))
 );
@@ -260,7 +266,7 @@ begin
     execute format('grant select on public.%I to authenticated',t);
     execute format('create trigger trg_bloqueia_agente before insert or update or delete on public.%I for each statement execute function public.bloqueia_escrita_do_agente()',t);
     if t='tarefas' then
-      execute format('create policy leitura on public.%I for select to authenticated using (public.is_admin() or project_id=any(public.allowed_project_ids()))',t);
+      execute format('create policy leitura on public.%I for select to authenticated using (public.is_admin() or project_id=any(public.allowed_project_ids()) or (responsavel_id=auth.uid() and not public.is_agente() and not public.is_automacao(null)))',t);
     elsif t in ('tarefa_passos','tarefa_chaves','tarefa_eventos') then
       execute format('create policy leitura on public.%I for select to authenticated using (exists(select 1 from public.tarefas t where t.id=tarefa_id))',t);
     else
@@ -391,6 +397,7 @@ begin
   if p is null or jsonb_typeof(p)<>'object' or octet_length(p::text)>65536 then
     raise exception 'Tarefa deve ser objeto de até 64 KiB.' using errcode='22023'; end if;
   if public.contem_cpf(p::text) then raise exception 'CPF não entra em tarefa.' using errcode='22023'; end if;
+  if p ? 'responsavel_id' then raise exception 'O responsável é escolhido pelo admin na revisão.' using errcode='22023'; end if;
   foreach k in array array['titulo','descricao','responsavel','prazo_motivo','chave'] loop
     if p ? k and jsonb_typeof(p->k) not in ('string','null') then
       raise exception 'Campo textual inválido: %',k using errcode='22023'; end if;
@@ -426,7 +433,7 @@ begin
   perform nullif(p->>'prazo','')::date;
   perform nullif(p->>'proxima_checagem','')::date;
 end $$;
-create function public._humano_tarefa(p_tarefa uuid) returns public.tarefas
+create function public._humano_tarefa(p_tarefa uuid,p_decisao boolean default true) returns public.tarefas
 language plpgsql security definer set search_path=public,pg_temp as $$
 declare t public.tarefas;
 begin
@@ -435,7 +442,11 @@ begin
   perform public._travar_modulo_tarefas();
   select * into t from public.tarefas where id=p_tarefa for update;
   if not found then raise exception 'Tarefa inexistente.' using errcode='22023'; end if;
-  perform public.assert_project_allowed(t.project_id);
+  if p_decisao and not public.is_admin() then
+    raise exception 'Só admin decide tarefas.' using errcode='42501'; end if;
+  if not public.is_admin() and t.responsavel_id is distinct from auth.uid() then
+    perform public.assert_project_allowed(t.project_id);
+  end if;
   return t;
 end $$;
 create function public._evento_tarefa(p_tarefa uuid,p_chave text,p_tipo text,p_origem text,p_resumo text,
@@ -456,6 +467,74 @@ begin
   return v;
 end $$;
 
+-- Atribuição não altera user_projects. O rótulo é um nome, nunca o e-mail.
+create function public._nome_responsavel(p_user uuid) returns text
+language sql stable security definer set search_path=public,pg_temp as $$
+  select left(public._payload_tarefa_publico(to_jsonb(coalesce(nullif(btrim(display_name),''),'Usuário')))#>>'{}',300)
+  from public.app_users where user_id=p_user;
+$$;
+create function public._responsavel_humano() returns trigger
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare papel text;
+begin
+  if new.responsavel_id is not null then
+    select role into papel from public.app_users where user_id=new.responsavel_id for share;
+    if papel is null or papel not in ('admin','professor') then
+      raise exception 'Responsável deve ser um usuário humano.' using errcode='22023'; end if;
+  end if;
+  return new;
+end $$;
+create trigger trg_responsavel_humano before insert or update of responsavel_id on public.tarefas
+for each row execute function public._responsavel_humano();
+
+create function public.atribuir_tarefa(p_tarefa uuid,p_user uuid) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare t public.tarefas; nome text;
+begin
+  t:=public._humano_tarefa(p_tarefa);
+  if p_user is not null then
+    perform 1 from public.app_users where user_id=p_user and role in ('admin','professor') for share;
+    if not found then raise exception 'Responsável deve ser um usuário humano.' using errcode='22023'; end if;
+    nome:=public._nome_responsavel(p_user);
+  end if;
+  update public.tarefas set responsavel_id=p_user,responsavel=nome,atualizada_em=now() where id=t.id;
+  perform public._evento_tarefa(t.id,'responsavel:'||gen_random_uuid(),'status','humano',
+    'Responsável: '||coalesce(nome,'Sem responsável'));
+end $$;
+
+create function public.registrar_feito(p_passo uuid,p_nota text,p_link text default null) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare s public.tarefa_passos; t public.tarefas; nome text; evento uuid;
+begin
+  select * into s from public.tarefa_passos where id=p_passo;
+  t:=public._humano_tarefa(s.tarefa_id,false);
+  if not public.is_admin() and t.responsavel_id is distinct from auth.uid() then
+    raise exception 'Só o responsável ou admin registra que fez.' using errcode='42501'; end if;
+  select * into s from public.tarefa_passos where id=p_passo for update;
+  if t.status in ('concluida','cancelada') or s.estado not in ('pendente','sugerido') then
+    raise exception 'Passo ou tarefa encerrados.' using errcode='22023'; end if;
+  if coalesce(length(btrim(p_nota)),0)=0 or length(p_nota)>2000 then
+    raise exception 'Nota obrigatória, até 2000 caracteres.' using errcode='22023'; end if;
+  if p_link is not null and (length(p_link)>500 or p_link !~ '^https://[^/[:space:]?#]+[^[:space:]]*$') then
+    raise exception 'Link deve começar com https:// e ter até 500 caracteres.' using errcode='22023'; end if;
+  nome:=public._nome_responsavel(auth.uid());
+  evento:=public._evento_tarefa(t.id,'feito:'||gen_random_uuid(),'sugestao','humano',
+    'Feito por '||nome||': '||btrim(p_nota),
+    jsonb_build_object('passo_id',s.id,'nota',btrim(p_nota),'link',p_link,'por',nome));
+  update public.tarefa_passos set estado='sugerido',evento_id=evento,ultimo_feito_id=evento where id=s.id;
+  update public.tarefas set precisa_atencao=true,motivo_atencao=split_part(nome,' ',1)||' registrou um passo; confirmar',
+    atualizada_em=now() where id=t.id;
+end $$;
+
+-- Só o código necessário ao cartão. Não abre projects nem qualquer dado financeiro.
+create function public.centros_das_tarefas(p_ids uuid[]) returns table(tarefa_id uuid,centro_custo text)
+language sql stable security definer set search_path=public,pg_temp as $$
+  select t.id,p.code from public.tarefas t join public.projects p on p.id=t.project_id
+  where auth.uid() is not null and t.id=any(p_ids) and (
+    public.is_admin() or t.project_id=any(public.allowed_project_ids()) or
+    (t.responsavel_id=auth.uid() and not public.is_agente() and not public.is_automacao(null)));
+$$;
+
 create function public.propor_tarefa(p jsonb) returns uuid
 language plpgsql security definer set search_path=public,pg_temp as $$
 begin
@@ -465,12 +544,13 @@ begin
   perform public.assert_project_allowed((p->>'project_id')::uuid);
   return public.criar_proposta('tarefa',(p->>'project_id')::uuid,p->>'titulo',p,null,p->>'chave');
 end $$;
-create function public.aplicar_proposta_tarefa(p_id uuid) returns uuid
+create function public.aplicar_proposta_tarefa(p_id uuid,p_responsavel uuid default null) returns uuid
 language plpgsql security definer set search_path=public,pg_temp as $$
 declare r public.propostas_agente; v uuid; s jsonb; passo uuid; i integer:=0;
 begin
   if auth.uid() is null or public.is_agente() or public.is_automacao(null) then
-    raise exception 'Só humano aplica tarefa.' using errcode='42501'; end if;
+    raise exception 'Só admin aplica tarefa.' using errcode='42501'; end if;
+  if not public.is_admin() then raise exception 'Só admin aplica tarefa.' using errcode='42501'; end if;
   perform public._travar_modulo_tarefas();
   select * into r from public.propostas_agente where id=p_id for update;
   if not found or r.tipo<>'tarefa' or r.status<>'pendente' then
@@ -491,6 +571,7 @@ begin
     insert into public.tarefa_chaves values(v,s->>'tipo',s->>'valor') on conflict do nothing;
   end loop;
   perform public._evento_tarefa(v,'criada:'||v,'criada','buriti','Tarefa criada pela revisão humana.');
+  if p_responsavel is not null then perform public.atribuir_tarefa(v,p_responsavel); end if;
   update public.propostas_agente set status='aplicada',decidida_por=auth.uid(),decidida_em=now(),objeto_id=v where id=r.id;
   return v;
 end $$;
@@ -518,8 +599,8 @@ begin perform public._decidir_passo(p_passo,p_nota,'dispensado'); end $$;
 create function public.registrar_nota(p_tarefa uuid,p_texto text) returns void
 language plpgsql security definer set search_path=public,pg_temp as $$
 begin
-  perform public._humano_tarefa(p_tarefa);
-  if coalesce(length(btrim(p_texto)),0)=0 then raise exception 'Nota obrigatória.' using errcode='22023'; end if;
+  perform public._humano_tarefa(p_tarefa,false);
+  if coalesce(length(btrim(p_texto)),0)=0 or length(p_texto)>2000 then raise exception 'Nota obrigatória, até 2000 caracteres.' using errcode='22023'; end if;
   perform public._evento_tarefa(p_tarefa,'nota:'||gen_random_uuid(),'nota','humano',p_texto);
 end $$;
 create function public._status_tarefa(p_tarefa uuid,p_status text,p_nota text) returns void
@@ -1017,6 +1098,7 @@ begin
     where p.pronamespace='public'::regnamespace and p.proname = any(array[
     'is_automacao','set_automacao','_proteger_identidade_automacao','_bloquear_financeiro_automacao',
     '_travar_modulo_tarefas','_travar_lote_tarefas','_payload_tarefa_publico','listar_propostas_tarefa_seguras',
+    '_nome_responsavel','_responsavel_humano','atribuir_tarefa','registrar_feito','centros_das_tarefas',
     '_eventos_imutaveis','_texto_tarefa_seguro','_validar_tarefa','_humano_tarefa','_evento_tarefa',
     '_decidir_passo','_status_tarefa','_exigir_vigia','_validar_lote_vigia','propor_tarefa',
     '_vigia_contexto_base','_vigia_capturar_base','_vigia_registrar_base','_vigia_expurgar_base','_vigia_timestamp',
@@ -1046,7 +1128,7 @@ begin
       raise exception '054: RLS/ACL incorretas: %',t; end if;
   end loop;
   for f in select p.oid,p.proname,p.prosecdef,p.proconfig from pg_proc p where p.pronamespace='public'::regnamespace
-    and p.proname in ('is_automacao','set_automacao','listar_propostas_tarefa_seguras','propor_tarefa','aplicar_proposta_tarefa','confirmar_passo',
+    and p.proname in ('atribuir_tarefa','registrar_feito','centros_das_tarefas','is_automacao','set_automacao','listar_propostas_tarefa_seguras','propor_tarefa','aplicar_proposta_tarefa','confirmar_passo',
     'dispensar_passo','registrar_nota','concluir_tarefa','reabrir_tarefa','cancelar_tarefa','atualizar_prazo',
     'vincular_mensagem','revisar_mensagem','vigia_contexto','vigia_capturar','vigia_registrar','vigia_expurgar') loop
     if not f.prosecdef or not ('search_path=public, pg_temp'=any(f.proconfig)) or has_function_privilege('anon',f.oid,'EXECUTE') then

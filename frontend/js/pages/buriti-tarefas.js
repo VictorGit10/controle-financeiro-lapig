@@ -3,11 +3,12 @@ window.BuritiTarefasUI = (() => {
   const f = () => window.BuritiTarefas;
   let geracao = 0;
   const ocupados = new Set();
-  const CAMPOS = 'id,project_id,titulo,descricao,responsavel,status,precisa_atencao,motivo_atencao,' +
+  const CAMPOS = 'id,project_id,titulo,descricao,responsavel,responsavel_id,status,precisa_atencao,motivo_atencao,' +
     'prazo,prazo_motivo,criada_em,concluida_em,projects(name,code),' +
     'tarefa_passos(id,ordem,descricao,quem,estado,evento_id,' +
+    'feito:tarefa_eventos!ultimo_feito_id(tipo,origem,detalhe),' +
     'evento:tarefa_eventos!evento_id(resumo,gmail_thread_id,ocorrido_em)),' +
-    'eventos:tarefa_eventos!tarefa_eventos_tarefa_id_fkey(id,tipo,origem,resumo,gmail_thread_id,ocorrido_em,criado_em)';
+    'eventos:tarefa_eventos!tarefa_eventos_tarefa_id_fkey(id,tipo,origem,resumo,detalhe,gmail_thread_id,ocorrido_em,criado_em)';
   const MSG = 'gmail_message_id,gmail_thread_id,recebida_em,assunto,trecho,fila,motivo,classificacao,estado,anexos,' +
     'vigia_vinculos(tarefa_id,estado,tarefas(id,titulo,status))';
 
@@ -68,41 +69,50 @@ window.BuritiTarefasUI = (() => {
     return `<button class="btn ${primaria ? 'btn--primary' : 'btn--secondary'}" data-acao="${acao}" data-id="${escapeAttr(id)}">${texto}</button>`;
   }
 
-  function passoHTML(s, aberta) {
+  function passoHTML(s, aberta, podeFazer) {
     const estado = f().ESTADOS_PASSO[s.estado];
     const editavel = aberta && ['pendente', 'sugerido'].includes(s.estado);
+    const feito = f().registroFeito(s);
     return `<li class="buriti-passo">
-      <div class="buriti-bloco__titulo"><i data-lucide="${estado.icone}"></i> ${s.ordem}. ${escapeAttr(s.descricao)}</div>
-      <div class="buriti-sub">${estado.texto}${s.quem ? ` · ${escapeAttr(s.quem)}` : ''}</div>
-      ${s.estado === 'sugerido' ? `<div class="buriti-bloco buriti-evidencia"><strong>Evidência sugerida</strong>
-        <p class="buriti-sub">${escapeAttr(s.evento?.resumo || 'Resumo indisponível.')}</p>
-        ${link(s.evento?.gmail_thread_id)}</div>` : ''}
-      ${editavel ? `<div class="buriti-acoes">${botao('confirmar', 'Confirmar', s.id, true)}${botao('dispensar', 'Dispensar', s.id)}</div>` : ''}
+      <div class="buriti-bloco__titulo"><i data-lucide="${estado.icone}"></i> ${s.ordem}. ${f().textoComLinks(s.descricao)}</div>
+      <div class="buriti-sub">${s.estado === 'sugerido' && feito ? 'Feito — aguardando o Victor' : estado.texto}${s.quem ? ` · ${escapeAttr(s.quem)}` : ''}</div>
+      ${s.estado === 'sugerido' ? `<div class="buriti-bloco buriti-evidencia"><strong>${feito ? `Feito por ${escapeAttr(feito.por)}${Auth.isAdmin() ? ' — confirmar?' : ''}` : 'Evidência sugerida'}</strong>
+        <p class="buriti-sub">${f().textoComLinks(feito?.nota || s.evento?.resumo || 'Resumo indisponível.')}</p>
+        ${feito?.link ? f().textoComLinks(feito.link) : link(s.evento?.gmail_thread_id)}</div>` : ''}
+      ${editavel && podeFazer ? `<div class="buriti-acoes">${botao('feito', 'Registrar que fiz', s.id, true)}</div>` : ''}
+      ${editavel && Auth.isAdmin() ? `<div class="buriti-acoes">${botao('confirmar', 'Confirmar', s.id, true)}${botao('dispensar', 'Dispensar', s.id)}</div>` : ''}
     </li>`;
   }
 
-  function tarefaHTML(t) {
+  function eventosHTML(eventos) {
+    return eventos.map(e => '<li><div class="buriti-sub">' + escapeAttr(f().dataHora(e.ocorrido_em)) + ' · ' + escapeAttr(e.origem) +
+      '</div><div>' + f().textoComLinks(e.resumo) + '</div>' + (e.detalhe?.link ? f().textoComLinks(e.detalhe.link) : '') +
+      link(e.gmail_thread_id) + '</li>').join('') || '<li>Nenhum evento.</li>';
+  }
+
+  function tarefaHTML(t, minhas = false) {
     const aberta = ['em_andamento', 'aguardando_terceiro'].includes(t.status);
     const selo = f().seloPrazo(t.prazo);
     const passos = [...t.tarefa_passos].sort((a, b) => a.ordem - b.ordem);
     return `<article class="card buriti-cartao" data-tarefa="${escapeAttr(t.id)}">
       <header class="buriti-cartao__topo"><h3 class="buriti-titulo">${escapeAttr(t.titulo)}</h3>
-        <span class="badge ${aberta ? selo.classe : 'badge--active'}">${aberta ? selo.texto : 'Concluída'}</span></header>
-      <div class="buriti-cartao__centro">${escapeAttr(t.projects?.code || '')} ${escapeAttr(t.projects?.name || '')}</div>
-      ${t.precisa_atencao ? `<div class="buriti-bloco buriti-bloco--aviso"><span class="badge badge--warning">precisa de você</span>
+        <span class="badge ${aberta ? selo.classe : 'badge--active'}">${aberta ? selo.texto : t.status === 'cancelada' ? 'Cancelada' : 'Concluída'}</span></header>
+      <div class="buriti-cartao__centro">${escapeAttr(t.projects?.code || t.centro_custo || 'Centro indisponível')} ${escapeAttr(t.projects?.name || '')}</div>
+      ${t.precisa_atencao && Auth.isAdmin() ? `<div class="buriti-bloco buriti-bloco--aviso"><span class="badge badge--warning">precisa de você</span>
         <p class="buriti-sub">${escapeAttr(t.motivo_atencao || '')}</p></div>` : ''}
-      ${t.descricao ? `<p class="buriti-cartao__resumo">${escapeAttr(t.descricao)}</p>` : ''}
+      ${t.descricao ? `<p class="buriti-cartao__resumo">${f().textoComLinks(t.descricao)}</p>` : ''}
       <div class="buriti-sub">${t.responsavel ? `Responsável: ${escapeAttr(t.responsavel)} · ` : ''}
         Prazo: ${t.prazo ? escapeAttr(t.prazo.split('-').reverse().join('/')) : '—'}
         ${t.prazo_motivo ? ` · ${escapeAttr(t.prazo_motivo)}` : ''}
         ${t.status === 'aguardando_terceiro' ? ' · Aguardando terceiro' : ''}</div>
-      <ol class="buriti-lista buriti-passos">${passos.map(s => passoHTML(s, aberta)).join('')}</ol>
-      <details class="buriti-bloco" data-linha-tempo><summary>Linha do tempo · últimos eventos</summary>
-        <ul class="buriti-lista">${t.eventos.map(e => `<li><div class="buriti-sub">${escapeAttr(f().dataHora(e.ocorrido_em))} · ${escapeAttr(e.origem)}</div>
-          <div>${escapeAttr(e.resumo)}</div>${link(e.gmail_thread_id)}</li>`).join('') || '<li>Nenhum evento.</li>'}</ul>
+      <ol class="buriti-lista buriti-passos">${passos.map(s => passoHTML(s, aberta, minhas && f().podeRegistrarFeito(t, Auth.getUser()?.id, Auth.isAdmin()))).join('')}</ol>
+      <details class="buriti-bloco" data-linha-tempo><summary>Encaminhamentos · últimos eventos</summary>
+        <ul class="buriti-lista" data-eventos>${eventosHTML(t.eventos)}</ul>
+        ${t.eventos.length >= 10 ? botao('historico', 'Ver todos os encaminhamentos') : ''}
       </details>
       <div data-erro></div><div class="buriti-acoes">${botao('nota', 'Nota')}
-        ${aberta ? botao('concluir', 'Concluir', '', true) : ''}</div>
+        ${Auth.isAdmin() ? botao('responsavel', 'Responsável') : ''}
+        ${aberta && Auth.isAdmin() && !minhas ? botao('concluir', 'Concluir', '', true) : ''}</div>
     </article>`;
   }
 
@@ -112,10 +122,11 @@ window.BuritiTarefasUI = (() => {
       .order('id', { referencedTable: 'eventos' }).limit(10, { referencedTable: 'eventos' });
   }
 
-  async function atualizarTarefa(node, id, filtro) {
+  async function atualizarTarefa(node, id, filtro, minhas) {
     const t = await ler(consultaTarefa().eq('id', id).single());
+    await preencherCentros([t]);
     if (!node.isConnected) return;
-    if ((filtro === 'abertas' && !['em_andamento', 'aguardando_terceiro'].includes(t.status)) ||
+    if ((minhas && t.responsavel_id !== Auth.getUser()?.id) || (filtro === 'abertas' && !['em_andamento', 'aguardando_terceiro'].includes(t.status)) ||
       (filtro === 'concluidas' && t.status !== 'concluida')) {
       const lista = node.parentElement;
       node.remove();
@@ -124,7 +135,7 @@ window.BuritiTarefasUI = (() => {
     }
     const aberto = node.querySelector('[data-linha-tempo]')?.open;
     const temp = document.createElement('div');
-    temp.innerHTML = tarefaHTML(t);
+    temp.innerHTML = tarefaHTML(t, minhas);
     const novo = temp.firstElementChild;
     novo.querySelector('[data-linha-tempo]').open = aberto;
     node.replaceWith(novo);
@@ -164,12 +175,51 @@ window.BuritiTarefasUI = (() => {
 
   async function rpc(nome, args) { await ler(supabaseClient.rpc(nome, args)); }
 
-  async function acaoTarefa(e, filtro) {
+  async function acaoTarefa(e, filtro, minhas) {
     const button = e.target.closest('[data-acao]');
     const node = button?.closest('[data-tarefa]');
     if (!node) return;
     const id = node.dataset.tarefa, acao = button.dataset.acao;
-    const atualizar = () => atualizarTarefa(node, id, filtro);
+    const atualizar = () => atualizarTarefa(node, id, filtro, minhas);
+    if (acao === 'historico') {
+      button.disabled = true;
+      try {
+        const eventos = await lerTudo(() => supabaseClient.from('tarefa_eventos')
+          .select('id,tipo,origem,resumo,detalhe,gmail_thread_id,ocorrido_em,criado_em')
+          .eq('tarefa_id', id).order('criado_em', { ascending: false }).order('id'));
+        if (!node.isConnected) return;
+        node.querySelector('[data-eventos]').innerHTML = eventosHTML(eventos);
+        button.remove();
+      } catch (erro) { button.disabled = false; erroCartao(node, erro); }
+      return;
+    }
+    if (acao === 'responsavel' && Auth.isAdmin()) {
+      try {
+        const t = await ler(consultaTarefa().eq('id', id).single());
+        await escolherResponsavel(t.responsavel_id, async usuario => {
+          const ok = await agir(node, id, () => rpc('atribuir_tarefa', { p_tarefa: id, p_user: usuario }), atualizar);
+          if (!ok) throw new Error('Não foi possível atribuir a tarefa.');
+          await atualizarMenu();
+        });
+      } catch (erro) { erroCartao(node, erro); }
+      return;
+    }
+    if (acao === 'feito' && minhas) {
+      createModal({ title: 'Registrar que fiz', saveLabel: 'Registrar',
+        bodyHTML: `<div class="form-group">
+          <label class="form-label" for="buriti-feito-nota">O que você fez?</label>
+          <textarea id="buriti-feito-nota" class="form-input" style="width:100%;" rows="4" maxlength="2000" required></textarea>
+        </div><div class="form-group">
+          <label class="form-label" for="buriti-feito-link">Link (opcional)</label>
+          <input id="buriti-feito-link" class="form-input" style="width:100%;" type="url" placeholder="https://" maxlength="500">
+        </div>`,
+        onSave: async () => {
+          const args = f().validarFeito(document.getElementById('buriti-feito-nota').value, document.getElementById('buriti-feito-link').value);
+          const ok = await agir(node, id, () => rpc('registrar_feito', { p_passo: button.dataset.id, ...args }), atualizar);
+          if (!ok) throw new Error('Não foi possível registrar. Confira o erro no cartão.');
+        } });
+      return;
+    }
     if (acao === 'nota') {
       createModal({ title: 'Nota da tarefa', saveLabel: 'Registrar nota',
         bodyHTML: '<label class="form-label" for="buriti-nota">Nota (use pseudônimos; sem CPF, e-mail ou telefone)</label><textarea id="buriti-nota" class="form-input" rows="4" maxlength="2000"></textarea>',
@@ -181,6 +231,7 @@ window.BuritiTarefasUI = (() => {
         } });
       return;
     }
+    if (!Auth.isAdmin()) return;
     if (acao === 'concluir') {
       if (!await confirmAction('Concluir esta tarefa? Todos os passos precisam estar confirmados ou dispensados.')) return;
       await agir(node, id, () => rpc('concluir_tarefa', { p_tarefa: id, p_nota: null }), atualizar);
@@ -190,23 +241,25 @@ window.BuritiTarefasUI = (() => {
     }
   }
 
-  async function tarefas(root, filtro = 'abertas') {
+  async function tarefas(root, filtro = 'abertas', minhas = false) {
     const vez = ++geracao;
     root.innerHTML = `<div class="buriti-abas" role="group" aria-label="Filtro de tarefas">
-      ${['abertas', 'concluidas'].map(v => `<button class="btn ${v === filtro ? 'btn--primary' : 'btn--ghost'}" data-filtro="${v}" aria-pressed="${v === filtro}">${v === 'abertas' ? 'Abertas' : 'Concluídas'}</button>`).join('')}</div>
+      ${(minhas ? ['todas', 'abertas', 'concluidas'] : ['abertas', 'concluidas']).map(v => `<button class="btn ${v === filtro ? 'btn--primary' : 'btn--ghost'}" data-filtro="${v}" aria-pressed="${v === filtro}">${v === 'abertas' ? 'Abertas' : v === 'todas' ? 'Todas' : 'Concluídas'}</button>`).join('')}</div>
       <div class="buriti-coluna" data-cartoes><p class="buriti-sub">Consultando tarefas…</p></div>`;
     root.onclick = e => {
       const valor = e.target.closest('[data-filtro]')?.dataset.filtro;
-      if (valor) tarefas(root, valor);
-      else acaoTarefa(e, filtro);
+      if (valor) tarefas(root, valor, minhas);
+      else acaoTarefa(e, filtro, minhas);
     };
     try {
       const rows = await lerTudo(() => {
         const q = consultaTarefa().order('prazo', { ascending: true, nullsFirst: false }).order('id');
-        return filtro === 'abertas' ? q.in('status', ['em_andamento', 'aguardando_terceiro']) : q.eq('status', 'concluida');
+        if (minhas) q.eq('responsavel_id', Auth.getUser()?.id);
+        return filtro === 'abertas' ? q.in('status', ['em_andamento', 'aguardando_terceiro']) : filtro === 'concluidas' ? q.eq('status', 'concluida') : q;
       });
+      await preencherCentros(rows);
       if (vez !== geracao || !root.isConnected) return;
-      root.querySelector('[data-cartoes]').innerHTML = rows.length ? f().ordenarTarefas(rows).map(tarefaHTML).join('')
+      root.querySelector('[data-cartoes]').innerHTML = rows.length ? f().ordenarTarefas(rows).map(t => tarefaHTML(t, minhas)).join('')
         : '<p class="buriti-sub">Nenhuma tarefa neste filtro.</p>';
     } catch (e) {
       if (vez !== geracao || !root.isConnected) return;
@@ -331,6 +384,55 @@ window.BuritiTarefasUI = (() => {
     lucide.createIcons();
   }
 
+  async function preencherCentros(rows) {
+    const semCentro = rows.filter(t => !t.projects?.code);
+    for (let i = 0; i < semCentro.length; i += 200) {
+      const lote = semCentro.slice(i, i + 200);
+      const centros = await ler(supabaseClient.rpc('centros_das_tarefas', { p_ids: lote.map(t => t.id) }));
+      const mapa = new Map(centros.map(c => [c.tarefa_id, c.centro_custo]));
+      for (const t of lote) {
+        if (!mapa.has(t.id)) throw new Error('Centro da tarefa indisponível. Atualize a página.');
+        t.centro_custo = mapa.get(t.id);
+      }
+    }
+  }
+
+  async function escolherResponsavel(atual, salvar, titulo = 'Responsável da tarefa') {
+    if (!Auth.isAdmin()) return;
+    const usuarios = await lerTudo(() => supabaseClient.from('app_users')
+      .select('user_id,display_name,role').in('role', ['admin', 'professor']).order('display_name').order('user_id'));
+    createModal({ title: titulo, saveLabel: 'Salvar',
+      bodyHTML: '<label class="form-label" for="buriti-responsavel">Responsável</label>' +
+        '<select id="buriti-responsavel" class="form-input"><option value="">Sem responsável</option>' +
+        usuarios.map(u => '<option value="' + escapeAttr(u.user_id) + '" ' + (u.user_id === atual ? 'selected' : '') + '>' +
+          escapeAttr(u.display_name || 'Usuário sem nome (' + u.user_id.slice(0, 8) + ')') + '</option>').join('') + '</select>',
+      onSave: () => salvar(document.getElementById('buriti-responsavel').value || null) });
+  }
+
+  let consultaMenu = 0;
+  // true/false = consulta concluída; null = indisponível ou superada por outra consulta.
+  async function atualizarMenu() {
+    const vez = ++consultaMenu;
+    const item = document.querySelector('[data-minhas-tarefas]');
+    const status = document.querySelector('[data-minhas-status]');
+    if (!item) return null;
+    const usuario = Auth.getUser()?.id;
+    item.hidden = !usuario;
+    if (status) { status.hidden = true; status.textContent = ''; }
+    if (!usuario) return false;
+    try {
+      const rows = await ler(supabaseClient.from('tarefas').select('id').eq('responsavel_id', usuario).limit(1));
+      if (vez !== consultaMenu || usuario !== Auth.getUser()?.id) return null;
+      item.hidden = rows.length === 0;
+      return rows.length > 0;
+    } catch {
+      if (vez !== consultaMenu || usuario !== Auth.getUser()?.id) return null;
+      item.hidden = false;
+      if (status) { status.hidden = false; status.textContent = 'Não foi possível consultar suas tarefas. Abra Minhas tarefas para tentar novamente.'; }
+      return null;
+    }
+  }
+
   function sair() { geracao++; }
-  return { tarefas, triagem, saude, sair };
+  return { tarefas, triagem, saude, sair, atualizarMenu, escolherResponsavel };
 })();

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { criarToolsTarefas, montarPayloadTarefa } from '../mcp/src/buriti-tarefa.js';
-import { seloPrazo, ordenarTarefas, saudeVigia, gmailLink } from '../frontend/js/components/buriti-tarefas.js';
+import { seloPrazo, ordenarTarefas, saudeVigia, gmailLink, textoComLinks, validarFeito, registroFeito, podeRegistrarFeito } from '../frontend/js/components/buriti-tarefas.js';
 
 describe('selos e ordenação do Buriti', () => {
   const hoje = new Date(2026, 9, 6, 23, 59);
@@ -39,7 +39,7 @@ const entrada = { titulo: ' Implantar bolsas ', passos: [{ descricao: ' Atualiza
 
 describe('tools de tarefas sem rede', () => {
   it('monta o contrato p da 054, sem campos externos ao payload', () => {
-    const payload = montarPayloadTarefa({ ...entrada, centro_de_custo: '30.068', status: 'concluida' }, ID);
+    const payload = montarPayloadTarefa({ ...entrada, centro_de_custo: '30.068', status: 'concluida', responsavel_id: 'proibido' }, ID);
     expect(payload).toEqual({ project_id: ID, titulo: 'Implantar bolsas', passos: [{ ...entrada.passos[0], descricao: 'Atualizar quadro' }], prazo: entrada.prazo, chaves: entrada.chaves });
   });
   it('exige projeto, título e de 1 a 50 passos', () => {
@@ -75,7 +75,7 @@ describe('tools de tarefas sem rede', () => {
     const consultar = async (nome, fn) => fn({ from });
     const tools = criarToolsTarefas({ consultar, centroPorCodigo: async () => ({ id: ID }) });
     const result = await tools.listarTarefas({ centro_de_custo: '30.068' });
-    expect(result.tarefas).toBe(rows);
+    expect(result.tarefas).toEqual(rows);
     expect(from).toHaveBeenCalledWith('tarefas');
     expect(chamadas).toContainEqual(['in', 'status', ['em_andamento', 'aguardando_terceiro']]);
     expect(chamadas).toContainEqual(['eq', 'project_id', ID]);
@@ -85,5 +85,56 @@ describe('tools de tarefas sem rede', () => {
     chamadas.length = 0;
     expect((await tools.listarTarefas({ status: 'concluidas', limite: 1 })).truncado).toBe(true);
     expect(chamadas).toContainEqual(['eq', 'status', 'concluida']);
+  });
+});
+
+
+describe('responsável: funções puras e contrato MCP', () => {
+  it('linkifica texto escapado, sem transformar HTML ou javascript em execução', () => {
+    const html = textoComLinks('<img src=x onerror=alert(1)> Veja https://exemplo.invalid/doc?a=1&b=2. javascript:alert(1)');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+    expect(html).toContain('href="https://exemplo.invalid/doc?a=1&amp;b=2"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).not.toContain('href="javascript:');
+    expect(textoComLinks('https://pessoa:senha@exemplo.invalid')).not.toContain('<a');
+  });
+  it('exige nota e restringe link opcional ao HTTPS e aos limites', () => {
+    expect(validarFeito(' Feito ', ' ')).toEqual({ p_nota: 'Feito', p_link: null });
+    expect(validarFeito('a'.repeat(2000), 'https://exemplo.invalid')).toHaveProperty('p_link', 'https://exemplo.invalid');
+    for (const nota of ['', '   ', 'a'.repeat(2001)]) expect(() => validarFeito(nota)).toThrow('nota');
+    for (const link of ['javascript:alert(1)', 'http://exemplo.invalid', 'https://', 'https://host/ espaço', 'https://host/' + 'a'.repeat(500)]) {
+      expect(() => validarFeito('Feito', link)).toThrow('https://');
+    }
+  });
+  it('só responsável ou admin podem registrar em tarefa aberta', () => {
+    expect(podeRegistrarFeito({ status: 'em_andamento', responsavel_id: 'eu' }, 'eu')).toBe(true);
+    expect(podeRegistrarFeito({ status: 'aguardando_terceiro' }, 'admin', true)).toBe(true);
+    expect(podeRegistrarFeito({ status: 'em_andamento', responsavel_id: 'outro' }, 'eu')).toBe(false);
+    expect(podeRegistrarFeito({ status: 'em_andamento' }, undefined)).toBe(false);
+    for (const status of ['cancelada', 'concluida']) expect(podeRegistrarFeito({ status, responsavel_id: 'eu' }, 'eu', true)).toBe(false);
+  });
+  it('MCP devolve nome e último feito por FK mesmo que esteja fora dos eventos recentes', async () => {
+    const feito = { tipo: 'sugestao', origem: 'humano', detalhe: { nota: 'Enviei', link: 'https://exemplo.invalid/doc', por: 'Arthur Pietro', email: 'não sai' } };
+    const rows = [{ id: ID, responsavel: 'Arthur Pietro', tarefa_passos: [{ id: 'passo', estado: 'confirmado', feito }], eventos: Array(10).fill({ tipo: 'nota' }) }];
+    let campos;
+    const q = { then: resolve => resolve(rows) };
+    for (const m of ['order', 'limit', 'in']) q[m] = () => q;
+    q.select = v => { campos = v; return q; };
+    const from = vi.fn().mockReturnValue(q);
+    const tools = criarToolsTarefas({ consultar: async (_, fn) => fn({ from }) });
+    const result = await tools.listarTarefas();
+    expect(result.tarefas[0].responsavel).toBe('Arthur Pietro');
+    expect(result.tarefas[0].tarefa_passos[0].feito).toEqual({ nota: 'Enviei', link: 'https://exemplo.invalid/doc', por: 'Arthur Pietro' });
+    expect(campos).toContain('feito:tarefa_eventos!ultimo_feito_id');
+    expect(campos).not.toContain('app_users');
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(rows[0].tarefa_passos[0].feito).toBe(feito);
+  });
+  it('não projeta endereços pessoais nem confunde sugestão do vigia com feito', () => {
+    expect(registroFeito({ feito: { tipo: 'sugestao', origem: 'vigia', detalhe: { por: 'Vigia' } } })).toBeNull();
+    expect(registroFeito({ feito: { tipo: 'sugestao', origem: 'humano', detalhe: {
+      por: 'pessoa@exemplo.invalid', nota: 'Escrevi para pessoa@exemplo.invalid', link: 'https://exemplo.invalid/pessoa@exemplo.invalid',
+    } } })).toEqual({ por: '[Retido]', nota: '[Retido]', link: null });
   });
 });

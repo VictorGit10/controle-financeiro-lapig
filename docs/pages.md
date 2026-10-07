@@ -152,15 +152,21 @@ Página em cartões para uso no celular, com três abas: **Propostas**, **Tarefa
 
 - **Propostas** mantém os filtros Pendentes/Decididas, revisão de balancete pela
   `ImportQueue`, respostas e rejeições. Proposta `tipo='tarefa'` mostra descrição,
-  responsável, prazo e passos; **Criar tarefa** chama `aplicar_proposta_tarefa(p_id)`.
+  responsável, prazo e passos; **Criar tarefa** (só admin) abre seletor de usuários humanos e chama
+  `aplicar_proposta_tarefa(p_id,p_responsavel)`.
 - **Tarefas** lista abertas (`em_andamento`/`aguardando_terceiro`) ou concluídas,
   ordenadas por prazo, com tarefas sem prazo ao fim. Cada cartão mostra o selo de
   prazo, `precisa_atencao`/motivo, passos com seus quatro estados e evidência do
-  evento associado ao passo sugerido. Confirmar/Dispensar chama
+  evento associado ao passo sugerido. O admin atribui/desatribui pelo seletor **Responsável**
+  (`atribuir_tarefa`); registros do responsável destacam nome, nota e link para conferência.
+  Nesta aba, admin decide com Confirmar/Dispensar; **Registrar que fiz** fica
+  exclusivamente em Minhas tarefas. Confirmar/Dispensar (só admin) chama
   `confirmar_passo(p_passo,p_nota)`/`dispensar_passo(p_passo,p_nota)`; Nota chama
   `registrar_nota(p_tarefa,p_texto)`; Concluir pede confirmação e chama
   `concluir_tarefa(p_tarefa,p_nota)` (o banco exige todos os passos decididos).
-  Linha do tempo recolhida mostra os 10 últimos eventos por tarefa, com links Gmail.
+  Linha do tempo recolhida mostra os 10 últimos eventos por tarefa, com links, e permite
+  carregar **todos os encaminhamentos**, em páginas. Professor apenas lê/anota; responsável
+  também registra feito, sem confirmação ou conclusão.
 - **Triagem** prioriza mensagens `esclarecer` e qualquer mensagem com vínculo
   `sugerido`, inclusive se a fila dela for rotina. Os vínculos são N:N em
   `vigia_vinculos`; cada Aceitar/Não é desta tarefa chama
@@ -185,7 +191,41 @@ Datas, selos, ordenação e links vivem no módulo ES testável
 No MCP, `propor_tarefa` e `tarefas` são registradas com `buriti(...)` e continuam
 ausentes do Assistente do site. A proposta resolve UUID/código do centro e envia
 `propor_tarefa({p: payload})`; a leitura usa tarefas/passos/eventos no escopo RLS,
-sem ler mensagens, remetentes ou endereços técnicos das regras de evidência.
+sem ler mensagens, remetentes ou endereços técnicos das regras de evidência. Retorna
+`responsavel` (nome) e `feito` por passo (nota/link/por), pela FK `ultimo_feito_id`,
+independentemente do limite de eventos recentes.
+
+## Minhas tarefas (`minhas-tarefas.js`)
+
+**Link direto:** acrescente `#minhas-tarefas` ao endereço do site. No servidor local:
+`http://localhost:8080/#minhas-tarefas` (também funciona com `index.html#minhas-tarefas`).
+Sem sessão, o site mostra o login e abre a página depois de autenticar; com sessão
+restaurada, abre diretamente. O link tem prioridade sobre a página inicial e
+continua válido mesmo sem tarefas atribuídas (a página informa a ausência).
+
+**Entrada sem link direto:** não-admin com tarefas atribuídas e nenhum centro de
+custo entra em Minhas tarefas. Quem tem centros, admin ou usuário sem tarefas
+mantém Projetos como página inicial. A decisão reaproveita a consulta do menu;
+falha mantém o banner de indisponibilidade e o acesso a Minhas tarefas pelo menu.
+
+Rota `minhas-tarefas`, acessível pelo menu para qualquer login com tarefa atribuída.
+O menu é consultado no boot/reentrada e ao abrir a página ou atribuir uma tarefa;
+só some quando a consulta confirma ausência de atribuições. Erros mostram banner,
+inclusive na página, sem parecer lista vazia.
+
+Cartões compartilhados com a aba Tarefas, filtrados por `responsavel_id = Auth.getUser().id`,
+ordenados por prazo, com filtros Todas/Abertas/Concluídas. Exibem centro, descrição com
+links seguros, selo de prazo, passos, estado **Feito — aguardando o Victor** e encaminhamentos
+recolhíveis/paginados. O código do centro fora do escopo vem de `centros_das_tarefas`;
+a linha do projeto e seus dados financeiros continuam protegidos pelo RLS normal.
+
+**Registrar que fiz** aparece somente nesta página, inclusive para admin que tenha
+tarefa atribuída. O modal usa grupos de formulário em coluna, com rótulo acima
+do campo e largura total. Exige nota e aceita link HTTPS opcional; chama
+`registrar_feito` e recarrega o cartão. **Nota** usa `registrar_nota`.
+Passos decididos/tarefas encerradas não oferecem registro de feito. Não-admin não
+vê ações de confirmar, dispensar, concluir ou atribuir. A interface prioriza celular,
+com botões de pelo menos 44 px e quebra de links longos.
 
 ## UsuariosPage (`usuarios.js`) — admin-only
 

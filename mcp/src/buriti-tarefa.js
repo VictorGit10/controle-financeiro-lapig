@@ -1,3 +1,5 @@
+import { registroFeito } from '../../frontend/js/components/buriti-tarefas.js';
+
 // Parte pura: escolhe somente os campos do contrato da RPC 054.
 // Validação de conteúdo/PII e autorização continuam no banco.
 export function montarPayloadTarefa(entrada, projectId) {
@@ -40,7 +42,8 @@ export function criarToolsTarefas({ rpc, consultar, centroPorCodigo }) {
       const linhas = await consultar('tarefas', sb => {
         let q = sb.from('tarefas').select('id,project_id,titulo,descricao,responsavel,status,precisa_atencao,' +
           'motivo_atencao,prazo,prazo_motivo,proxima_checagem,criada_em,concluida_em,projects(name,code),' +
-          'tarefa_passos(id,ordem,descricao,quem,estado,confirmado_em,evento_id),' +
+          'tarefa_passos(id,ordem,descricao,quem,estado,confirmado_em,evento_id,' +
+          'feito:tarefa_eventos!ultimo_feito_id(tipo,origem,detalhe)), ' +
           'eventos:tarefa_eventos!tarefa_eventos_tarefa_id_fkey(id,tipo,origem,resumo,detalhe,gmail_thread_id,ocorrido_em,criado_em)')
           .order('prazo', { ascending: true, nullsFirst: false }).order('id')
           .order('ordem', { referencedTable: 'tarefa_passos' })
@@ -51,7 +54,7 @@ export function criarToolsTarefas({ rpc, consultar, centroPorCodigo }) {
         else if (status !== 'todas') q = q.eq('status', status === 'concluidas' ? 'concluida' : status);
         return q;
       });
-      return { tarefas: linhas, truncado: linhas.length === teto,
+      return { tarefas: linhas.map(t => ({ ...t, tarefa_passos: t.tarefa_passos.map(s => ({ ...s, feito: registroFeito(s) })) })), truncado: linhas.length === teto,
         nota: 'Leitura escopada pelo RLS. Eventos limitados aos 10 últimos de cada tarefa; passos sugeridos ainda exigem confirmação humana.' };
     },
   };

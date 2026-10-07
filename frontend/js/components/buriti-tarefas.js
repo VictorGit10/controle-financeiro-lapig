@@ -83,7 +83,52 @@ export function ligadaAutomaticamente(m) {
     && (m.vigia_vinculos || []).some(v => v.estado === 'sugerido');
 }
 
+// Texto livre continua escapado; somente URLs HTTP(S) viram links.
+const escapar = texto => String(texto ?? '').replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+export function textoComLinks(texto) {
+  return String(texto ?? '').split(/(https?:\/\/[^\s<>"']+)/g).map(parte => {
+    if (!/^https?:\/\//.test(parte)) return escapar(parte);
+    const url = parte.replace(/[.,;!?)]+$/, '');
+    try {
+      const parsed = new URL(url);
+      if (!parsed.hostname || parsed.username || parsed.password) return escapar(parte);
+    } catch { return escapar(parte); }
+    return '<a href="' + escapar(url) + '" target="_blank" rel="noopener noreferrer">' +
+      escapar(url) + '</a>' + escapar(parte.slice(url.length));
+  }).join('');
+}
+
+export function validarFeito(nota, link = '') {
+  if (!nota?.trim() || nota.length > 2000) throw new Error('Escreva uma nota de até 2000 caracteres.');
+  const url = link.trim();
+  if (url) {
+    let parsed;
+    try { parsed = new URL(url); } catch { /* mensagem comum abaixo */ }
+    if (url.length > 500 || !/^https:\/\//.test(url) || /\s/.test(url) ||
+      !parsed?.hostname || parsed.username || parsed.password) {
+      throw new Error('Use um link https:// de até 500 caracteres.');
+    }
+  }
+  return { p_nota: nota.trim(), p_link: url || null };
+}
+
+// A FK ultimo_feito_id preserva a evidência mesmo após confirmação e muitos eventos.
+export function registroFeito(passo) {
+  const e = passo.feito;
+  if (e?.origem !== 'humano' || e.tipo !== 'sugestao' || !e.detalhe?.por) return null;
+  const seguro = valor => typeof valor === 'string' && !/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(valor) ? valor : null;
+  const link = seguro(e.detalhe.link);
+  return { nota: seguro(e.detalhe.nota) || '[Retido]', por: seguro(e.detalhe.por) || '[Retido]',
+    link: link && /^https:\/\//.test(link) ? link : null };
+}
+
+export function podeRegistrarFeito(tarefa, usuario, admin = false) {
+  return ['em_andamento', 'aguardando_terceiro'].includes(tarefa.status) &&
+    (admin || Boolean(usuario && tarefa.responsavel_id === usuario));
+}
+
 if (typeof window !== 'undefined') {
   window.BuritiTarefas = { seloPrazo, ordenarTarefas, dataHora, gmailLink, saudeVigia, ESTADOS_PASSO,
-    seloClassificacao, motivoLegivel, ligadaAutomaticamente };
+    seloClassificacao, motivoLegivel, ligadaAutomaticamente, textoComLinks, validarFeito, registroFeito, podeRegistrarFeito };
 }
