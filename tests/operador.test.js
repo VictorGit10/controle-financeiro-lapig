@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lerCredencial, caminhoCredencial } from '../mcp/src/operador.js';
+import { lerCredencial, caminhoCredencial } from '../mcp/src/operador-credencial.js';
 
 describe('credencial do Buriti operador', () => {
   it('prefere o ambiente e cai para o arquivo', () => {
