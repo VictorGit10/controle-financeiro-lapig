@@ -5,7 +5,7 @@ window.BuritiTarefasUI = (() => {
   const ocupados = new Set();
   const CAMPOS = 'id,project_id,titulo,descricao,responsavel,responsavel_id,status,precisa_atencao,motivo_atencao,' +
     'prazo,prazo_motivo,criada_em,concluida_em,projects(name,code),' +
-    'tarefa_passos(id,ordem,descricao,quem,estado,evento_id,' +
+    'tarefa_passos(id,ordem,descricao,quem,executor,estado,evento_id,' +
     'feito:tarefa_eventos!ultimo_feito_id(tipo,origem,detalhe),' +
     'evento:tarefa_eventos!evento_id(resumo,gmail_thread_id,ocorrido_em)),' +
     'eventos:tarefa_eventos!tarefa_eventos_tarefa_id_fkey(id,tipo,origem,resumo,detalhe,gmail_thread_id,ocorrido_em,criado_em)';
@@ -79,13 +79,13 @@ window.BuritiTarefasUI = (() => {
       ${s.estado === 'sugerido' ? `<div class="buriti-bloco buriti-evidencia"><strong>${feito ? `Feito por ${escapeAttr(feito.por)}${Auth.isAdmin() ? ' — confirmar?' : ''}` : 'Evidência sugerida'}</strong>
         <p class="buriti-sub">${f().textoComLinks(feito?.nota || s.evento?.resumo || 'Resumo indisponível.')}</p>
         ${feito?.link ? f().textoComLinks(feito.link) : link(s.evento?.gmail_thread_id)}</div>` : ''}
-      ${editavel && podeFazer ? `<div class="buriti-acoes">${botao('feito', 'Registrar que fiz', s.id, true)}</div>` : ''}
+      ${editavel && podeFazer && s.executor !== 'buriti' ? `<div class="buriti-acoes">${botao('feito', 'Registrar que fiz', s.id, true)}</div>` : ''}
       ${editavel && Auth.isAdmin() ? `<div class="buriti-acoes">${botao('confirmar', 'Confirmar', s.id, true)}${botao('dispensar', 'Dispensar', s.id)}</div>` : ''}
     </li>`;
   }
 
   function eventosHTML(eventos) {
-    return eventos.map(e => '<li><div class="buriti-sub">' + escapeAttr(f().dataHora(e.ocorrido_em)) + ' · ' + escapeAttr(e.origem) +
+    return eventos.map(e => '<li><div class="buriti-sub">' + escapeAttr(f().dataHora(e.ocorrido_em)) + ' · ' + escapeAttr(f().rotuloOrigem(e.origem)) +
       '</div><div>' + f().textoComLinks(e.resumo) + '</div>' + (e.detalhe?.link ? f().textoComLinks(e.detalhe.link) : '') +
       link(e.gmail_thread_id) + '</li>').join('') || '<li>Nenhum evento.</li>';
   }

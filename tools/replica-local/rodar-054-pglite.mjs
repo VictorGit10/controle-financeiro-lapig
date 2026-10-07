@@ -27,7 +27,9 @@ try {
     ('is_agente','is_admin','allowed_project_ids','assert_project_allowed','contem_cpf','bloqueia_escrita_do_agente');`);
   await arquivo('database/054_buriti_tarefas.sql');
   await arquivo('tests/sql/test_054_buriti_tarefas.sql');
-  console.log('054 OK em PGlite. Concorrência entre conexões exige rodar-054.sh/Docker.');
+  await arquivo('database/055_buriti_administra_tarefas.sql');
+  await arquivo('tests/sql/test_055_buriti_administra_tarefas.sql');
+  console.log('054 e 055 OK em PGlite. Concorrência entre conexões exige rodar-054.sh/Docker.');
 } catch (e) {
   console.error(e.message, e.detail || '', e.where || '');
   process.exitCode = 1;

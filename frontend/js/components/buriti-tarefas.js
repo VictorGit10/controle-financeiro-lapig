@@ -128,7 +128,13 @@ export function podeRegistrarFeito(tarefa, usuario, admin = false) {
     (admin || Boolean(usuario && tarefa.responsavel_id === usuario));
 }
 
+// Quem fez cada coisa na linha do tempo, para o Victor e o Arthur: o vigia e o operador são o Buriti.
+const ORIGENS = { buriti: 'Buriti', vigia: 'Buriti (leitura do e-mail)', humano: 'Pessoa', sistema: 'Sistema' };
+export function rotuloOrigem(origem) {
+  return ORIGENS[origem] || origem || '';
+}
+
 if (typeof window !== 'undefined') {
-  window.BuritiTarefas = { seloPrazo, ordenarTarefas, dataHora, gmailLink, saudeVigia, ESTADOS_PASSO,
+  window.BuritiTarefas = { rotuloOrigem, seloPrazo, ordenarTarefas, dataHora, gmailLink, saudeVigia, ESTADOS_PASSO,
     seloClassificacao, motivoLegivel, ligadaAutomaticamente, textoComLinks, validarFeito, registroFeito, podeRegistrarFeito };
 }

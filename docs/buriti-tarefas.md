@@ -177,3 +177,11 @@ escolher o responsável e destaca nome, nota e link para confirmação. O MCP de
 Validação: `npm test`, `npm run lint` e `bash tools/replica-local/rodar-054.sh`.
 Sem Docker, `node tools/replica-local/rodar-054-pglite.mjs` executa o mesmo SQL sintético e asserções de
 RLS/ACL; instalação temporária e limites descritos em `tools/replica-local/README.md`.
+
+## O Buriti conduz (055, 07/10/2026)
+Decisão do Victor: o Buriti cria a tarefa que ele pediu no chat, faz os passos `executor='buriti'`, passa a vez
+ao responsável nos passos de pessoa, confirma com prova clara, cobra e conclui. Age pelo login de automação
+("Buriti operador", o mesmo do vigia), porque o login `agente` não grava (barreira da 051). No MCP: `criar_tarefa`,
+`concluir_meu_passo`, `confirmar_passo`, `anotar_tarefa`, `pedir_atencao`, `concluir_tarefa`; credencial em
+`%USERPROFILE%\.buriti\operador.json` (gravada por `ferramentas/configurar-operador.ps1` da pasta Buriti).
+Na tela, o vigia e o operador aparecem como "Buriti".

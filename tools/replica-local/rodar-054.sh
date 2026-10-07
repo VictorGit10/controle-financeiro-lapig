@@ -180,4 +180,7 @@ do $$ begin
   end if;
 end $$;
 SQL
-echo '054: todas as asserções e os cenários concorrentes passaram no Postgres descartável.'
+# 055 (o Buriti administra as tarefas) sobre o estado final da 054.
+run_sql database/055_buriti_administra_tarefas.sql
+run_sql tests/sql/test_055_buriti_administra_tarefas.sql
+echo '054 e 055: todas as asserções e os cenários concorrentes passaram no Postgres descartável.'

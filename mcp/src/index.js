@@ -28,7 +28,8 @@ import {
   projecaoDeCaixa,
   planoDeTrabalho,
 } from './tools.js';
-import { proporBalancete, listarPropostas, perguntar, proporTarefa, listarTarefas } from './buriti.js';
+import { proporBalancete, listarPropostas, perguntar, proporTarefa, listarTarefas, criarTarefa, concluirMeuPasso,
+  confirmarPasso, anotarTarefa, pedirAtencao, concluirTarefa } from './buriti.js';
 
 // Enquadramento que vale para TODAS as tools. Fica aqui, e não repetido dentro
 // de cada descrição, por dois motivos: o cliente lê isto uma vez no handshake —
@@ -442,6 +443,101 @@ buriti(
   },
   listarTarefas,
   SO_LEITURA
+);
+
+// ── Buriti operador (055): administra as tarefas que o Victor pediu ─────────
+// Login separado (automação, sem acesso financeiro). Regras de uso no AGENTS.md da pasta Buriti:
+// criar só o que o Victor pediu no chat; confirmar passo de pessoa só com prova clara (na dúvida,
+// pedir_atencao); falar sem "ok" só com a equipe interna sobre a tarefa.
+const OPERA = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+
+buriti(
+  'criar_tarefa',
+  {
+    title: 'Criar tarefa (Buriti operador)',
+    description: 'Cria a tarefa que o Victor pediu no chat, já valendo (sem proposta). Passos com executor ' +
+      '"buriti" são do Buriti (ele faz e marca com concluir_meu_passo); "pessoa" são do responsável, que os vê ' +
+      'em Minhas tarefas. `responsavel` é o nome como está no sistema (ex.: "Arthur"). Nunca CPF, e-mail ou ' +
+      'telefone de pessoa física em título, descrição ou passos; endereços técnicos só em evidencia.',
+    inputSchema: {
+      centro_de_custo: z.string().optional().describe('Código do centro de custo (ex.: 30.068).'),
+      project_id: z.string().optional().describe('UUID do projeto, alternativa ao código.'),
+      titulo: z.string().min(1).max(300),
+      descricao: z.string().max(10000).optional(),
+      responsavel: z.string().max(300).optional().describe('Nome do responsável como está no sistema.'),
+      prazo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      prazo_motivo: z.string().max(1000).optional(),
+      passos: z.array(z.object({
+        descricao: z.string().min(1).max(1000),
+        executor: z.enum(['buriti', 'pessoa']).optional().describe('Padrão: pessoa.'),
+        quem: z.string().max(300).optional(),
+        evidencia: z.record(z.string(), z.unknown()).optional().describe('Regra de evidência para o vigia.'),
+      })).min(1).max(50),
+      chaves: z.array(z.object({
+        tipo: z.enum(['thread', 'centro_custo', 'pessoa', 'termo', 'numero']),
+        valor: z.string().min(1).max(300),
+      })).max(100).optional(),
+    },
+  },
+  criarTarefa,
+  OPERA
+);
+
+buriti(
+  'concluir_meu_passo',
+  {
+    title: 'Concluir passo do Buriti',
+    description: 'Marca como feito um passo cujo executor é o Buriti, dizendo o que foi feito.',
+    inputSchema: { passo_id: z.string(), nota: z.string().min(1).max(2000) },
+  },
+  concluirMeuPasso,
+  OPERA
+);
+
+buriti(
+  'confirmar_passo',
+  {
+    title: 'Confirmar passo de pessoa com prova',
+    description: 'Confirma o passo de uma pessoa SÓ com prova clara (ex.: e-mail do Arthur à FUNAPE com o ' +
+      'centro de custo). `prova` diz qual é, sem e-mail ou CPF. Na dúvida, não confirme: use pedir_atencao.',
+    inputSchema: { passo_id: z.string(), prova: z.string().min(1).max(2000) },
+  },
+  confirmarPasso,
+  OPERA
+);
+
+buriti(
+  'anotar_tarefa',
+  {
+    title: 'Anotar ou cobrar na tarefa',
+    description: 'Registra uma nota na linha do tempo. `cobranca: true` registra como cobrança ao responsável ' +
+      '(o aviso a ele vai pelo Correio).',
+    inputSchema: { tarefa_id: z.string(), texto: z.string().min(1).max(2000), cobranca: z.boolean().optional() },
+  },
+  anotarTarefa,
+  OPERA
+);
+
+buriti(
+  'pedir_atencao',
+  {
+    title: 'Pedir a atenção do Victor',
+    description: 'Marca a tarefa com "precisa de você" e o motivo: decisão do Victor, exigência externa, prova duvidosa.',
+    inputSchema: { tarefa_id: z.string(), motivo: z.string().min(1).max(2000) },
+  },
+  pedirAtencao,
+  OPERA
+);
+
+buriti(
+  'concluir_tarefa',
+  {
+    title: 'Concluir tarefa (Buriti operador)',
+    description: 'Conclui a tarefa quando todos os passos estão confirmados ou dispensados.',
+    inputSchema: { tarefa_id: z.string(), nota: z.string().min(1).max(2000) },
+  },
+  concluirTarefa,
+  OPERA
 );
 
 const transporte = new StdioServerTransport();

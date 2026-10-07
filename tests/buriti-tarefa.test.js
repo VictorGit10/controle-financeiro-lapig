@@ -138,3 +138,33 @@ describe('responsável: funções puras e contrato MCP', () => {
     } } })).toEqual({ por: '[Retido]', nota: '[Retido]', link: null });
   });
 });
+
+describe('Buriti operador (055)', () => {
+  it('montarPayloadTarefa leva o executor e recusa valor desconhecido', () => {
+    const p = montarPayloadTarefa({ titulo: 'T', passos: [{ descricao: 'a', executor: 'buriti' }, { descricao: 'b' }] }, 'pid');
+    expect(p.passos[0].executor).toBe('buriti');
+    expect(p.passos[1].executor).toBeUndefined();
+    expect(() => montarPayloadTarefa({ titulo: 'T', passos: [{ descricao: 'a', executor: 'robo' }] }, 'pid')).toThrow(/Executor/);
+  });
+  it('criarTarefa usa o login do operador e passa o responsável pelo nome, fora do payload', async () => {
+    const rpcOperador = vi.fn().mockResolvedValue('t1');
+    const rpc = vi.fn();
+    const tools = criarToolsTarefas({ rpc, consultar: vi.fn(), centroPorCodigo: vi.fn().mockResolvedValue({ id: 'pid' }), rpcOperador });
+    const r = await tools.criarTarefa({ centro_de_custo: '30.068', titulo: 'T', responsavel: 'Arthur', passos: [{ descricao: 'a' }] });
+    expect(r.tarefa_id).toBe('t1');
+    expect(rpc).not.toHaveBeenCalled();
+    expect(rpcOperador).toHaveBeenCalledWith('buriti_criar_tarefa', { p: { project_id: 'pid', titulo: 'T', passos: [{ descricao: 'a' }] }, p_responsavel: 'Arthur' });
+  });
+  it('as demais ações exigem ids e textos e chamam a RPC certa', async () => {
+    const rpcOperador = vi.fn().mockResolvedValue(null);
+    const t = criarToolsTarefas({ rpc: vi.fn(), consultar: vi.fn(), centroPorCodigo: vi.fn(), rpcOperador });
+    await t.concluirMeuPasso({ passo_id: 'p1', nota: 'feito' });
+    await t.confirmarPasso({ passo_id: 'p2', prova: 'e-mail à FUNAPE' });
+    await t.anotarTarefa({ tarefa_id: 't', texto: 'cobrei', cobranca: true });
+    await t.pedirAtencao({ tarefa_id: 't', motivo: 'decisão' });
+    await t.concluirTarefa({ tarefa_id: 't', nota: 'fim' });
+    expect(rpcOperador.mock.calls.map(c => c[0])).toEqual(['buriti_concluir_passo', 'buriti_confirmar_passo', 'buriti_anotar', 'buriti_pedir_atencao', 'buriti_concluir_tarefa']);
+    expect(rpcOperador.mock.calls[2][1]).toEqual({ p_tarefa: 't', p_texto: 'cobrei', p_cobranca: true });
+    await expect(t.confirmarPasso({ passo_id: 'p2', prova: ' ' })).rejects.toThrow(/prova/);
+  });
+});

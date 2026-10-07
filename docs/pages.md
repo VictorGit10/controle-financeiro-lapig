@@ -249,3 +249,8 @@ Aba de conversa sobre os dados. A página é fina de propósito: junta o laço (
 - **Banner de indisponível** — se a Edge Function não estiver publicada, a tela diz o comando do deploy em vez de falhar em silêncio, com botão "Tentar de novo".
 
 **Globais usadas:** `CFAgent`, `CFTools`, `CFMarkdown`, `escapeAttr`, `showToast`, `supabaseClient` (indiretamente, pelas tools), `Router`.
+
+### Usuários — Buriti operador (055)
+Professor (não o próprio admin) pode virar **Buriti operador** (`set_automacao(..., 'vigia', true)`), com confirmação:
+perde os centros de custo e não volta a professor pela tela. Para o operador, o modal só liga/desliga. Na aba Tarefas
+e em Minhas tarefas, passo com `executor='buriti'` não tem "Registrar que fiz"; a linha do tempo mostra "Buriti".

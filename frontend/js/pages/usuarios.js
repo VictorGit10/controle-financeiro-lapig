@@ -36,13 +36,14 @@ const UsuariosPage = (() => {
   }
 
   async function refresh() {
-    const [usersRes, upRes, projRes] = await Promise.all([
+    const [usersRes, upRes, projRes, autoRes] = await Promise.all([
       supabaseClient.from('app_users')
         .select('user_id, role, display_name, email, created_at')
         .order('role')
         .order('email'),
       supabaseClient.from('user_projects').select('user_id, project_id'),
       supabaseClient.from('projects').select('id, name, code, active').order('name'),
+      supabaseClient.from('automacoes').select('user_id, ativo'),
     ]);
 
     if (usersRes.error) { showToast('Erro ao carregar usuários: ' + usersRes.error.message, 'error'); return; }
@@ -56,7 +57,9 @@ const UsuariosPage = (() => {
     (upRes.data || []).forEach(r => {
       (assigned[r.user_id] = assigned[r.user_id] || new Set()).add(r.project_id);
     });
-    users.forEach(u => { u._projectIds = assigned[u.user_id] || new Set(); });
+    // automacoes (054) é só do admin; se falhar, o badge só não diz "desligado".
+    const ativos = new Map((autoRes.error ? [] : autoRes.data || []).map(a => [a.user_id, a.ativo]));
+    users.forEach(u => { u._projectIds = assigned[u.user_id] || new Set(); u._ativo = ativos.get(u.user_id); });
 
     renderPage();
   }
@@ -87,14 +90,16 @@ const UsuariosPage = (() => {
         ? '<span class="badge badge--active">Administrador</span>'
         : u.role === 'agente'
           ? '<span class="badge badge--warning">Agente (Buriti)</span>'
-          : '<span class="badge badge--info">Professor</span>';
+          : u.role === 'automacao'
+            ? `<span class="badge badge--warning">Buriti operador${u._ativo === false ? ' (desligado)' : ''}</span>`
+            : '<span class="badge badge--info">Professor</span>';
       const name = u.display_name || nameFromEmail(u.email) || '—';
       return `
         <tr>
           <td style="font-weight:600;">${escapeAttr(name)}</td>
           <td style="color:var(--text-secondary);">${escapeAttr(u.email || '—')}</td>
           <td>${roleBadge}</td>
-          <td style="text-align:center;">${u.role === 'admin' ? '<span style="color:var(--text-muted);">—</span>' : projCount}</td>
+          <td style="text-align:center;">${['admin', 'automacao'].includes(u.role) ? '<span style="color:var(--text-muted);">—</span>' : projCount}</td>
           <td style="font-size:0.8rem;color:var(--text-secondary);">${u.created_at ? formatDate(u.created_at.substring(0, 10)) : '—'}</td>
           <td>
             <button class="btn btn--ghost btn--sm" onclick="UsuariosPage.openEdit('${escapeAttrJs(u.user_id)}')" title="Editar atribuições">
@@ -155,6 +160,27 @@ const UsuariosPage = (() => {
         <span>${escapeAttr(p.name)}${p.code ? ' — ' + escapeAttr(p.code) : ''}${p.active === false ? ' <span class="badge badge--ended" style="font-size:0.6rem;">Inativo</span>' : ''}</span>
       </label>`).join('');
 
+    // Buriti operador (mig. 054/055): sem centros de custo; aqui só liga/desliga.
+    if (user.role === 'automacao') {
+      createModal({
+        title: 'Buriti operador',
+        bodyHTML: `<p>Login de automação do Buriti: administra as tarefas e lê os e-mails pelo vigia. Não vê saldos,
+          bolsistas nem arquivos.</p>
+          <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="user-automacao-ativo"
+            ${user._ativo === false ? '' : 'checked'} style="width:18px;height:18px;accent-color:var(--accent);"> Ligado</label>
+          <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:8px;">Desligar corta na hora o acesso do Buriti às tarefas.</p>`,
+        saveLabel: 'Salvar',
+        onSave: async () => {
+          const ativo = document.getElementById('user-automacao-ativo').checked;
+          const { error } = await supabaseClient.rpc('set_automacao', { p_user: userId, p_nome: 'vigia', p_ativo: ativo });
+          if (error) throw new Error('Erro ao salvar: ' + error.message);
+          showToast(ativo ? 'Buriti operador ligado.' : 'Buriti operador desligado.', 'success');
+          await refresh();
+        },
+      });
+      return;
+    }
+
     createModal({
       title: `Editar usuário — ${escapeAttr(user.display_name || nameFromEmail(user.email) || user.email || '—')}`,
       bodyHTML: `
@@ -164,6 +190,7 @@ const UsuariosPage = (() => {
             <option value="professor" ${user.role === 'professor' ? 'selected' : ''}>Professor — vê apenas os centros de custo atribuídos</option>
             <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador — acesso total</option>
             <option value="agente" ${user.role === 'agente' ? 'selected' : ''}>Agente (Buriti) — lê os centros atribuídos e só cria propostas</option>
+            ${user.role === 'professor' && !isSelf ? '<option value="automacao">Buriti operador (automação) — administra tarefas, sem acesso a projetos</option>' : ''}
           </select>
           ${user.role === 'agente' ? '<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;">Papel travado: tirar alguém do papel de agente dá a uma IA poder de gravar, e só se faz no SQL Editor, de propósito (mig. 051). Aqui se ajusta só o escopo.</p>' : ''}
           ${isSelf ? '<p style="font-size:0.8rem;color:var(--warning);margin-top:4px;">Você não pode remover seu próprio acesso de administrador por aqui.</p>' : ''}
@@ -188,6 +215,15 @@ const UsuariosPage = (() => {
         // Evita lockout: o admin não pode rebaixar a si mesmo por aqui.
         if (isSelf && role !== 'admin') {
           throw new Error('Você não pode remover seu próprio acesso de administrador. Peça a outro administrador para alterar seu papel.');
+        }
+        if (role === 'automacao') {
+          // Login dedicado: a conversão tira todos os centros de custo e não tem volta pela tela (mig. 054).
+          if (!confirm('Transformar este login no Buriti operador? Ele perde todos os centros de custo e não volta a ser professor.')) return false;
+          const { error } = await supabaseClient.rpc('set_automacao', { p_user: userId, p_nome: 'vigia', p_ativo: true });
+          if (error) throw new Error('Erro ao salvar: ' + error.message);
+          showToast('Login transformado no Buriti operador.', 'success');
+          await refresh();
+          return;
         }
         const projectIds = Array.from(document.querySelectorAll('.user-proj-check:checked')).map(cb => cb.value);
 

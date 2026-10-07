@@ -39,9 +39,10 @@ const ESPERADAS = [
   'quem_sou_eu',
 ];
 
-// Buriti (mig. 051 e 054): as únicas que escrevem — e só PROPOSTAS. Três declaram
+// Buriti (mig. 051, 054 e 055): as únicas que escrevem — propostas e, pelo login do operador, tarefas. Todas declaram
 // escrita sem ser destrutivas; listar_propostas e tarefas são leitura.
-const BURITI_ESCRITA = ['propor_balancete', 'perguntar', 'propor_tarefa'];
+const BURITI_ESCRITA = ['propor_balancete', 'perguntar', 'propor_tarefa', 'criar_tarefa', 'concluir_meu_passo',
+  'confirmar_passo', 'anotar_tarefa', 'pedir_atencao', 'concluir_tarefa'];
 const BURITI = [...BURITI_ESCRITA, 'listar_propostas', 'tarefas'];
 
 // Sem herdar as CF_* do ambiente: se elas vazassem para cá, o teste "sem
@@ -64,7 +65,7 @@ const { tools } = await cliente.listTools();
 const nomes = tools.map((t) => t.name).sort();
 const faltando = [...ESPERADAS, ...BURITI].filter((n) => !nomes.includes(n));
 conferir(
-  'servidor anuncia exatamente as 9 tools de leitura + 5 do Buriti',
+  'servidor anuncia exatamente as 9 tools de leitura + 11 do Buriti',
   faltando.length === 0 && tools.length === ESPERADAS.length + BURITI.length,
   faltando.length ? `faltando: ${faltando.join(', ')}` : `${tools.length} tools`
 );
