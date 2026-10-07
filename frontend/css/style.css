@@ -2267,6 +2267,15 @@ img { max-width: 100%; display: block; }
 .buriti-sub { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
 .buriti-acoes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: var(--sp-3); }
 .buriti-acoes .btn { min-height: 44px; }
+.buriti-titulo { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.buriti-cartao__topo { flex-wrap: wrap; }
+.buriti-passos { margin: var(--sp-4) 0; }
+.buriti-passo { border-bottom: 1px solid var(--border-default); padding-bottom: var(--sp-3); }
+.buriti-evidencia { margin-top: var(--sp-2); }
+.buriti-rotina { margin-top: var(--sp-4); }
+.buriti-rotina > .buriti-coluna { margin-top: var(--sp-3); }
+.buriti-cartao .form-input { width: 100%; }
+.buriti-cartao a { overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .buriti-acoes { flex-direction: column; }
   .buriti-acoes .btn { width: 100%; justify-content: center; }

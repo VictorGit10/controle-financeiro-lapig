@@ -145,6 +145,48 @@ Página **experimental** (somente leitura) que agrega numa tela só os 4 KPIs-ch
 - **Link para a pasta do Drive** — quando `projects.drive_folder_url` está preenchido (mig. 041), o cabeçalho mostra um botão que abre a pasta do projeto no Google Drive.
 - **Fontes** — `projects`, `scholarships`, `calc_project_monthly`, `get_previsto_vs_realizado`, `monitoramento` (carregadas em paralelo com `Promise.all`).
 
+## BuritiPage (`buriti.js`, `buriti-tarefas.js`)
+
+Página em cartões para uso no celular, com três abas: **Propostas**, **Tarefas** e
+**Triagem** (só admin). A migração 054 é o contrato; não há escrita direta em tabelas.
+
+- **Propostas** mantém os filtros Pendentes/Decididas, revisão de balancete pela
+  `ImportQueue`, respostas e rejeições. Proposta `tipo='tarefa'` mostra descrição,
+  responsável, prazo e passos; **Criar tarefa** chama `aplicar_proposta_tarefa(p_id)`.
+- **Tarefas** lista abertas (`em_andamento`/`aguardando_terceiro`) ou concluídas,
+  ordenadas por prazo, com tarefas sem prazo ao fim. Cada cartão mostra o selo de
+  prazo, `precisa_atencao`/motivo, passos com seus quatro estados e evidência do
+  evento associado ao passo sugerido. Confirmar/Dispensar chama
+  `confirmar_passo(p_passo,p_nota)`/`dispensar_passo(p_passo,p_nota)`; Nota chama
+  `registrar_nota(p_tarefa,p_texto)`; Concluir pede confirmação e chama
+  `concluir_tarefa(p_tarefa,p_nota)` (o banco exige todos os passos decididos).
+  Linha do tempo recolhida mostra os 10 últimos eventos por tarefa, com links Gmail.
+- **Triagem** prioriza mensagens `esclarecer` e qualquer mensagem com vínculo
+  `sugerido`, inclusive se a fila dela for rotina. Os vínculos são N:N em
+  `vigia_vinculos`; cada Aceitar/Não é desta tarefa chama
+  `vincular_mensagem(p_msg,p_tarefa,p_aceitar)` para aquele par. Aceitar também
+  revisa a fila para `tarefa`. Mensagens sem candidato podem ser vinculadas a uma
+  tarefa aberta. **É rotina** rejeita os pares ainda sugeridos e chama
+  `revisar_mensagem(p_msg,p_fila)`; a auditoria dos últimos 7 dias fica recolhida,
+  com ação para devolver à revisão. Operações compostas são sequenciais: uma
+  falha preserva os efeitos já gravados, recarrega o cartão e mostra o erro.
+- **Saúde do vigia** usa a última `vigia_execucoes` de tipo `checagem` com
+  `terminada_em` preenchida; mais de 2 horas destaca atraso, ausência real destaca
+  que nunca rodou, e falha de consulta tem banner. A 054 só permite ao admin ler
+  execuções: professores veem explicitamente a saúde indisponível para seu perfil,
+  sem interpretar a lista vazia do RLS como executor parado.
+
+Consultas de tarefas e filas são paginadas. Ações recarregam só o cartão afetado;
+erros ficam no cartão e consultas parciais da triagem informam qual fonte falhou.
+Datas, selos, ordenação e links vivem no módulo ES testável
+`js/components/buriti-tarefas.js` (bridge `window.BuritiTarefas`); o adaptador humano
+é `window.BuritiTarefasUI`. Testes Vitest com happy-dom cobrem render e ações.
+
+No MCP, `propor_tarefa` e `tarefas` são registradas com `buriti(...)` e continuam
+ausentes do Assistente do site. A proposta resolve UUID/código do centro e envia
+`propor_tarefa({p: payload})`; a leitura usa tarefas/passos/eventos no escopo RLS,
+sem ler mensagens, remetentes ou endereços técnicos das regras de evidência.
+
 ## UsuariosPage (`usuarios.js`) — admin-only
 
 Gerencia o **papel** (admin/professor) e os **centros de custo** permitidos por usuário. Rota `usuarios`, bloqueada pelo guard em `app.js` e oculta no sidebar (`data-admin`) para professores.

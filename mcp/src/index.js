@@ -28,7 +28,7 @@ import {
   projecaoDeCaixa,
   planoDeTrabalho,
 } from './tools.js';
-import { proporBalancete, listarPropostas, perguntar } from './buriti.js';
+import { proporBalancete, listarPropostas, perguntar, proporTarefa, listarTarefas } from './buriti.js';
 
 // Enquadramento que vale para TODAS as tools. Fica aqui, e não repetido dentro
 // de cada descrição, por dois motivos: o cliente lê isto uma vez no handshake —
@@ -303,11 +303,10 @@ tool(
   quemSouEu
 );
 
-// ── Buriti: as únicas tools que escrevem — e só PROPOSTAS ──────────────────
+// ── Buriti: propostas e acompanhamento, exclusivos do MCP ─────────────────
 // Registradas com `buriti(...)` e não `tool(...)` de propósito: existem só no
 // MCP, nunca no Assistente do site (tests/ai-tools.test.js confere as duas
-// coisas). Só funcionam com login de papel `agente` (mig. 051); com outro
-// login, criar_proposta responde "Só o agente cria propostas".
+// coisas). As escritas exigem papel agente; a leitura segue o RLS do login.
 const PROPOE = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
 function buriti(nome, config, handler, annotations = PROPOE) {
@@ -394,6 +393,55 @@ buriti(
     },
   },
   perguntar
+);
+
+buriti(
+  'propor_tarefa',
+  {
+    title: 'Propor tarefa (Buriti)',
+    description: 'Propõe uma tarefa com projeto, prazo, passos e chaves de ligação. A tarefa só existe ' +
+      'depois que o Victor aplica a proposta na página Buriti. Nunca incluir CPF, e-mail ou telefone ' +
+      'de pessoa física em títulos, descrições, responsáveis ou chaves: use pseudônimos. ' +
+      'Endereços técnicos em evidencia servem só à regra de direção do vigia. Não confirma passos nem conclui tarefas.',
+    inputSchema: {
+      project_id: z.string().optional().describe('UUID do projeto ou código do centro; obrigatório se centro_de_custo faltar.'),
+      centro_de_custo: z.string().optional().describe('Código do centro de custo (ex.: 30.068), alternativa a project_id.'),
+      titulo: z.string().min(1).max(300).describe('Título mascarado da tarefa.'),
+      descricao: z.string().max(10000).optional().describe('Contexto da tarefa, sem dados pessoais.'),
+      responsavel: z.string().max(300).optional().describe('Pseudônimo do responsável.'),
+      prazo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Prazo opcional em AAAA-MM-DD.'),
+      prazo_motivo: z.string().max(1000).optional().describe('Motivo do prazo.'),
+      passos: z.array(z.object({
+        descricao: z.string().min(1).max(1000).describe('O que precisa ser feito.'),
+        quem: z.string().max(300).optional().describe('Pseudônimo de quem executa o passo.'),
+        evidencia: z.record(z.string(), z.unknown()).optional().describe('Regra JSON de evidência avaliada pelo vigia; não é confirmação.'),
+      })).min(1).max(50).describe('Passos em ordem de execução.'),
+      chaves: z.array(z.object({
+        tipo: z.enum(['thread', 'centro_custo', 'pessoa', 'termo', 'numero']).describe('Tipo de chave de ligação.'),
+        valor: z.string().min(1).max(300).describe('Valor da chave, mascarado.'),
+      })).max(100).optional().describe('Chaves para ligar mensagens à tarefa.'),
+    },
+  },
+  proporTarefa,
+  { ...PROPOE, idempotentHint: false }
+);
+
+buriti(
+  'tarefas',
+  {
+    title: 'Acompanhar tarefas do Buriti',
+    description: 'Lista tarefas visíveis no escopo do login, abertas por padrão, com todos os passos ' +
+      'e os 10 últimos eventos de cada tarefa. Não lê mensagens ou remetentes do vigia. ' +
+      'Passo sugerido é interpretação de evidência: só o humano confirma ou dispensa e conclui a tarefa.',
+    inputSchema: {
+      project_id: z.string().optional().describe('UUID ou código do centro de custo para filtrar.'),
+      centro_de_custo: z.string().optional().describe('Código do centro de custo para filtrar.'),
+      status: z.enum(['abertas', 'concluidas', 'cancelada', 'todas']).optional().describe('Padrão: abertas (em andamento ou aguardando terceiro).'),
+      limite: z.number().int().positive().max(200).optional().describe('Quantidade máxima de tarefas; padrão 50, máximo 200.'),
+    },
+  },
+  listarTarefas,
+  SO_LEITURA
 );
 
 const transporte = new StdioServerTransport();

@@ -16,8 +16,11 @@ import path from 'node:path';
 
 import { textoDoPdf, montarPropostaBalancete, DATA } from './buriti-proposta.js';
 import { rpc, consultar, armazenar } from './client.js';
+import { criarToolsTarefas } from './buriti-tarefa.js';
 
 export const BUCKET = 'propostas-agente';
+
+export const { proporTarefa, listarTarefas } = criarToolsTarefas({ rpc, consultar, centroPorCodigo });
 
 async function mapaAtivo() {
   return consultar('mapa conta → rubrica', (sb) =>

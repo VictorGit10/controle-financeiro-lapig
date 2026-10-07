@@ -77,7 +77,7 @@ describe('lista de tools', () => {
   // site é o humano, que aplica — não propõe para si mesmo.
   it('as tools do Buriti existem no MCP e não no site', () => {
     const doBuriti = [...fonteMcp.matchAll(/\bburiti\(\s*'([a-z_]+)'/g)].map((m) => m[1]).sort();
-    expect(doBuriti).toEqual(['listar_propostas', 'perguntar', 'propor_balancete']);
+    expect(doBuriti).toEqual(['listar_propostas', 'perguntar', 'propor_balancete', 'propor_tarefa', 'tarefas']);
     const noSite = TOOLS.map((t) => t.nome);
     for (const nome of doBuriti) expect(noSite).not.toContain(nome);
   });

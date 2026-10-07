@@ -1,0 +1,43 @@
+[
+  {
+    "gmail_message_id":"DEMO-M1", "gmail_thread_id":"T1", "recebida_em":"2026-10-06T09:00:00-03:00",
+    "de":"Victor <victor@exemplo.invalid>", "para":"Arthur <arthur@exemplo.invalid>", "cc":"",
+    "assunto":"Implantar 2 meses de bolsa do Otávio no 30.068",
+    "corpo":"Arthur, atualize o quadro de bolsistas, cadastre no Conecta e envie à Ranielly da FUNAPE os 2 meses de bolsa do Otávio no centro 30.068. Copie a mim e ao Prof. Manuel no envio.",
+    "headers":{}, "anexos":0
+  },
+  {
+    "gmail_message_id":"DEMO-M2", "gmail_thread_id":"DEMO-AGENDA", "recebida_em":"2026-10-06T09:05:00-03:00",
+    "de":"Equipe Exemplo <equipe@exemplo.invalid>", "para":"victor@exemplo.invalid", "cc":"",
+    "assunto":"Aceito: reunião da equipe", "corpo":"Aceitei o convite para a reunião da equipe.",
+    "headers":{"Content-Type":"text/calendar; method=REPLY"}, "anexos":0
+  },
+  {
+    "gmail_message_id":"DEMO-M3", "gmail_thread_id":"DEMO-NEWSLETTER", "recebida_em":"2026-10-06T09:10:00-03:00",
+    "de":"Boletim <boletim@exemplo.invalid>", "para":"victor@exemplo.invalid", "cc":"",
+    "assunto":"Boletim semanal de novidades", "corpo":"Confira as novidades da semana em nosso boletim.",
+    "headers":{"List-Id":"boletim.exemplo.invalid","List-Unsubscribe":"<https://exemplo.invalid/sair>","Precedence":"bulk"}, "anexos":0
+  },
+  {
+    "gmail_message_id":"DEMO-M4", "gmail_thread_id":"T2", "recebida_em":"2026-10-06T10:00:00-03:00",
+    "de":"Arthur <arthur@exemplo.invalid>", "para":"Ranielly <ranielly@funape.org.br>",
+    "cc":"Victor <victor@exemplo.invalid>, Prof. Manuel <manuel@ufg.br>",
+    "assunto":"Quadro de bolsistas atualizado · 30.068",
+    "corpo":"Ranielly, segue o quadro de bolsistas do 30.068 atualizado com 2 meses do Otávio. Copio o Victor e o Prof. Manuel para acompanhamento.",
+    "headers":{}, "anexos":1
+  },
+  {
+    "gmail_message_id":"DEMO-M5", "gmail_thread_id":"T2", "recebida_em":"2026-10-06T10:30:00-03:00",
+    "de":"Ranielly <ranielly@funape.org.br>", "para":"Arthur <arthur@exemplo.invalid>",
+    "cc":"Victor <victor@exemplo.invalid>, Prof. Manuel <manuel@ufg.br>",
+    "assunto":"Re: Quadro de bolsistas atualizado · 30.068",
+    "corpo":"Arthur, para implantar os 2 meses do Otávio no 30.068, é necessário enviar a justificativa do coordenador assinada. Aguardo esse documento para prosseguir.",
+    "headers":{}, "anexos":0
+  },
+  {
+    "gmail_message_id":"DEMO-M6", "gmail_thread_id":"DEMO-TJGO", "recebida_em":"2026-10-06T11:00:00-03:00",
+    "de":"Protocolo TJGO <protocolo@tjgo.jus.br>", "para":"victor@exemplo.invalid", "cc":"",
+    "assunto":"Consulta sobre participação em evento", "corpo":"Solicitamos informar se há interesse em participar do encontro sobre atendimento institucional. Este assunto é independente da implantação de bolsas.",
+    "headers":{}, "anexos":0
+  }
+]

@@ -25,6 +25,10 @@ Router.register('buriti', {
 const BuritiPage = (() => {
 
   let containerEl = null;
+  let contentEl = null;
+  let secao = 'propostas';
+  let carga = 0;
+  const ocupados = new Set();
   let aba = 'pendentes';      // 'pendentes' | 'decididas'
   let propostas = [];
 
@@ -33,6 +37,7 @@ const BuritiPage = (() => {
     bolsas:    { icone: 'file-spreadsheet', rotulo: 'Bolsas' },
     pergunta:  { icone: 'message-circle-question', rotulo: 'Pergunta' },
     aviso:     { icone: 'bell',           rotulo: 'Aviso' },
+    tarefa:    { icone: 'list-checks',     rotulo: 'Tarefa' },
   };
   const STATUS = {
     pendente:   ['badge--warning', 'Pendente'],
@@ -48,22 +53,47 @@ const BuritiPage = (() => {
 
   async function load(container) {
     containerEl = container;
-    await refresh();
+    secao = 'propostas';
+    aba = 'pendentes';
+    await trocarSecao(secao);
+  }
+
+  async function trocarSecao(nova) {
+    if (nova === 'triagem' && !Auth.isAdmin()) return;
+    carga++;
+    window.BuritiTarefasUI.sair();
+    secao = nova;
+    containerEl.innerHTML = `<div class="buriti-pagina">
+      <p class="buriti-intro">O <strong>Buriti</strong> propõe; você revisa, aplica e acompanha.</p>
+      <div data-saude><p class="buriti-sub">Consultando saúde do vigia…</p></div>
+      <div class="buriti-abas" role="tablist" aria-label="Buriti">
+        ${[['propostas', 'Propostas'], ['tarefas', 'Tarefas'], ...(Auth.isAdmin() ? [['triagem', 'Triagem']] : [])].map(([s, nome]) =>
+          `<button role="tab" aria-selected="${secao === s}" class="btn ${secao === s ? 'btn--primary' : 'btn--ghost'}" onclick="BuritiPage.trocarSecao('${s}')">${nome}</button>`).join('')}
+      </div><div data-conteudo role="tabpanel"></div></div>`;
+    contentEl = containerEl.querySelector('[data-conteudo]');
+    const saude = window.BuritiTarefasUI.saude(containerEl.querySelector('[data-saude]'));
+    if (secao === 'tarefas') await window.BuritiTarefasUI.tarefas(contentEl);
+    else if (secao === 'triagem') await window.BuritiTarefasUI.triagem(contentEl);
+    else await refresh();
+    await saude;
   }
 
   async function refresh() {
-    containerEl.innerHTML = '<div class="skeleton skeleton--card" style="height:200px;"></div>';
+    if (secao !== 'propostas') return;
+    const vez = ++carga;
+    contentEl.innerHTML = '<div class="skeleton skeleton--card" style="height:200px;"></div>';
     const campos = aba === 'pendentes'
       ? 'id,tipo,project_id,chave,resumo,payload,arquivo_path,status,criada_em,projects(name,code)'
-      : 'id,tipo,project_id,chave,resumo,status,criada_em,decidida_em,motivo,projects(name,code)';
+      : 'id,tipo,project_id,chave,resumo,payload,status,criada_em,decidida_em,motivo,projects(name,code)';
     let q = supabaseClient.from('propostas_agente').select(campos)
       .order('criada_em', { ascending: false }).limit(aba === 'pendentes' ? 100 : 50);
     q = aba === 'pendentes' ? q.eq('status', 'pendente') : q.neq('status', 'pendente');
     const { data, error } = await q;
+    if (vez !== carga || secao !== 'propostas') return;
 
     if (error) {
       // Tabela ausente = migração 051 não aplicada. Falha nunca vira "caixa vazia".
-      containerEl.innerHTML = `
+      contentEl.innerHTML = `
         <div class="alert-banner alert-banner--warning">
           <i data-lucide="alert-triangle" class="alert-banner__icon"></i>
           <div class="alert-banner__body">
@@ -136,6 +166,7 @@ const BuritiPage = (() => {
     const acoes = p.status !== 'pendente' ? '' : `
       <div class="buriti-acoes">
         ${p.tipo === 'balancete' ? `<button class="btn btn--primary" onclick="BuritiPage.revisar('${id}')"><i data-lucide="clipboard-check"></i> Revisar e aplicar</button>` : ''}
+        ${p.tipo === 'tarefa' ? `<button class="btn btn--primary" onclick="BuritiPage.criarTarefa('${id}')"><i data-lucide="list-checks"></i> Criar tarefa</button>` : ''}
         ${p.tipo === 'pergunta' || p.tipo === 'aviso' ? `<button class="btn btn--primary" onclick="BuritiPage.responder('${id}')"><i data-lucide="reply"></i> ${p.tipo === 'aviso' ? 'Ciente' : 'Responder'}</button>` : ''}
         <button class="btn btn--secondary" onclick="BuritiPage.rejeitar('${id}')"><i data-lucide="x-circle"></i> Rejeitar</button>
       </div>`;
@@ -145,18 +176,62 @@ const BuritiPage = (() => {
         ${p.motivo ? ` — <em>${escapeAttr(p.motivo)}</em>` : ''}
       </div>`;
     return `
-      <article class="card buriti-cartao fade-in">
+      <article class="card buriti-cartao fade-in" data-proposta="${escapeAttr(p.id)}">
         <header class="buriti-cartao__topo">
           <span class="buriti-cartao__tipo"><i data-lucide="${t.icone}"></i> ${t.rotulo}</span>
           <span class="badge ${cls}">${rot}</span>
         </header>
         <div class="buriti-cartao__centro">${centroHTML(p)}</div>
         <p class="buriti-cartao__resumo">${escapeAttr(p.resumo)}</p>
+        ${p.tipo === 'tarefa' ? resumoTarefaHTML(p.payload) : ''}
         ${p.status === 'pendente' ? perguntasHTML(p) + avisosHTML(p) : ''}
         <div class="buriti-sub">Proposta em ${dataHora(p.criada_em)}</div>
         ${decisao}
+        <div data-erro></div>
         ${acoes}
       </article>`;
+  }
+
+  function resumoTarefaHTML(p = {}) {
+    const selo = window.BuritiTarefas.seloPrazo(p.prazo);
+    return `<div class="buriti-bloco"><span class="badge ${selo.classe}">${selo.texto}</span>
+      ${p.prazo ? `<div class="buriti-sub">Prazo: ${escapeAttr(p.prazo.split('-').reverse().join('/'))}</div>` : ''}
+      ${p.prazo_motivo ? `<p class="buriti-sub">${escapeAttr(p.prazo_motivo)}</p>` : ''}
+      ${p.descricao ? `<p>${escapeAttr(p.descricao)}</p>` : ''}
+      ${p.responsavel ? `<p class="buriti-sub">Responsável: ${escapeAttr(p.responsavel)}</p>` : ''}
+      <ol class="buriti-lista">${(p.passos || []).map((s, i) => `<li>${i + 1}. ${escapeAttr(s.descricao)}${s.quem ? ` · ${escapeAttr(s.quem)}` : ''}</li>`).join('')}</ol></div>`;
+  }
+
+  function erroCartao(id, e) {
+    const node = [...contentEl.querySelectorAll('[data-proposta]')].find(n => n.dataset.proposta === id);
+    if (node) {
+      node.querySelector('[data-erro]').innerHTML = `<div class="alert-banner alert-banner--warning" role="alert">
+        <div>Não foi possível completar a ação. ${escapeAttr(e.message)}</div></div>`;
+    }
+  }
+
+  async function atualizarProposta(id) {
+    const { data, error } = await supabaseClient.from('propostas_agente')
+      .select('id,tipo,project_id,chave,resumo,payload,status,criada_em,decidida_em,motivo,projects(name,code)').eq('id', id).single();
+    if (error) throw new Error(error.message);
+    propostas = propostas.map(p => p.id === id ? data : p);
+    const node = [...contentEl.querySelectorAll('[data-proposta]')].find(n => n.dataset.proposta === id);
+    if (!node || secao !== 'propostas') return;
+    if (aba === 'pendentes' && data.status !== 'pendente') node.remove();
+    else node.outerHTML = cartaoHTML(data);
+    lucide.createIcons();
+  }
+
+  async function criarTarefa(id) {
+    if (ocupados.has(id)) return;
+    ocupados.add(id);
+    try {
+      const { error } = await supabaseClient.rpc('aplicar_proposta_tarefa', { p_id: id });
+      if (error) throw new Error(error.message);
+      await atualizarProposta(id);
+      showToast('Tarefa criada. Acompanhe na aba Tarefas.', 'success');
+    } catch (e) { erroCartao(id, e); }
+    finally { ocupados.delete(id); }
   }
 
   function render() {
@@ -168,20 +243,14 @@ const BuritiPage = (() => {
          </div>`
       : `<div class="empty-state" style="padding:var(--sp-6);"><p class="empty-state__text">Nenhuma decisão ainda.</p></div>`;
 
-    containerEl.innerHTML = `
-      <div class="buriti-pagina">
-        <p class="buriti-intro">
-          O <strong>Buriti</strong> confere os documentos e <strong>propõe</strong>; quem aplica é você.
-          Ele não grava nenhum número sozinho.
-        </p>
-        <div class="buriti-abas" role="tablist">
+    contentEl.innerHTML = `
+        <div class="buriti-abas" role="group" aria-label="Filtro de propostas">
           <button class="btn ${aba === 'pendentes' ? 'btn--primary' : 'btn--ghost'} btn--sm" onclick="BuritiPage.trocarAba('pendentes')">
             Pendentes${aba === 'pendentes' ? ` (${propostas.length})` : ''}
           </button>
           <button class="btn ${aba === 'decididas' ? 'btn--primary' : 'btn--ghost'} btn--sm" onclick="BuritiPage.trocarAba('decididas')">Decididas</button>
         </div>
-        <div class="buriti-coluna">${propostas.length ? propostas.map(cartaoHTML).join('') : vazio}</div>
-      </div>`;
+        <div class="buriti-coluna">${propostas.length ? propostas.map(cartaoHTML).join('') : vazio}</div>`;
     lucide.createIcons();
   }
 
@@ -191,10 +260,10 @@ const BuritiPage = (() => {
     try {
       await PlanoTrabalhoPage.revisarPropostaBalancete(p, (resumo) => {
         if (resumo?.saved) showToast('Balancete gravado e proposta marcada como aplicada.', 'success');
-        refresh();
+        atualizarProposta(id).catch(e => erroCartao(id, e));
       });
     } catch (e) {
-      showToast(e.message, 'error');
+      erroCartao(id, e);
     }
   }
 
@@ -214,9 +283,10 @@ const BuritiPage = (() => {
         const { error } = await supabaseClient.rpc('decidir_proposta', {
           p_id: id, p_decisao: decisao, p_motivo: texto || null,
         });
-        if (error) throw new Error(error.message);
+        if (error) { erroCartao(id, error); throw new Error(error.message); }
         showToast(decisao === 'rejeitada' ? 'Proposta rejeitada.' : 'Resposta enviada ao Buriti.', 'success');
-        await refresh();
+        try { await atualizarProposta(id); }
+        catch (e) { erroCartao(id, e); throw e; }
       },
     });
     setTimeout(() => document.getElementById('buriti-texto')?.focus(), 50);
@@ -244,5 +314,5 @@ const BuritiPage = (() => {
     });
   }
 
-  return { load, refresh, trocarAba, revisar, responder, rejeitar };
+  return { load, refresh, trocarAba, trocarSecao, revisar, responder, rejeitar, criarTarefa };
 })();
