@@ -228,3 +228,24 @@ describe('Triagem, saúde e propostas', () => {
     expect(root.querySelector('[data-proposta]')).toBeNull();
   });
 });
+
+describe('triagem: rótulos e ligadas automaticamente', () => {
+  it('classificação vira selo legível; exigência em destaque', () => {
+    expect(f.seloClassificacao('exigencia')).toEqual({ texto: 'Exigência', classe: 'badge--warning' });
+    expect(f.seloClassificacao('informativo').classe).toBe('badge--info');
+    expect(f.seloClassificacao(null)).toBeNull();
+  });
+  it('motivo técnico vira frase; desconhecido passa como veio', () => {
+    expect(f.motivoLegivel('demanda_nova')).toBe('Assunto novo, sem tarefa');
+    expect(f.motivoLegivel('algo_novo')).toBe('algo_novo');
+    expect(f.motivoLegivel(null)).toBe('');
+  });
+  it('só vai para "ligadas automaticamente" o que a regra garante e não pede ação', () => {
+    const v = [{ estado: 'sugerido', tarefa_id: 't1' }];
+    expect(f.ligadaAutomaticamente({ motivo: 'mensagem_propria', classificacao: 'informativo', vigia_vinculos: v })).toBe(true);
+    expect(f.ligadaAutomaticamente({ motivo: 'regra', classificacao: 'informativo', vigia_vinculos: v })).toBe(true);
+    expect(f.ligadaAutomaticamente({ motivo: 'regra', classificacao: 'exigencia', vigia_vinculos: v })).toBe(false);
+    expect(f.ligadaAutomaticamente({ motivo: 'modelo', classificacao: 'informativo', vigia_vinculos: v })).toBe(false);
+    expect(f.ligadaAutomaticamente({ motivo: 'regra', classificacao: 'informativo', vigia_vinculos: [] })).toBe(false);
+  });
+});

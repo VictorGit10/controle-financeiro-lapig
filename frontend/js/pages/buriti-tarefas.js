@@ -8,7 +8,7 @@ window.BuritiTarefasUI = (() => {
     'tarefa_passos(id,ordem,descricao,quem,estado,evento_id,' +
     'evento:tarefa_eventos!evento_id(resumo,gmail_thread_id,ocorrido_em)),' +
     'eventos:tarefa_eventos!tarefa_eventos_tarefa_id_fkey(id,tipo,origem,resumo,gmail_thread_id,ocorrido_em,criado_em)';
-  const MSG = 'gmail_message_id,gmail_thread_id,recebida_em,assunto,trecho,fila,motivo,estado,anexos,' +
+  const MSG = 'gmail_message_id,gmail_thread_id,recebida_em,assunto,trecho,fila,motivo,classificacao,estado,anexos,' +
     'vigia_vinculos(tarefa_id,estado,tarefas(id,titulo,status))';
 
   async function ler(consulta) {
@@ -219,10 +219,12 @@ window.BuritiTarefasUI = (() => {
     const sugeridos = m.vigia_vinculos.filter(v => v.estado === 'sugerido');
     const rotina = m.fila === 'rotina' && !sugeridos.length;
     const excluidos = new Set(m.vigia_vinculos.map(v => v.tarefa_id));
+    const selo = f().seloClassificacao(m.classificacao);
     return `<article class="card buriti-cartao" data-msg="${escapeAttr(m.gmail_message_id)}">
       <header class="buriti-cartao__topo"><h3 class="buriti-titulo">${escapeAttr(m.assunto || 'Assunto indisponível')}</h3>
-        <span class="badge ${rotina ? 'badge--info' : 'badge--warning'}">${rotina ? 'Rotina' : 'Precisa de revisão'}</span></header>
-      <div class="buriti-sub">${escapeAttr(f().dataHora(m.recebida_em))} · ${escapeAttr(m.motivo)} · ${escapeAttr(m.estado)}</div>
+        <span class="buriti-acoes">${selo ? `<span class="badge ${selo.classe}">${escapeAttr(selo.texto)}</span>` : ''}
+        <span class="badge ${rotina ? 'badge--info' : 'badge--warning'}">${rotina ? 'Rotina' : 'Precisa de revisão'}</span></span></header>
+      <div class="buriti-sub">${escapeAttr(f().dataHora(m.recebida_em))} · ${escapeAttr(f().motivoLegivel(m.motivo))}${m.estado === 'processada' ? '' : ` · ${escapeAttr(m.estado)}`}</div>
       <p class="buriti-cartao__resumo">${escapeAttr(m.trecho || 'Trecho indisponível.')}</p>
       ${m.anexos > 0 ? '<p class="buriti-sub">Anexo não conferido</p>' : ''}${link(m.gmail_thread_id)}
       ${sugeridos.map(v => `<div class="buriti-bloco"><strong>Vínculo sugerido: ${escapeAttr(v.tarefas?.titulo || v.tarefa_id)}</strong>
@@ -261,14 +263,35 @@ window.BuritiTarefasUI = (() => {
     if (vez !== geracao || !root.isConnected) return;
     // Inclui sugestões em mensagens de rotina no grupo prioritário.
     valor(2).filter(m => m.vigia_vinculos.some(v => v.estado === 'sugerido')).forEach(m => mapa.set(m.gmail_message_id, m));
-    const pendentes = [...mapa.values()].sort((a, b) => a.recebida_em.localeCompare(b.recebida_em));
+    const todas = [...mapa.values()].sort((a, b) => a.recebida_em.localeCompare(b.recebida_em));
+    const automaticas = todas.filter(m => f().ligadaAutomaticamente(m));
+    const pendentes = todas.filter(m => !f().ligadaAutomaticamente(m));
     const rotina = valor(2).filter(m => !mapa.has(m.gmail_message_id));
     const renderMsg = m => mensagemHTML(m, valor(3), resultados[3].status === 'fulfilled');
     root.innerHTML = `${erros.join('')}<div class="buriti-coluna" data-pendentes>
       ${pendentes.map(renderMsg).join('') || (erros.length ? '' : '<p class="buriti-sub" data-vazio>Nenhuma mensagem esperando revisão.</p>')}</div>
+      ${automaticas.length ? `<details class="buriti-bloco buriti-automaticas"><summary>Ligadas automaticamente (${automaticas.length})</summary>
+        <p class="buriti-sub">Mesma conversa da tarefa ou mensagem sua, sem pedido de ação. Confira se quiser.</p>
+        <div class="buriti-acoes"><button type="button" class="btn btn--primary" data-aceitar-todas>Aceitar todas</button></div>
+        <div class="buriti-coluna" data-automaticas>${automaticas.map(renderMsg).join('')}</div></details>` : ''}
       <details class="buriti-bloco buriti-rotina"><summary>Rotina · últimos 7 dias${resultados[2].status === 'fulfilled' ? ` (${rotina.length})` : ' · indisponível'}</summary>
         <div class="buriti-coluna" data-rotina>${rotina.map(renderMsg).join('')}</div></details>`;
     root.onclick = async e => {
+      const todasBtn = e.target.closest('[data-aceitar-todas]');
+      if (todasBtn && Auth.isAdmin()) {
+        todasBtn.disabled = true;
+        const bloco = todasBtn.closest('.buriti-automaticas');
+        try {
+          for (const m of automaticas) {
+            for (const v of m.vigia_vinculos.filter(v => v.estado === 'sugerido')) {
+              await rpc('vincular_mensagem', { p_msg: m.gmail_message_id, p_tarefa: v.tarefa_id, p_aceitar: true });
+            }
+            await rpc('revisar_mensagem', { p_msg: m.gmail_message_id, p_fila: 'tarefa' });
+          }
+          bloco.remove();
+        } catch (err) { todasBtn.disabled = false; bloco.insertAdjacentHTML('afterbegin', aviso('Nem todos os vínculos foram aceitos; tente de novo.', err)); }
+        return;
+      }
       const b = e.target.closest('[data-acao]'), node = b?.closest('[data-msg]');
       if (!node || !Auth.isAdmin()) return;
       const id = node.dataset.msg, acao = b.dataset.acao;
