@@ -14,9 +14,9 @@ function sandbox(opcoes = {}) {
   let mensagens = opcoes.mensagens || [fixtures.mensagens.envio, fixtures.mensagens.github];
   const ctx = { versao_esquema:1,tarefas:[copiar(fixtures.tarefa)],cursor_em:'2026-10-05T16:00:00.000Z',vinculos:[],pendentes:[],alertas_emitidos:[],esclarecer:0,rotina:0,saude:'ok',...opcoes.contexto };
   function gmailMessage(m) {
-    return { getId:()=>m.gmail_message_id, getThread:()=>({getId:()=>m.gmail_thread_id}), getDate:()=>new Date(m.recebida_em),
+    return { getId:()=>m.gmail_message_id, getThread:()=>({getId:()=>m.gmail_thread_id,isInSpam:()=>!!m.spam}), getDate:()=>new Date(m.recebida_em),
       getFrom:()=>m.de || '',getTo:()=>m.para || '',getCc:()=>m.cc || '',getSubject:()=>m.assunto || '',getPlainBody:()=>m.corpo || '',
-      getHeader:n=>m.headers?.[n] || '',getAttachments:()=>Array(m.anexos || 0).fill({}),isInTrash:()=>!!m.trash,isInSpam:()=>!!m.spam };
+      getHeader:n=>m.headers?.[n] || '',getAttachments:()=>Array(m.anexos || 0).fill({}),isInTrash:()=>!!m.trash };
   }
   function response(status, body) { return {getResponseCode:()=>status,getContentText:()=>JSON.stringify(body)}; }
   function registrar(p) {

@@ -25,6 +25,13 @@ var VigiaMain = (function () {
     return ctx;
   }
   function chaveErro(e) { return /^(janela_|contexto_|configuracao_|login_|rpc_|mensagem_)[a-z0-9_]+$/.test(e.message || '') ? e.message : 'execucao_falhou'; }
+  // Falha inesperada: registra onde foi (linhas do script) para diagnóstico em Execuções. Mensagem só dos
+  // erros do próprio JavaScript (TypeError etc.), que não carregam conteúdo de e-mail.
+  function diagnostico(e) {
+    var linhas = String((e && e.stack) || '').split('\n').filter(function (l) { return /^\s*at /.test(l); }).slice(0, 6).join(' | ');
+    var nativo = e && /^(TypeError|ReferenceError|RangeError|SyntaxError)$/.test(e.name);
+    return 'execucao_falhou: ' + ((e && e.name) || 'Error') + (nativo ? ' (' + e.message + ')' : '') + ' em ' + (linhas || '?');
+  }
   function entregar(db, config, avisos, ctx) {
     (avisos || []).forEach(function (aviso) {
       var tarefa = (ctx.tarefas || []).find(function (t) { return t.id === aviso.tarefa_id; }) || { titulo: 'Triagem do vigia' };
@@ -77,6 +84,7 @@ var VigiaMain = (function () {
       db.rpc('vigia_expurgar');
       return { estado: 'ok', execucao_id: execucao, mensagens: resultados.length, erros: erros.length };
     } catch (e) {
+      if (chaveErro(e) === 'execucao_falhou') console.error(diagnostico(e));
       if (db && execucao && !terminou) {
         try { db.rpc('vigia_registrar', { p: { versao: VERSAO, execucao: { id: execucao, terminada_em: new Date().toISOString(), erros: [{ codigo: chaveErro(e) }] } } }); } catch (_) { /* O monitor externo verá execução sem fim. */ }
       }

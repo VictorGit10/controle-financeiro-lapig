@@ -4,7 +4,7 @@ var VigiaGmail = (function () {
     ['Auto-Submitted','List-Id','List-Unsubscribe','Precedence','Content-Type'].forEach(function (nome) { headers[nome] = mensagem.getHeader(nome) || ''; });
     return { gmail_message_id: mensagem.getId(), gmail_thread_id: mensagem.getThread().getId(), recebida_em: mensagem.getDate().toISOString(),
       de: mensagem.getFrom(), para: mensagem.getTo(), cc: mensagem.getCc(), assunto: mensagem.getSubject(), corpo: mensagem.getPlainBody(),
-      headers: headers, content_type: headers['Content-Type'], spam: passadaSpam === true || mensagem.isInSpam(), anexos: mensagem.getAttachments({ includeInlineImages: false, includeAttachments: true }).length };
+      headers: headers, content_type: headers['Content-Type'], spam: passadaSpam === true || mensagem.getThread().isInSpam(), anexos: mensagem.getAttachments({ includeInlineImages: false, includeAttachments: true }).length };
   }
   function buscar(cursor, fim) {
     var limite = new Date(fim).getTime();

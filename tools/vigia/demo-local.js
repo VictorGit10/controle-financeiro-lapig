@@ -126,16 +126,16 @@ function criarGmailApp(mensagens) {
       getId:()=>msg.gmail_message_id,getThread:()=>thread.api,getDate:()=>new Date(msg.recebida_em),
       getFrom:()=>msg.de || '',getTo:()=>msg.para || '',getCc:()=>msg.cc || '',getSubject:()=>msg.assunto || '',getPlainBody:()=>msg.corpo || '',
       getHeader:nome=>{const chave=Object.keys(msg.headers || {}).find(k=>k.toLowerCase()===nome.toLowerCase());return chave ? msg.headers[chave] : '';},
-      getAttachments:()=>Array.from({length:msg.anexos || 0},()=>({})),isInTrash:()=>msg.lixeira===true,isInSpam:()=>msg.spam===true
+      getAttachments:()=>Array.from({length:msg.anexos || 0},()=>({})),isInTrash:()=>msg.lixeira===true,_spam:msg.spam===true
     };
     thread.mensagens.push(objeto);porId.set(msg.gmail_message_id,objeto);
   }
-  for (const thread of threads.values()) thread.api={getId:()=>thread.id,getMessages:()=>thread.mensagens.slice()};
+  for (const thread of threads.values()) thread.api={getId:()=>thread.id,isInSpam:()=>thread.mensagens.some(m=>m._spam),getMessages:()=>thread.mensagens.slice()};
   return {
     getMessageById:id=>porId.get(id) || null,
     search(query,inicio=0,max=100) {
       const depois=query.match(/\bafter:(\d+)/),antes=query.match(/\bbefore:(\d+)/),spam=query.startsWith('in:spam');
-      const encontrados=[...threads.values()].filter(t=>t.mensagens.some(m=>!m.isInTrash() && m.isInSpam()===spam &&
+      const encontrados=[...threads.values()].filter(t=>t.mensagens.some(m=>!m.isInTrash() && m._spam===spam &&
         (!depois || m.getDate().getTime()>Number(depois[1])*1000) && (!antes || m.getDate().getTime()<Number(antes[1])*1000)));
       return encontrados.slice(inicio,inicio+max).map(t=>t.api);
     }
