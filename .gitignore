@@ -70,3 +70,7 @@ tools/replica-local/dump/
 # ── Supabase CLI local (config.toml e' versionado; estado local nao) ──
 supabase/.branches/
 supabase/.temp/
+
+# ── Vigia (tools/vigia) ──────────────────────────────────────
+# Palco do clasp: tem .clasp.json com o scriptId do projeto na conta do Victor.
+tools/vigia/.publicar/

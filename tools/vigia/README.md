@@ -7,26 +7,42 @@ da migração 054 com o formato de [CONTRATO.md](CONTRATO.md). Não aplique este
 
 ## Instalar, passo a passo
 
-1. Entre na conta Google **victoramaral.lapig** e abra <https://script.google.com>.
-2. Clique em **Novo projeto**, dê o nome **Vigia LAPIG** e abra o arquivo `Código.gs`.
-3. Abra [dist/Vigia.gs](dist/Vigia.gs) neste repositório, copie **todo** o conteúdo e substitua o código
-   inicial no editor. Salve. Não copie os arquivos `src` individualmente nem o código dos testes.
-4. Na engrenagem **Configurações do projeto**, selecione o fuso **America/Sao_Paulo** e confirme o runtime V8.
-5. Na mesma tela, vá a **Propriedades do script → Adicionar propriedade** e preencha a tabela abaixo.
-   Pegue os valores com o administrador; não cole senhas em código, chat ou captura de tela.
-6. No seletor de função da barra superior, selecione **testarConfiguracao**, clique **Executar** e
-   leia o registro: propriedades obrigatórias devem dizer `ok`. O teste mostra nomes/status, nunca valores.
-7. Selecione **checar** e clique **Executar**. Autorize acesso ao Gmail, envio de e-mail e conexões externas
-   usando essa mesma conta. Confira a última execução e os registros de Triagem na página Buriti.
-   Se as RPCs ainda não existirem, pare aqui e solicite a instalação do banco ao administrador.
-8. Selecione **resumoDiario** e execute uma vez: deve chegar um resumo, mesmo sem tarefas.
-9. Selecione **instalarGatilhos** e execute. Ele cria checagem a cada 30 min e resumo na faixa das 8h,
-   no fuso de São Paulo (o Google pode variar os minutos). Reexecutar substitui os dois gatilhos sem duplicá-los.
-10. No ícone de relógio **Acionadores**, confira `checar` e `resumoDiario`. Em **Execuções** veja falhas;
-    na página confira a última checagem. O monitor da página aponta atraso após duas horas.
+A publicação é pelo **clasp**, já logado na conta Google **victoramaral.lapig** — quem roda é o Claude,
+como no Correio do Buriti:
 
-O login Supabase deve ter papel **automacao**, registro `vigia` em `automacoes` e **nenhum** centro de custo
-em `user_projects`; ele atua só pelas RPCs. Não use conta admin nem chave de serviço.
+```sh
+node tools/vigia/publicar.js          # build + create (1ª vez) + push; imprime o link do editor
+node tools/vigia/publicar.js --seco   # só monta o palco em .publicar/ e mostra os passos, sem rede
+```
+
+O projeto **Vigia LAPIG** é criado na primeira publicação e reaproveitado nas seguintes (o scriptId
+fica em `tools/vigia/.publicar/.clasp.json`, pasta fora do git). O `appsscript.json` já leva fuso
+**America/Sao_Paulo**, runtime **V8** e os escopos mínimos; o vigia não é web app, não há implantação.
+
+Com o link do editor que a publicação imprime, sobram para o Victor:
+
+1. Na engrenagem **Configurações do projeto → Propriedades do script → Adicionar propriedade**, preencha
+   a tabela abaixo. Pegue os valores com o administrador; não cole senhas em código, chat ou captura.
+2. No seletor de função da barra superior, selecione **testarConfiguracao**, clique **Executar** e leia
+   o registro: as propriedades obrigatórias devem dizer `ok`. O teste mostra nomes/status, nunca valores.
+3. Selecione **checar** e clique **Executar**. Na primeira vez o Google pede autorização: autorize Gmail,
+   envio de e-mail, conexões externas e gatilhos com essa mesma conta. Confira a última execução e os
+   registros de Triagem na página Buriti.
+4. Selecione **resumoDiario** e execute uma vez: deve chegar um resumo, mesmo sem tarefas.
+5. Selecione **instalarGatilhos** e execute. Ele cria checagem a cada 30 min e resumo na faixa das 8h,
+   no fuso de São Paulo (o Google pode variar os minutos). Reexecutar substitui os dois gatilhos sem
+   duplicá-los.
+6. No ícone de relógio **Acionadores**, confira `checar` e `resumoDiario`. Em **Execuções** veja falhas;
+   na página confira a última checagem. O monitor da página aponta atraso após duas horas.
+
+O login Supabase é o **mesmo do "Buriti operador"** (migração 055): papel **automacao**, registro
+`vigia` em `automacoes` e **nenhum** centro de custo em `user_projects`; atua só pelas RPCs. Não use
+conta admin nem chave de serviço.
+
+**Alternativa sem o clasp:** crie um projeto novo em <https://script.google.com>, copie **todo** o
+conteúdo de [dist/Vigia.gs](dist/Vigia.gs) para o `Código.gs`, ajuste o fuso America/Sao_Paulo e o
+runtime V8 nas Configurações do projeto e siga os passos 1–6 acima. Não copie os arquivos `src`
+individualmente nem o código dos testes.
 
 | Propriedade | Obrigatória? | O que preencher |
 | --- | --- | --- |
