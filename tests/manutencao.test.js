@@ -9,8 +9,8 @@ describe('modo manutenção', () => {
     expect(Manutencao.interpretar({ ativo: true, mensagem: ' Volto às 15h ' }).mensagem).toBe('Volto às 15h');
     expect(Manutencao.interpretar({ ativo: true, mensagem: '' }).mensagem).toMatch(/em atualização/);
   });
-  it('o arquivo publicado começa desligado', async () => {
+  it('o arquivo publicado é JSON com "ativo" booleano (liga e desliga em cada migração)', async () => {
     const { readFileSync } = await import('node:fs');
-    expect(JSON.parse(readFileSync('frontend/manutencao.json', 'utf8')).ativo).toBe(false);
+    expect(typeof JSON.parse(readFileSync('frontend/manutencao.json', 'utf8')).ativo).toBe('boolean');
   });
 });
