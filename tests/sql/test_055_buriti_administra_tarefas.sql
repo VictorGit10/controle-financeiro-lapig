@@ -73,6 +73,7 @@ set role authenticated;
 select pg_temp.ok((select count(*)=1 from public.tarefas where id=current_setting('t55.tarefa')::uuid),'responsável lê a tarefa criada pelo Buriti');
 select pg_temp.invalido(format('select public.registrar_feito(%L,%L)',current_setting('t55.p1'),'Fiz o do Buriti'));
 select public.registrar_feito(current_setting('t55.p2')::uuid,'Quadro atualizado.');
+select public.registrar_feito(current_setting('t55.p4')::uuid,'Também registrei este.');
 -- Pessoas não usam as RPCs do operador.
 select pg_temp.negado(format('select public.buriti_confirmar_passo(%L,%L)',current_setting('t55.p2'),'eu mesmo'));
 select pg_temp.negado(format('select public.buriti_concluir_tarefa(%L,%L)',current_setting('t55.tarefa'),'fim'));
@@ -111,6 +112,10 @@ select pg_temp.invalido(format('select public.buriti_confirmar_passo(%L,%L)',cur
 select pg_temp.invalido(format('select public.buriti_anotar(%L,%L)',current_setting('t55.tarefa'),'CPF 529.982.247-25'));
 select public.buriti_concluir_passo(current_setting('t55.p1')::uuid,'Dados conferidos no sistema.');
 select public.buriti_confirmar_passo(current_setting('t55.p2')::uuid,'Quadro novo salvo na pasta do projeto.');
+reset role;
+select pg_temp.ok((select precisa_atencao and motivo_atencao like '%registrou um passo; confirmar' from public.tarefas
+  where id=current_setting('t55.tarefa')::uuid),'aviso fica enquanto outro passo registrado espera confirmação');
+set role authenticated;
 select pg_temp.invalido(format('select public.buriti_concluir_tarefa(%L,%L)',current_setting('t55.tarefa'),'cedo demais'));
 select public.buriti_anotar(current_setting('t55.tarefa')::uuid,'Arthur, falta enviar à FUNAPE.',true);
 select public.buriti_pedir_atencao(current_setting('t55.tarefa')::uuid,'A FUNAPE pediu justificativa assinada.');

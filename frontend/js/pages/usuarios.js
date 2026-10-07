@@ -171,6 +171,8 @@ const UsuariosPage = (() => {
           <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:8px;">Desligar corta na hora o acesso do Buriti às tarefas.</p>`,
         saveLabel: 'Salvar',
         onSave: async () => {
+          // Sem a leitura de automacoes não se sabe o estado atual: não grava às cegas (falha fechada).
+          if (user._ativo === undefined) throw new Error('Não foi possível ler se o Buriti operador está ligado. Recarregue a página.');
           const ativo = document.getElementById('user-automacao-ativo').checked;
           const { error } = await supabaseClient.rpc('set_automacao', { p_user: userId, p_nome: 'vigia', p_ativo: ativo });
           if (error) throw new Error('Erro ao salvar: ' + error.message);

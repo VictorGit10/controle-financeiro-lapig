@@ -137,11 +137,13 @@ begin
   v:=public._evento_tarefa(t.id,'buriti:'||gen_random_uuid(),'confirmacao','buriti','Confirmado pelo Buriti: '||prova,
     jsonb_build_object('passo_id',s.id,'estado','confirmado','prova',prova));
   update public.tarefa_passos set estado='confirmado',evento_id=v,confirmado_por=auth.uid(),confirmado_em=now() where id=s.id;
-  -- Se só este passo pedia atenção, a confirmação resolve; outro motivo continua de pé.
-  update public.tarefas set atualizada_em=now(),
-    precisa_atencao=precisa_atencao and coalesce(motivo_atencao,'') not like '%registrou um passo; confirmar',
-    motivo_atencao=case when coalesce(motivo_atencao,'') like '%registrou um passo; confirmar' then null else motivo_atencao end
-   where id=t.id;
+  -- O aviso "registrou um passo; confirmar" é da tarefa, não do passo: só sai quando não resta outro passo
+  -- registrado pela pessoa esperando confirmação. Outro motivo (pedido de atenção) continua de pé.
+  update public.tarefas set atualizada_em=now() where id=t.id;
+  if not exists(select 1 from public.tarefa_passos where tarefa_id=t.id and estado='sugerido' and ultimo_feito_id is not null) then
+    update public.tarefas set precisa_atencao=false,motivo_atencao=null
+     where id=t.id and coalesce(motivo_atencao,'') like '%registrou um passo; confirmar';
+  end if;
 end $$;
 
 -- Anotação ou cobrança (ao responsável) na linha do tempo.

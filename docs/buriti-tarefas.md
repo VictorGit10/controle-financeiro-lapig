@@ -185,3 +185,7 @@ ao responsável nos passos de pessoa, confirma com prova clara, cobra e conclui.
 `concluir_meu_passo`, `confirmar_passo`, `anotar_tarefa`, `pedir_atencao`, `concluir_tarefa`; credencial em
 `%USERPROFILE%\.buriti\operador.json` (gravada por `ferramentas/configurar-operador.ps1` da pasta Buriti).
 Na tela, o vigia e o operador aparecem como "Buriti".
+Limites conhecidos (revisão do Kimi K3, 07/10/2026): `buriti_criar_tarefa` aceita qualquer projeto existente;
+tarefa num centro fora do escopo do login agente fica invisível para a tool `tarefas` (só o admin a vê) — o
+MCP resolve o centro pelo login agente, então isso só acontece chamando a RPC direto. As tools do operador não
+têm chave de idempotência: se `criar_tarefa` der erro de rede, conferir com `tarefas` antes de repetir.
