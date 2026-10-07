@@ -23,6 +23,9 @@ O Victor não lê SQL nem código e não entra no GitHub. Ele só dá **"ok" no 
 6. **Mandar ao Victor** um resumo em português: o que muda, o que o relatório do cofre mediu (dados e
    estrutura), o que a outra IA achou e, com todas as letras, **se muda quem vê o quê**. Pedir que ninguém
    use o sistema durante a aplicação (uns 10 minutos).
+6b. **Manutenção (desde 07/10/2026):** quando o código publicado depende da migração, publicar junto
+   `frontend/manutencao.json` com `"ativo": true` (o site mostra "Em atualização" e bloqueia o uso, inclusive de
+   quem está com ele aberto, em até 1 min) e só voltar a `false` depois de aplicar e conferir.
 7. Com o **"ok"** dele no chat (vale só para aquela migração e aquele código de aprovação): **aplicar**.
 8. **Conferir** o fim do log e confirmar ao Victor. Registrar a aplicação em `docs/migracoes.md`.
 

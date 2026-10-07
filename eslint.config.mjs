@@ -118,6 +118,7 @@ export default [
   {
     files: [
       "frontend/js/pure-fns.js",
+      "frontend/js/manutencao.js",
       "frontend/js/parsers/**/*.js",
       "frontend/js/components/**/*.js",
       "frontend/js/ai/**/*.js",
