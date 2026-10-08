@@ -23,11 +23,22 @@ O Victor não lê SQL nem código e não entra no GitHub. Ele só dá **"ok" no 
 6. **Mandar ao Victor** um resumo em português: o que muda, o que o relatório do cofre mediu (dados e
    estrutura), o que a outra IA achou e, com todas as letras, **se muda quem vê o quê**. Pedir que ninguém
    use o sistema durante a aplicação (uns 10 minutos).
-6b. **Manutenção (desde 07/10/2026):** quando o código publicado depende da migração, publicar junto
-   `frontend/manutencao.json` com `"ativo": true` (o site mostra "Em atualização" e bloqueia o uso, inclusive de
-   quem está com ele aberto, em até 1 min) e só voltar a `false` depois de aplicar e conferir.
-7. Com o **"ok"** dele no chat (vale só para aquela migração e aquele código de aprovação): **aplicar**.
-8. **Conferir** o fim do log e confirmar ao Victor. Registrar a aplicação em `docs/migracoes.md`.
+6b. **Manutenção — SEMPRE, em toda aplicação (regra do Victor, 08/10/2026).** Não importa se o código
+   depende ou não da migração: depois do "ok" e ANTES de disparar o `aplicar`:
+   - `frontend/manutencao.json` com `{"ativo": true, "mensagem": "O Controle Financeiro está em atualização
+     (<o que muda>). Volte em alguns minutos — não é preciso fazer nada."}`; commit
+     `chore(site): manutenção LIGADA para aplicar a NNN` e push no `master`;
+   - esperar o `deploy.yml` daquele commit terminar e conferir no ar
+     (`curl -s "https://victorgit10.github.io/controle-financeiro-lapig/manutencao.json?x=$RANDOM"` → `"ativo": true`);
+     o site bloqueia inclusive quem está com ele aberto em até 1 min — esperar esse minuto;
+   - só então disparar o `aplicar`. Depois de aplicar **e conferir**, voltar a `{"ativo": false, "mensagem": ""}`
+     no commit `chore(site): manutenção DESLIGADA — NNN aplicada em produção (dd/mm/aaaa)`, junto com o registro
+     em `docs/migracoes.md`, e conferir no ar que voltou a `false`.
+   - Se o aplicar falhar ou ficar INCERTO, a manutenção continua LIGADA até o Victor decidir.
+7. Com o **"ok"** dele no chat (vale só para aquela migração e aquele código de aprovação): ligar a manutenção
+   (6b) e **aplicar**.
+8. **Conferir** o fim do log e confirmar ao Victor. Registrar a aplicação em `docs/migracoes.md` e desligar a
+   manutenção (6b).
 
 O "ok" é regra, não trava: a chave permite disparar sem ele. Nunca aplicar sem o "ok" explícito.
 
