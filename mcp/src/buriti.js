@@ -14,7 +14,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { textoDoPdf, montarPropostaBalancete, DATA } from './buriti-proposta.js';
+import { textoDoPdf, montarPropostaBalancete, montarPropostaPlano, DATA } from './buriti-proposta.js';
+import { lerPlano } from './buriti-plano-leitura.js';
+import { PtFormatError } from '../../frontend/js/parsers/pt-parser.js';
 import { rpc, consultar, armazenar } from './client.js';
 import { criarToolsTarefas } from './buriti-tarefa.js';
 import { rpcOperador } from './operador.js';
@@ -93,6 +95,49 @@ export async function proporBalancete({ caminho_pdf, simular = false, sugestoes 
     perguntas: p.payload.perguntas.length,
     avisos: p.payload.avisos,
     proximo_passo: 'Um humano revisa e aplica na página Buriti do site. Nada foi gravado no balancete.',
+  };
+}
+
+
+/** Plano original/remanejamento: nenhuma gravação financeira pelo agente. */
+export async function proporPlano({ caminho, centro_de_custo, tipo, simular = false }) {
+  if (!centro_de_custo?.trim()) throw new Error('Informe o código do centro de custo: o DOCX do PROAD não o contém.');
+  if (!['original', 'remanejamento'].includes(tipo)) throw new Error('Tipo do plano: original ou remanejamento.');
+  const arquivoNome = path.basename(caminho);
+  let extraido;
+  let bytes;
+  try {
+    // Formato inválido deve ser recusado mesmo se o caminho não existir.
+    if (!/\.(docx|pdf)$/i.test(arquivoNome)) {
+      return { criada: false, motivo: 'Não há leitor automático para este formato. Use DOCX no padrão PROAD/UFG ou o PDF do plano assinado.' };
+    }
+    bytes = await fs.readFile(caminho);
+    extraido = await lerPlano(bytes, arquivoNome);
+  } catch (err) {
+    if (err instanceof PtFormatError) return { criada: false, motivo: err.message };
+    throw err;
+  }
+  // Recusa CPF antes de consultar contexto, enviar arquivo ou criar proposta.
+  const preliminar = montarPropostaPlano({ extraido, arquivoNome, tipo });
+  if (!preliminar.ok) return { criada: false, motivo: preliminar.problemas.join(' ') };
+  const centro = await centroPorCodigo(centro_de_custo.trim());
+  const planoAtivo = await rpc('get_plano_ativo', { p_project_id: centro.id });
+  const p = montarPropostaPlano({ extraido, arquivoNome, tipo, planoAtivo });
+  if (simular) return {
+    criada: false, simulacao: true, centro: centro.name, resumo: p.resumo,
+    avisos: p.payload.avisos, conferencias: p.payload.conferencias,
+  };
+  const contentType = /\.pdf$/i.test(arquivoNome) ? 'application/pdf'
+    : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const seguro = arquivoNome.replace(/[^\w.-]/g, '_');
+  const arquivo = await armazenar(BUCKET, `${centro.id}/${Date.now()}_${seguro}`, bytes, contentType);
+  const id = await rpc('criar_proposta', {
+    p_tipo: 'plano', p_project_id: centro.id, p_resumo: p.resumo,
+    p_payload: p.payload, p_arquivo_path: arquivo, p_chave: p.chave,
+  });
+  return {
+    criada: true, proposta_id: id, centro: centro.name, resumo: p.resumo, avisos: p.payload.avisos,
+    proximo_passo: 'Um humano revisa e aplica na página Buriti do site. Nada foi gravado no plano de trabalho.',
   };
 }
 

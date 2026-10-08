@@ -34,6 +34,7 @@ const BuritiPage = (() => {
 
   const TIPO = {
     balancete: { icone: 'file-stack',     rotulo: 'Balancete' },
+    plano:     { icone: 'file-text', rotulo: 'Plano de trabalho' },
     bolsas:    { icone: 'file-spreadsheet', rotulo: 'Bolsas' },
     pergunta:  { icone: 'message-circle-question', rotulo: 'Pergunta' },
     aviso:     { icone: 'bell',           rotulo: 'Aviso' },
@@ -165,7 +166,7 @@ const BuritiPage = (() => {
     const id = escapeAttrJs(p.id);
     const acoes = p.status !== 'pendente' ? '' : `
       <div class="buriti-acoes">
-        ${p.tipo === 'balancete' ? `<button class="btn btn--primary" onclick="BuritiPage.revisar('${id}')"><i data-lucide="clipboard-check"></i> Revisar e aplicar</button>` : ''}
+        ${p.tipo === 'balancete' || p.tipo === 'plano' ? `<button class="btn btn--primary" onclick="BuritiPage.revisar('${id}')"><i data-lucide="clipboard-check"></i> Revisar e aplicar</button>` : ''}
         ${p.tipo === 'tarefa' && Auth.isAdmin() ? `<button class="btn btn--primary" onclick="BuritiPage.criarTarefa('${id}')"><i data-lucide="list-checks"></i> Criar tarefa</button>` : ''}
         ${p.tipo === 'pergunta' || p.tipo === 'aviso' ? `<button class="btn btn--primary" onclick="BuritiPage.responder('${id}')"><i data-lucide="reply"></i> ${p.tipo === 'aviso' ? 'Ciente' : 'Responder'}</button>` : ''}
         <button class="btn btn--secondary" onclick="BuritiPage.rejeitar('${id}')"><i data-lucide="x-circle"></i> Rejeitar</button>
@@ -183,6 +184,7 @@ const BuritiPage = (() => {
         </header>
         <div class="buriti-cartao__centro">${centroHTML(p)}</div>
         <p class="buriti-cartao__resumo">${escapeAttr(p.resumo)}</p>
+        ${p.tipo === 'plano' ? `<div class="buriti-sub">${p.payload?.tipo === 'original' ? 'Plano original' : 'Remanejamento'}</div>` : ''}
         ${p.tipo === 'tarefa' ? resumoTarefaHTML(p.payload) : ''}
         ${p.status === 'pendente' ? perguntasHTML(p) + avisosHTML(p) : ''}
         <div class="buriti-sub">Proposta em ${dataHora(p.criada_em)}</div>
@@ -242,7 +244,7 @@ const BuritiPage = (() => {
       ? `<div class="empty-state" style="padding:var(--sp-6);">
            <i data-lucide="inbox" class="empty-state__icon"></i>
            <h3 class="empty-state__title">Nada esperando por você</h3>
-           <p class="empty-state__text">Quando o Buriti conferir um balancete ou tiver uma dúvida, a proposta aparece aqui.</p>
+           <p class="empty-state__text">Quando o Buriti conferir um balancete, um plano ou tiver uma dúvida, a proposta aparece aqui.</p>
          </div>`
       : `<div class="empty-state" style="padding:var(--sp-6);"><p class="empty-state__text">Nenhuma decisão ainda.</p></div>`;
 
@@ -261,8 +263,10 @@ const BuritiPage = (() => {
     const p = propostas.find(x => x.id === id);
     if (!p) return;
     try {
-      await PlanoTrabalhoPage.revisarPropostaBalancete(p, (resumo) => {
-        if (resumo?.saved) showToast('Balancete gravado e proposta marcada como aplicada.', 'success');
+      const revisarProposta = p.tipo === 'plano'
+        ? PlanoTrabalhoPage.revisarPropostaPlano : PlanoTrabalhoPage.revisarPropostaBalancete;
+      await revisarProposta(p, (resumo) => {
+        if (resumo?.saved) showToast((p.tipo === 'plano' ? 'Plano' : 'Balancete') + ' gravado e proposta marcada como aplicada.', 'success');
         atualizarProposta(id).catch(e => erroCartao(id, e));
       });
     } catch (e) {

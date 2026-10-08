@@ -28,7 +28,7 @@ import {
   projecaoDeCaixa,
   planoDeTrabalho,
 } from './tools.js';
-import { proporBalancete, listarPropostas, perguntar, proporTarefa, listarTarefas, criarTarefa, concluirMeuPasso,
+import { proporBalancete, proporPlano, listarPropostas, perguntar, proporTarefa, listarTarefas, criarTarefa, concluirMeuPasso,
   confirmarPasso, anotarTarefa, pedirAtencao, concluirTarefa } from './buriti.js';
 
 // Enquadramento que vale para TODAS as tools. Fica aqui, e não repetido dentro
@@ -356,6 +356,29 @@ buriti(
     },
   },
   proporBalancete
+);
+
+buriti(
+  'propor_plano',
+  {
+    title: 'Propor plano de trabalho / remanejamento (Buriti)',
+    description:
+      'Lê um plano de trabalho PROAD/UFG em DOCX (formato normal) ou PDF do plano ' +
+      'assinado, com os MESMOS leitores da importação do site, sem conversão nem IA. ' +
+      'O código do centro de custo é obrigatório: o Word não o contém. Cria uma ' +
+      'PROPOSTA para um humano revisar e aplicar; não grava orçamento.\n\n' +
+      'Leva avisos da soma das rubricas, do total frente ao plano ativo e da ordem ' +
+      'das versões. Outros modelos/formatos são recusados, sem preenchimento manual ' +
+      'pelo agente. Refazer com o mesmo tipo e data (ou nome, se não houver data) ' +
+      'substitui a pendente anterior. simular: true mostra os avisos sem subir arquivo nem criar proposta.',
+    inputSchema: {
+      caminho: z.string().min(1).describe('Caminho local do DOCX ou PDF no computador onde o MCP roda.'),
+      centro_de_custo: z.string().min(1).describe('Código exato do centro de custo (ex.: 30.068). Obrigatório.'),
+      tipo: z.enum(['original', 'remanejamento']).describe('Plano original ou remanejamento.'),
+      simular: z.boolean().optional().describe('Só confere a proposta, sem upload nem criação. Padrão: false.'),
+    },
+  },
+  proporPlano
 );
 
 buriti(

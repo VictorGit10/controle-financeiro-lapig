@@ -41,7 +41,7 @@ const ESPERADAS = [
 
 // Buriti (mig. 051, 054 e 055): as únicas que escrevem — propostas e, pelo login do operador, tarefas. Todas declaram
 // escrita sem ser destrutivas; listar_propostas e tarefas são leitura.
-const BURITI_ESCRITA = ['propor_balancete', 'perguntar', 'propor_tarefa', 'criar_tarefa', 'concluir_meu_passo',
+const BURITI_ESCRITA = ['propor_balancete', 'propor_plano', 'perguntar', 'propor_tarefa', 'criar_tarefa', 'concluir_meu_passo',
   'confirmar_passo', 'anotar_tarefa', 'pedir_atencao', 'concluir_tarefa'];
 const BURITI = [...BURITI_ESCRITA, 'listar_propostas', 'tarefas'];
 
@@ -65,9 +65,17 @@ const { tools } = await cliente.listTools();
 const nomes = tools.map((t) => t.name).sort();
 const faltando = [...ESPERADAS, ...BURITI].filter((n) => !nomes.includes(n));
 conferir(
-  'servidor anuncia exatamente as 9 tools de leitura + 11 do Buriti',
+  'servidor anuncia exatamente as 9 tools de leitura + 12 do Buriti',
   faltando.length === 0 && tools.length === ESPERADAS.length + BURITI.length,
   faltando.length ? `faltando: ${faltando.join(', ')}` : `${tools.length} tools`
+);
+
+const planoProposto = tools.find(t => t.name === 'propor_plano');
+conferir(
+  'propor_plano exige caminho, código do centro e tipo; simular é opcional',
+  ['caminho', 'centro_de_custo', 'tipo'].every(k => planoProposto?.inputSchema.required?.includes(k))
+    && !planoProposto?.inputSchema.required?.includes('simular')
+    && JSON.stringify(planoProposto?.inputSchema.properties?.tipo.enum) === JSON.stringify(['original', 'remanejamento'])
 );
 
 const semDescricao = tools.filter((t) => !t.description || t.description.length < 40);

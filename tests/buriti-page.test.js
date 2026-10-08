@@ -403,3 +403,34 @@ describe('Minhas tarefas e atribuição', () => {
     expect(supabaseClient.rpc).not.toHaveBeenCalled();
   });
 });
+
+describe('Propostas de plano no cartão do Buriti', () => {
+  it.each(['original', 'remanejamento'])('mostra tipo %s, avisos e Revisar e aplicar; usa revisão de plano', async tipo => {
+    const revisarPropostaPlano = vi.fn().mockResolvedValue(undefined);
+    const revisarPropostaBalancete = vi.fn();
+    vi.stubGlobal('PlanoTrabalhoPage', { revisarPropostaPlano, revisarPropostaBalancete });
+    const p = { id: "plano'\"sintetico", tipo: 'plano', status: 'pendente', project_id: 'x',
+      resumo: 'Plano sintético', payload: { tipo, avisos: ['Confira <valor>'] },
+      arquivo_path: 'x/plano.docx' };
+    db.propostas_agente = [p];
+    await page.load(root);
+    const botao = [...root.querySelectorAll('button')].find(b => b.textContent.includes('Revisar e aplicar'));
+    expect(botao).toBeDefined();
+    const acionar = vi.fn();
+    new Function('BuritiPage', botao.getAttribute('onclick'))({ revisar: acionar });
+    expect(acionar).toHaveBeenCalledWith(p.id);
+    expect(root.textContent).toContain(tipo === 'original' ? 'Plano original' : 'Remanejamento');
+    expect(root.textContent).toContain('Confira <valor>');
+    expect(root.querySelector('valor')).toBeNull();
+    await page.revisar(p.id);
+    expect(revisarPropostaPlano).toHaveBeenCalledWith(p, expect.any(Function));
+    expect(revisarPropostaBalancete).not.toHaveBeenCalled();
+  });
+  it('plano já decidido não mostra botão de aplicação', async () => {
+    db.propostas_agente = [{ id: 'p', tipo: 'plano', status: 'aplicada', resumo: 'Sintético', payload: { tipo: 'original' } }];
+    await page.load(root);
+    page.trocarAba('decididas');
+    await vi.waitFor(() => expect(root.textContent).toContain('Sintético'));
+    expect(root.textContent).not.toContain('Revisar e aplicar');
+  });
+});

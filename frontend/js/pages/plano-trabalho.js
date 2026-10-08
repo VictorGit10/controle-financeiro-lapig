@@ -1,7 +1,7 @@
 /* ============================================================
    Plano de Trabalho Page — orçamento previsto por rubrica
    Suporta upload de DOCX (plano original ou remanejamento)
-   com extração via Edge Function (Ollama Cloud).
+   com extração determinística, compartilhada com o Buriti.
    ============================================================ */
 
 Router.register('plano-trabalho', {
@@ -108,7 +108,7 @@ const PlanoTrabalhoPage = (() => {
       .order('name', { ascending: true });
 
     if (error) {
-      showToast('Erro ao carregar projetos: ' + error.message, 'error');
+      showToast('Não foi possível carregar os projetos. ' + detalheTecnico(error.message), 'error');
       return;
     }
     allProjects = data || [];
@@ -1045,21 +1045,21 @@ const PlanoTrabalhoPage = (() => {
 
   // Seletores Projeto + Tipo injetados no topo da revisão de PLANO
   // (no lote não existe mais o step-1 com esses campos).
-  function planoBatchSelectorsHTML() {
+  function planoBatchSelectorsHTML({ projectId = selectedProjectId, tipo = 'remanejamento', travarProjeto = false } = {}) {
     const projOpts = allProjects.map(p =>
-      `<option value="${p.id}" ${p.id === selectedProjectId ? 'selected' : ''}>${escapeAttr(p.name)}${p.code ? ' — ' + escapeAttr(p.code) : ''}</option>`
+      `<option value="${p.id}" ${p.id === projectId ? 'selected' : ''}>${escapeAttr(p.name)}${p.code ? ' — ' + escapeAttr(p.code) : ''}</option>`
     ).join('');
     return `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;padding:12px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-elevated);">
         <div class="form-group" style="margin:0;">
           <label class="form-label" style="font-size:12px;">Projeto *</label>
-          <select id="pti-project" class="form-input">${projOpts}</select>
+          <select id="pti-project" class="form-input" ${travarProjeto ? 'disabled' : ''}>${projOpts}</select>
         </div>
         <div class="form-group" style="margin:0;">
           <label class="form-label" style="font-size:12px;">Tipo *</label>
           <select id="pti-tipo" class="form-input">
-            <option value="original">Plano original</option>
-            <option value="remanejamento" selected>Remanejamento</option>
+            <option value="original" ${tipo === 'original' ? 'selected' : ''}>Plano original</option>
+            <option value="remanejamento" ${tipo === 'remanejamento' ? 'selected' : ''}>Remanejamento</option>
           </select>
         </div>
       </div>`;
@@ -1137,7 +1137,7 @@ const PlanoTrabalhoPage = (() => {
       };
     },
     async renderReview(hostEl, extracted, file) {
-      const rightHTML = `<div id="pt-review-form">${planoBatchSelectorsHTML()}${renderReviewForm(extracted, file.name)}</div>`;
+      const rightHTML = `<div id="pt-review-form">${this.reviewSelectors ? this.reviewSelectors() : planoBatchSelectorsHTML()}${renderReviewForm(extracted, file.name)}</div>`;
       const onMount = (rightEl) => { lucide.createIcons({ nodes: [rightEl] }); };
       const formOnly = () => {
         hostEl.innerHTML = rightHTML;
@@ -1164,68 +1164,75 @@ const PlanoTrabalhoPage = (() => {
       }
     },
     async save(hostEl, extracted, file) {
-      const targetProjectId = hostEl.querySelector('#pti-project')?.value;
-      const tipo = hostEl.querySelector('#pti-tipo')?.value || 'remanejamento';
-      if (!targetProjectId) throw new Error('Selecione o projeto.');
-
-      const payload = collectReviewForm(hostEl, extracted);
-      payload.project_id     = targetProjectId;
-      payload.tipo           = tipo;
-      payload.arquivo_nome   = file.name;
-      // No preenchimento manual nada foi extraído — gravar o esqueleto em
-      // branco como raw_extraction mentiria sobre a origem dos números.
-      payload.raw_extraction = extracted._manual
-        ? null
-        : (extracted.raw_extraction || extracted.data);
-
-      // Remanejamento redistribui entre rubricas — não muda o total. Quando
-      // muda, é digitação errada ou aporte, e os dois merecem uma pergunta
-      // antes de virar orçamento. Foi assim que a Adequação 08 do 30.068
-      // entrou com 9.000 a menos em bolsas: o número era plausível e ninguém
-      // tinha como notar. A conferência é aqui, antes do upload, para um
-      // cancelamento não deixar arquivo órfão no bucket.
-      if (tipo === 'remanejamento') {
-        const { data: ativo, error: errAtivo } = await supabaseClient
-          .rpc('get_plano_ativo', { p_project_id: targetProjectId });
-        const anterior = errAtivo ? NaN : Number(ativo?.valor_total_plano);
-        const novo = Number(payload.valor_total_plano);
-        // Falha na consulta não vira alerta falso nem silêncio: sem o plano
-        // anterior simplesmente não há o que comparar.
-        if (Number.isFinite(anterior) && Number.isFinite(novo) && Math.abs(novo - anterior) >= 0.01) {
-          const dif = novo - anterior;
-          // Mensagem em parágrafo corrido: confirmAction escapa o texto dentro
-          // de um <p>, então quebra de linha viraria espaço.
-          const ok = await confirmAction(
-            'Este remanejamento muda o valor TOTAL do plano: o plano ativo hoje é ' +
-            `${formatBRL(anterior)} e este documento traz ${formatBRL(novo)} ` +
-            `(diferença de ${dif > 0 ? '+' : ''}${formatBRL(dif)}). ` +
-            'Um remanejamento normalmente mantém o total e só troca dinheiro de rubrica — ' +
-            'confira se algum valor foi digitado errado. Salvar assim mesmo?'
-          );
-          if (!ok) throw new Error('Salvamento cancelado: o total diverge do plano ativo em ' + formatBRL(dif) + '.');
-        }
-      }
-
-      const safeName = file.name.replace(/[^\w.-]/g, '_');
-      const path = `${targetProjectId}/${Date.now()}_${safeName}`;
-      const upload = await supabaseClient.storage
-        .from(STORAGE_BUCKET)
-        .upload(path, file, { contentType: file.type || 'application/octet-stream' });
-      if (upload.error) throw new Error('Falha no upload do arquivo: ' + upload.error.message);
-      payload.arquivo_storage_path = path;
-
-      const { error } = await supabaseClient.rpc('upsert_plano_trabalho', { p_payload: payload });
-      if (error) {
-        await supabaseClient.storage.from(STORAGE_BUCKET).remove([path]).catch(() => {});
-        throw new Error('Erro ao salvar plano: ' + error.message);
-      }
-
-      // Mantém o projeto recém-salvo como default do próximo arquivo.
-      selectedProjectId = targetProjectId;
-      localStorage.setItem(LS_PROJECT_KEY, selectedProjectId);
-      return { label: payload.titulo || file.name };
+      return salvarPlano(hostEl, extracted, file);
     },
   };
+
+  // Importação e Buriti salvam pelo mesmo caminho; proposta_id é atômico na 056.
+  async function salvarPlano(hostEl, extracted, file, proposta = null) {
+    const targetProjectId = hostEl.querySelector('#pti-project')?.value;
+    if (proposta && targetProjectId !== proposta.project_id) throw new Error('O projeto deve ser o da proposta.');
+    const tipo = hostEl.querySelector('#pti-tipo')?.value || 'remanejamento';
+    if (!targetProjectId) throw new Error('Selecione o projeto.');
+
+    const payload = collectReviewForm(hostEl, extracted);
+    payload.project_id     = targetProjectId;
+    payload.tipo           = tipo;
+    if (proposta) payload.proposta_id = proposta.id;
+    payload.arquivo_nome   = file.name;
+    // No preenchimento manual nada foi extraído — gravar o esqueleto em
+    // branco como raw_extraction mentiria sobre a origem dos números.
+    payload.raw_extraction = extracted._manual
+      ? null
+      : (extracted.raw_extraction || extracted.data);
+
+    // Remanejamento redistribui entre rubricas — não muda o total. Quando
+    // muda, é digitação errada ou aporte, e os dois merecem uma pergunta
+    // antes de virar orçamento. Foi assim que a Adequação 08 do 30.068
+    // entrou com 9.000 a menos em bolsas: o número era plausível e ninguém
+    // tinha como notar. A conferência é aqui, antes do upload, para um
+    // cancelamento não deixar arquivo órfão no bucket.
+    if (tipo === 'remanejamento') {
+      const { data: ativo, error: errAtivo } = await supabaseClient
+        .rpc('get_plano_ativo', { p_project_id: targetProjectId });
+      const anterior = errAtivo || ativo?.valor_total_plano == null ? NaN : Number(ativo.valor_total_plano);
+      const novo = payload.valor_total_plano == null ? NaN : Number(payload.valor_total_plano);
+      // Falha na consulta não vira alerta falso nem silêncio: sem o plano
+      // anterior simplesmente não há o que comparar.
+      if (Number.isFinite(anterior) && Number.isFinite(novo) && Math.abs(novo - anterior) >= 0.01) {
+        const dif = novo - anterior;
+        // Mensagem em parágrafo corrido: confirmAction escapa o texto dentro
+        // de um <p>, então quebra de linha viraria espaço.
+        const ok = await confirmAction(
+          'Este remanejamento muda o valor TOTAL do plano: o plano ativo hoje é ' +
+          `${formatBRL(anterior)} e este documento traz ${formatBRL(novo)} ` +
+          `(diferença de ${dif > 0 ? '+' : ''}${formatBRL(dif)}). ` +
+          'Um remanejamento normalmente mantém o total e só troca dinheiro de rubrica — ' +
+          'confira se algum valor foi digitado errado. Salvar assim mesmo?'
+        );
+        if (!ok) throw new Error('Salvamento cancelado: o total diverge do plano ativo em ' + formatBRL(dif) + '.');
+      }
+    }
+
+    const safeName = file.name.replace(/[^\w.-]/g, '_');
+    const path = `${targetProjectId}/${Date.now()}_${safeName}`;
+    const upload = await supabaseClient.storage
+      .from(STORAGE_BUCKET)
+      .upload(path, file, { contentType: file.type || 'application/octet-stream' });
+    if (upload.error) throw new Error('Falha no upload do arquivo. ' + detalheTecnico(upload.error.message));
+    payload.arquivo_storage_path = path;
+
+    const { error } = await supabaseClient.rpc('upsert_plano_trabalho', { p_payload: payload });
+    if (error) {
+      await supabaseClient.storage.from(STORAGE_BUCKET).remove([path]).catch(() => {});
+      throw new Error('Erro ao salvar plano. ' + detalheTecnico(error.message));
+    }
+
+    // Mantém o projeto recém-salvo como default do próximo arquivo.
+    selectedProjectId = targetProjectId;
+    localStorage.setItem(LS_PROJECT_KEY, selectedProjectId);
+    return { label: payload.titulo || file.name };
+  }
 
   const BALANCETE_HANDLER = {
     type: 'balancete',
@@ -1382,6 +1389,65 @@ const PlanoTrabalhoPage = (() => {
         return salvarBalancete(hostEl, extracted, file, proposta.id);
       },
     };
+  }
+
+
+  /** Números vêm da proposta; o DOCX só é convertido para exibir ao lado. */
+  function buritiPlanoHandler(proposta) {
+    const payload = proposta.payload;
+    return {
+      ...PLANO_HANDLER,
+      title: 'Revisar plano proposto pelo Buriti',
+      accept: '.docx,.pdf',
+      extLabel: 'DOCX / PDF',
+      validExt: name => /\.(docx|pdf)$/i.test(name),
+      fallbackExt: undefined,
+      manualFallback: undefined,
+      checkDeps() {
+        if (/\.docx$/i.test(payload.arquivo_nome || proposta.arquivo_path)) PLANO_HANDLER.checkDeps();
+      },
+      reviewSelectors: () => planoBatchSelectorsHTML({
+        projectId: proposta.project_id, tipo: payload.tipo, travarProjeto: true,
+      }),
+      async parse(file) {
+        const ex = structuredClone(payload.extraido);
+        ex.warnings = [...new Set([...(ex.warnings || []), ...(payload.avisos || [])])];
+        if (/\.docx$/i.test(file.name)) {
+          const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+          ex._html = result.value || '';
+        }
+        return ex;
+      },
+      async save(hostEl, extracted, file) {
+        return salvarPlano(hostEl, extracted, file, proposta);
+      },
+    };
+  }
+
+  async function revisarPropostaPlano(proposta, onFinished) {
+    if (proposta.tipo !== 'plano' || proposta.status !== 'pendente') {
+      throw new Error('Só é possível revisar uma proposta de plano pendente.');
+    }
+    const payload = proposta.payload;
+    if (!payload?.extraido?.data || !['original', 'remanejamento'].includes(payload.tipo)) {
+      throw new Error('A proposta não contém os dados do plano. Peça ao Buriti para refazê-la.');
+    }
+    await getImportHandlers();
+    if (!allProjects.some(p => p.id === proposta.project_id)) throw new Error('O projeto da proposta não está disponível neste login.');
+    if (!proposta.arquivo_path) throw new Error('A proposta não tem o documento anexado.');
+    const nome = payload.arquivo_nome || proposta.arquivo_path.split('/').pop();
+    if (!/\.(docx|pdf)$/i.test(nome)) throw new Error('A proposta deve anexar DOCX ou PDF.');
+    const { data: blob, error } = await supabaseClient.storage
+      .from('propostas-agente').download(proposta.arquivo_path);
+    if (error) throw new Error('Não foi possível baixar o documento da proposta. ' + detalheTecnico(error.message));
+    const type = /\.pdf$/i.test(nome) ? 'application/pdf'
+      : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    ImportQueue.open({
+      title: 'Revisar plano proposto pelo Buriti',
+      handlers: [buritiPlanoHandler(proposta)],
+      files: [new File([blob], nome, { type })],
+      onFinished,
+    });
   }
 
   /** Nome da rubrica pelo código — a página do Buriti mostra as sugestões por extenso. */
@@ -1927,7 +1993,7 @@ const PlanoTrabalhoPage = (() => {
         </div>
         <div class="form-group">
           <label class="form-label">Data do documento</label>
-          <input type="date" class="form-input" data-pt-field="data_documento" value="">
+          <input type="date" class="form-input" data-pt-field="data_documento" value="${toInputDate(d.data_documento || '')}">
         </div>
       </div>
 
@@ -2067,7 +2133,7 @@ const PlanoTrabalhoPage = (() => {
   }
 
   return {
-    load, onProjectChange, switchTab, onImportClick, getImportHandlers, revisarPropostaBalancete, rubricaNome,
+    load, onProjectChange, switchTab, onImportClick, getImportHandlers, revisarPropostaBalancete, revisarPropostaPlano, rubricaNome,
     visualizar, ativar, excluir, baixar,
     verBalancete, excluirBalancete, baixarBalancete,
     toggleRubrica,

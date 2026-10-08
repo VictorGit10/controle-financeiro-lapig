@@ -117,3 +117,73 @@ export function montarPropostaBalancete({ texto, arquivoNome, mapa = [], sugesto
     },
   };
 }
+
+// Mesma detecção da 052: formato de CPF + dígitos verificadores. Não exibe
+// o valor recusado, inclusive quando ele veio num aviso ou nome de arquivo.
+function contemCpf(texto) {
+  const candidatos = texto.match(/(?<![0-9])[0-9]{3}\.?[0-9]{3}\.?[0-9]{3}-?[0-9]{2}(?![0-9])/g) || [];
+  return candidatos.some(c => {
+    const d = c.replace(/\D/g, '').split('').map(Number);
+    if (new Set(d).size === 1) return false;
+    const dv = n => {
+      const resto = d.slice(0, n).reduce((s, v, i) => s + v * (n + 1 - i), 0) % 11;
+      return resto < 2 ? 0 : 11 - resto;
+    };
+    return dv(9) === d[9] && dv(10) === d[10];
+  });
+}
+
+/** Pura: compara valores já extraídos/RPC, sem somar ou projetar no MCP. */
+export function montarPropostaPlano({ extraido, arquivoNome, tipo, planoAtivo = null }) {
+  const recusar = motivo => ({ ok: false, problemas: [motivo] });
+  if (!['original', 'remanejamento'].includes(tipo)) return recusar('Tipo do plano: original ou remanejamento.');
+  if (!extraido?.data || !Array.isArray(extraido.data.rubricas) || !extraido.data.rubricas.length) {
+    return recusar('Nenhuma rubrica extraída do plano — confira o documento.');
+  }
+  if (contemCpf(JSON.stringify({ extraido, arquivoNome }))) {
+    return recusar('O conteúdo extraído contém CPF. A proposta não foi criada; retire dados pessoais dos campos do plano.');
+  }
+  // Projeta só o contrato do parser. HTML bruto e listas de equipe nunca
+  // entram no payload; a revisão gera o HTML de novo apenas para exibição.
+  const data = {};
+  for (const campo of ['titulo', 'coordenador', 'data_documento', 'prazo_inicio', 'prazo_fim',
+    'valor_total_plano', 'valor_despesas_projeto', 'valor_cip', 'valor_dao', 'receita_origem']) {
+    if (Object.hasOwn(extraido.data, campo)) data[campo] = extraido.data[campo];
+  }
+  data.rubricas = extraido.data.rubricas.map(r => ({
+    rubrica_code: r.rubrica_code, descricao_livre: r.descricao_livre, valor_previsto: r.valor_previsto,
+  }));
+  data.desembolsos = (extraido.data.desembolsos || []).map(d => ({
+    parcela: d.parcela, data_prevista: d.data_prevista, data_texto: d.data_texto,
+    valor: d.valor, valor_texto: d.valor_texto,
+  }));
+  const warnings = [...(extraido.warnings || [])];
+  const avisos = [...warnings];
+  const totalNovo = data.valor_total_plano;
+  const totalAtivo = planoAtivo?.valor_total_plano;
+  const totalDiferente = tipo === 'remanejamento' && totalNovo != null && totalAtivo != null
+    ? Math.abs(Number(totalNovo) - Number(totalAtivo)) >= 0.01 : null;
+  const originalExistente = tipo === 'original' && planoAtivo != null;
+  const dataAnterior = data.data_documento && planoAtivo?.data_documento
+    ? data.data_documento < planoAtivo.data_documento : null;
+  if (totalDiferente) avisos.push(
+    `Este remanejamento muda o valor total: plano ativo ${BRL(totalAtivo)}; documento ${BRL(totalNovo)}. Confira antes de aplicar.`
+  );
+  if (originalExistente) avisos.push('Este plano foi indicado como original, mas já existe um plano ativo neste centro de custo. Confira a ordem das versões.');
+  if (dataAnterior) avisos.push(
+    `A data do documento (${DATA(data.data_documento)}) é anterior à do plano ativo (${DATA(planoAtivo.data_documento)}). Confira a ordem das versões.`
+  );
+  return {
+    ok: true, problemas: [],
+    chave: `${tipo}:${data.data_documento || arquivoNome}`,
+    resumo: `${tipo === 'original' ? 'Plano original' : 'Remanejamento'} · ${BRL(totalNovo)} · ${data.rubricas.length} rubrica(s) · ${avisos.length} aviso(s)`,
+    payload: { versao: 1, arquivo_nome: arquivoNome, tipo, extraido: { data, warnings }, avisos,
+      conferencias: {
+        soma_rubricas_diverge: warnings.some(w => w.startsWith('A soma das rubricas')),
+        total_remanejamento_diverge: totalDiferente,
+        original_com_plano_ativo: originalExistente,
+        data_anterior_ao_plano_ativo: dataAnterior,
+      },
+    },
+  };
+}

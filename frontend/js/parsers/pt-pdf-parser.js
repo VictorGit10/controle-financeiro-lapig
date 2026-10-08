@@ -32,7 +32,7 @@
 
 import { parseBRL } from '../pure-fns.js';
 import { lookupRubrica } from './pt-rubrica-lookup.js';
-import { PtFormatError } from './pt-parser.js';
+import { PtFormatError, extractDataDocumento } from './pt-parser.js';
 import { detectPtModel, normalizeDocText } from './pt-model-detect.js';
 
 const TITULO_SECAO = 'plano de aplicacao dos recursos financeiros';
@@ -275,6 +275,7 @@ export function parsePtFromPdfText(text) {
   const linhaDao = rubricas.find(r => r.rubrica_code === 'dao');
 
   const data = {
+    data_documento: extractDataDocumento(text),
     titulo: cab.titulo,
     coordenador: cab.coordenador,
     prazo_inicio: cab.prazo_inicio,

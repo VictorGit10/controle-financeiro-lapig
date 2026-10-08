@@ -128,15 +128,16 @@ Vale a mesma regra do Claude Code, e pelo mesmo motivo: o Codex também aceita u
 ficaria versionado, com a senha dentro. Use o de usuário. O servidor só aparece
 depois de reiniciar o cliente.
 
-## Buriti — o agente que propõe (mig. 051)
+## Buriti — o agente que propõe (mig. 051 e 056)
 
 O **Buriti** é o mesmo pacote rodando com **outra credencial**: um usuário de
 papel `agente`. Com esse login, as tools de leitura enxergam só o escopo dele
-(`user_projects`) e as três tools do Buriti funcionam:
+(`user_projects`) e as tools de proposta e acompanhamento do Buriti funcionam:
 
 | Tool | Faz |
 |---|---|
 | `propor_balancete` | lê um PDF da FUNAPE com o mesmo leitor do site e cria uma **proposta** (com as perguntas de classificação, sugestão e justificativa de cada uma) |
+| `propor_plano` | lê DOCX PROAD/UFG (ou PDF assinado) pelos mesmos parsers do site e propõe plano original/remanejamento; centro de custo obrigatório, avisos de total e ordem, aplicação humana atômica pela 056 |
 | `listar_propostas` | propostas e a decisão humana sobre cada uma — inclusive a resposta de uma pergunta e o motivo de uma rejeição |
 | `perguntar` | deixa uma pergunta na página Buriti do site |
 
@@ -151,6 +152,15 @@ Teste sem banco, nos PDFs de uma pasta:
 ```bash
 node scripts/propor-balancetes-local.js "C:/caminho/da/pasta"
 ```
+
+Para conferir um plano antes de propor, chame `propor_plano` com
+`{ caminho: "C:/planos/sintetico.docx", centro_de_custo: "30.068", tipo: "remanejamento", simular: true }`.
+Sem `simular`, o original é anexado em `propostas-agente`; só um humano
+grava o orçamento na página Buriti. Refazer com o mesmo tipo e data do
+documento (ou nome do arquivo quando o parser não fornece data) substitui
+a proposta pendente. O MCP não converte formatos nem preenche modelos
+fora do padrão; CPF detectado no resultado é recusado antes do upload.
+A migração 056 precisa estar aplicada para criar/aplicar propostas de plano.
 
 ### Instalar o Buriti (passo do Victor)
 

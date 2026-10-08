@@ -43,7 +43,7 @@ const RE_TOPLEVEL = /^\s*([a-h])\s*[-–—]/i;
 const RE_TOTAL_FINAL = /^\s*total\s*$/i;
 
 // Header da tabela ("Item", "Valor (R$)", "1- Previsão de Despesas (...)").
-const RE_HEADER_LIKE = /^\s*(item|valor\s*\(?r?\$?\)?|1-?\s*previs[aã]o)/i;
+const RE_HEADER_LIKE = /^\s*(item|valor\s*\(?r?\$?\)?|[12]\s*[-–—]?\s*(previs[aã]o|receita))/i;
 
 // Aliases para mapear letras top-level a um rubrica_code (quando há subitens
 // genéricos, o subitem herda o code do pai).
@@ -184,6 +184,16 @@ function parseLinhas(tabela) {
   return out;
 }
 
+// Só a data explicitamente rotulada; não confundir vigência ou assinatura.
+export function extractDataDocumento(texto) {
+  const m = texto.match(/data\s+(?:do\s+)?documento\s*:?\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])));
+  if (d.getUTCFullYear() !== Number(m[3]) || d.getUTCMonth() + 1 !== Number(m[2])
+      || d.getUTCDate() !== Number(m[1])) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
 // ── Cabeçalho (título, prazos, CIP, DAO, etc.) ──────────────
 
 function extractCabecalho(doc) {
@@ -207,6 +217,7 @@ function extractCabecalho(doc) {
   }
 
   return {
+    data_documento: extractDataDocumento(fullText),
     titulo: null,
     coordenador: null,
     prazo_inicio,
@@ -217,6 +228,38 @@ function extractCabecalho(doc) {
     valor_despesas_projeto: null,
     receita_origem: null,
   };
+}
+
+// Despesas do projeto são comparáveis às rubricas; o total geral pode incluir
+// CIP e DAO. O resumo pode estar em outra tabela, fora da tabela canônica.
+function totalDeclarado(tabela, doc) {
+  let despesas = null, receita = null, total = null, totalPlano = null;
+  let cip = null, dao = null;
+  for (const tr of doc.querySelectorAll('tr')) {
+    const cells = Array.from(tr.children).map(textOf);
+    const label = cells[0] || '';
+    const previsao = /^(?:[12]\s*[-–—]?\s*)?previs[ãa]o de despesas\b/i.test(label);
+    const entrada = /^1\s*[-–—]?\s*receita\b/i.test(label);
+    const final = /^total$/i.test(label) && tabela.contains(tr);
+    const geral = /^(?:valor\s+)?total do plano$/i.test(label);
+    const indiretos = /^previs[ãa]o de custos indiretos\b/i.test(label);
+    const administrativo = /^d\.?\s*a\.?\s*o\b/i.test(label);
+    if (!previsao && !entrada && !final && !geral && !indiretos && !administrativo) continue;
+    for (let i = cells.length - 1; i > 0; i--) {
+      if (!/\d/.test(cells[i]) || parseBRL(cells[i]) == null) continue;
+      const valor = parseBRL(cells[i]);
+      if (previsao) despesas = valor;
+      else if (geral) totalPlano = valor;
+      else if (final) total ??= valor; // não trocar o total geral pelo subtotal de CIP
+      else if (indiretos) cip = valor;
+      else if (administrativo) dao = valor;
+      else receita = valor;
+      break;
+    }
+  }
+  const m = textOf(doc.body || doc.documentElement)
+    .match(/valor total do plano\s*:?\s*r?\$?\s*([\d.,]+)/i);
+  return { despesas, total: totalPlano ?? total ?? receita ?? (m ? parseBRL(m[1]) : null), cip, dao };
 }
 
 // ── Parser principal ───────────────────────────────────────
@@ -248,6 +291,24 @@ export function parsePtFromHtml(html) {
   };
 
   const warnings = [];
+  const declaracao = totalDeclarado(tabela, doc);
+  const declarado = declaracao.despesas ?? declaracao.total;
+  const cip = declaracao.cip ?? cabecalho.valor_cip;
+  const dao = declaracao.dao ?? cabecalho.valor_dao;
+  // Só comparar com custos adicionais quando ambos foram lidos. Ausência
+  // não é zero; as rubricas e o valor extraído continuam intactos.
+  const comCustos = declaracao.despesas == null && cip != null && dao != null
+    ? valor_total_plano + cip + dao : null;
+  const rubricasBatem = declarado != null && Math.abs(valor_total_plano - declarado) < 0.01;
+  const comCustosBate = comCustos != null && declarado != null && Math.abs(comCustos - declarado) < 0.01;
+  if (declarado != null && !rubricasBatem && !comCustosBate) {
+    warnings.push(
+      `A soma das rubricas (${valor_total_plano.toFixed(2)}) não bate com o total declarado ` +
+      `no plano (${declarado.toFixed(2)}). ` +
+      (comCustos != null ? `Com CIP e DAO declarados, a soma é ${comCustos.toFixed(2)}. ` : '') +
+      'Confira antes de salvar.'
+    );
+  }
   if (rubricas.length === 0) {
     warnings.push('Tabela encontrada mas nenhuma rubrica com valor extraída — confira o documento.');
   }
