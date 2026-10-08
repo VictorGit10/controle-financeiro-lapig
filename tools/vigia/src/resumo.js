@@ -50,6 +50,7 @@ var VigiaResumo = (function () {
     var detalhe = [t.responsavel ? limpo(t.responsavel, 80) : '', SITUACOES[t.situacao] || '', prazo(t.prazo, hoje)].filter(Boolean).join(' · ');
     var linhas = ['• ' + cabeca + (detalhe ? ' — ' + detalhe : '')];
     if (t.precisa_atencao && t.motivo_atencao) linhas.push('  Precisa de você: ' + limpo(t.motivo_atencao, 300));
+    if (t.aviso_responsavel) linhas.push('  Precisa de você: ' + limpo(t.aviso_responsavel, 300));
     if (t.ultima_atualizacao && t.ultima_atualizacao.resumo) {
       linhas.push('  Última atualização (' + quando(t.ultima_atualizacao.ocorrido_em) + '): ' + limpo(t.ultima_atualizacao.resumo, 400));
     }
@@ -63,12 +64,12 @@ var VigiaResumo = (function () {
   function textoResumoDiario(estado, hoje) {
     var tarefas = (estado.tarefas || []).filter(function (t) { return ['concluida','cancelada'].indexOf(t.status) < 0; });
     var detalhadas = estado.resumo_tarefas || null;
-    var precisam = (detalhadas || tarefas).filter(function (t) { return t.precisa_atencao; });
+    var precisam = (detalhadas || tarefas).filter(function (t) { return t.precisa_atencao || t.aviso_responsavel; });
     var linhas = ['Vigia · ' + hoje, 'Tarefas abertas: ' + tarefas.length, 'Precisam de você: ' + precisam.length,
       'Mensagens para esclarecer: ' + (estado.esclarecer == null ? 'indisponível' : estado.esclarecer), 'Rotina: ' + (estado.rotina == null ? 'indisponível' : estado.rotina),
       'Saúde: ' + (estado.saude === 'ok' ? 'checagem em dia' : 'checagem requer atenção')];
     if (detalhadas) {
-      var outras = detalhadas.filter(function (t) { return !t.precisa_atencao; });
+      var outras = detalhadas.filter(function (t) { return !t.precisa_atencao && !t.aviso_responsavel; });
       if (precisam.length) {
         linhas.push('', 'PRECISA DE VOCÊ');
         precisam.forEach(function (t) { linhas = linhas.concat(linhaTarefa(t, hoje)); });

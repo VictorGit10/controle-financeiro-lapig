@@ -304,6 +304,14 @@ describe('Minhas tarefas e atribuição', () => {
     expect(root.querySelector('.buriti-ultima').textContent).toContain('Esperando alguém');
     expect(root.querySelector('.buriti-ultima a').href).toBe('https://exemplo.invalid/doc');
   });
+  it('admin vê o aviso do responsável junto do pedido manual, sem um apagar o outro', async () => {
+    db.tarefas[0].motivo_atencao = 'Autorizar prorrogação'; db.tarefas[0].aviso_responsavel = 'Arthur: travado';
+    db.tarefas[1].precisa_atencao = false; db.tarefas[1].aviso_responsavel = 'Arthur atualizou; confirmar';
+    await window.BuritiTarefasUI.tarefas(root);
+    const um = root.querySelector('[data-tarefa="t1"] .buriti-bloco--aviso').textContent;
+    expect(um).toContain('Autorizar prorrogação'); expect(um).toContain('Arthur: travado');
+    expect(root.querySelector('[data-tarefa="t2"] .buriti-bloco--aviso').textContent).toContain('Arthur atualizou; confirmar');
+  });
   it('com um passo só, o formulário não pede para marcar passos', async () => {
     atribuir();
     await window.BuritiTarefasUI.tarefas(root, 'todas', true);

@@ -29,21 +29,20 @@ language sql immutable security definer set search_path=public,pg_temp as $$
     when 'travado' then 'Travado' when 'feito' then 'Feito' end;
 $$;
 
--- Motivos de "precisa de você" que a própria atualização põe e tira. Os demais (pedido do Buriti, prazo,
--- mensagem do vigia) só saem por quem os resolve.
-create function public._motivo_automatico(p text) returns boolean
-language sql immutable security definer set search_path=public,pg_temp as $$
-  select p is null or p like '%; confirmar' or p like '%: travado';
-$$;
+-- Aviso que a atualização do responsável põe e tira ("Arthur: travado", "Arthur atualizou; confirmar"). Fica
+-- numa coluna própria para nunca mexer no "precisa de você" posto pelo Victor, pelo Buriti, pelo prazo ou
+-- pelo vigia (revisão do GPT-6.1 Sol, 08/10: distinguir pelo texto apagava pedido manual parecido).
+alter table public.tarefas add column aviso_responsavel text check (length(aviso_responsavel)<=300);
 
--- Sem passo da pessoa esperando confirmação, o aviso "; confirmar" sai. Vale para confirmar e dispensar,
--- pelo Victor na página ou pelo Buriti.
+-- Sem passo da pessoa esperando confirmação, o aviso de confirmar sai (o novo, da coluna própria, e o antigo
+-- da 055, "registrou um passo; confirmar"). Vale para confirmar e dispensar, pelo Victor ou pelo Buriti.
 create function public._limpar_confirmar(p_tarefa uuid) returns void
 language plpgsql security definer set search_path=public,pg_temp as $$
 begin
   if not exists(select 1 from public.tarefa_passos where tarefa_id=p_tarefa and estado='sugerido' and ultimo_feito_id is not null) then
+    update public.tarefas set aviso_responsavel=null where id=p_tarefa and aviso_responsavel like '%; confirmar';
     update public.tarefas set precisa_atencao=false,motivo_atencao=null
-     where id=p_tarefa and coalesce(motivo_atencao,'') like '%; confirmar';
+     where id=p_tarefa and coalesce(motivo_atencao,'') like '%registrou um passo; confirmar';
   end if;
 end $$;
 
@@ -69,7 +68,7 @@ end $$;
 create function public.registrar_atualizacao(p_tarefa uuid,p_situacao text,p_texto text,
   p_link text default null,p_passos uuid[] default null) returns uuid
 language plpgsql security definer set search_path=public,pg_temp as $$
-declare t public.tarefas; nome text; primeiro text; texto text; evento uuid; marcados uuid[]; motivo text;
+declare t public.tarefas; nome text; primeiro text; texto text; evento uuid; marcados uuid[]; aviso text;
 begin
   t:=public._humano_tarefa(p_tarefa,false);
   if not public.is_admin() and t.responsavel_id is distinct from auth.uid() then
@@ -98,22 +97,18 @@ begin
     nome||' · '||public._rotulo_situacao(p_situacao)||': '||texto,
     jsonb_build_object('situacao',p_situacao,'texto',texto,'link',p_link,'por',nome,'passos',to_jsonb(marcados)));
   update public.tarefa_passos set estado='sugerido',evento_id=evento,ultimo_feito_id=evento where id=any(marcados);
-  -- "Precisa de você": travado pede o Victor; passo marcado pede confirmação; saiu do travado, o aviso de
-  -- travado sai (ou volta a ser o de confirmar, se ainda há passo da pessoa esperando). Motivo que não é
-  -- destes dois automáticos (pedido do Buriti, prazo, mensagem) nunca é sobrescrito: segue até alguém resolver.
-  if not public._motivo_automatico(t.motivo_atencao) then motivo:=t.motivo_atencao;
-  elsif p_situacao='travado' then motivo:=primeiro||': travado';
-  elsif cardinality(marcados)>0 then motivo:=primeiro||' atualizou; confirmar';
-  elsif coalesce(t.motivo_atencao,'') like '%: travado' then
-    motivo:=case when exists(select 1 from public.tarefa_passos where tarefa_id=t.id and estado='sugerido'
+  -- Aviso do responsável: travado pede o Victor; passo marcado pede confirmação; saiu do travado, o aviso
+  -- de travado sai (ou volta a ser o de confirmar, se ainda há passo da pessoa esperando).
+  if p_situacao='travado' then aviso:=primeiro||': travado';
+  elsif cardinality(marcados)>0 then aviso:=primeiro||' atualizou; confirmar';
+  elsif coalesce(t.aviso_responsavel,'') like '%: travado' then
+    aviso:=case when exists(select 1 from public.tarefa_passos where tarefa_id=t.id and estado='sugerido'
       and ultimo_feito_id is not null) then primeiro||' atualizou; confirmar' end;
-  else motivo:=t.motivo_atencao;
+  else aviso:=t.aviso_responsavel;
   end if;
-  update public.tarefas set situacao=p_situacao,ultima_atualizacao_id=evento,
+  update public.tarefas set situacao=p_situacao,ultima_atualizacao_id=evento,aviso_responsavel=aviso,
     status=case when p_situacao='esperando' then 'aguardando_terceiro' else 'em_andamento' end,
-    precisa_atencao=case when motivo is null then false
-      when motivo is distinct from t.motivo_atencao then true else precisa_atencao end,
-    motivo_atencao=motivo,atualizada_em=now() where id=t.id;
+    atualizada_em=now() where id=t.id;
   return evento;
 end $$;
 
@@ -134,6 +129,51 @@ begin
   update public.tarefa_passos set estado='confirmado',evento_id=v,confirmado_por=auth.uid(),confirmado_em=now() where id=s.id;
   update public.tarefas set atualizada_em=now() where id=t.id;
   perform public._limpar_confirmar(t.id);
+end $$;
+
+-- As duas RPCs da 055 que ainda não conferiam o passo depois do lock (revisão de 08/10): um passo apagado por
+-- buriti_editar_passos entre a leitura e o lock geraria evento com passo nulo e "sucesso" sem efeito.
+create or replace function public.buriti_concluir_passo(p_passo uuid,p_nota text) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare s public.tarefa_passos; t public.tarefas; nota text; v uuid;
+begin
+  select * into s from public.tarefa_passos where id=p_passo;
+  t:=public._buriti_tarefa(s.tarefa_id);
+  select * into s from public.tarefa_passos where id=p_passo for update;
+  if not found then raise exception 'Passo inexistente.' using errcode='22023'; end if;
+  if s.executor<>'buriti' then raise exception 'Passo de pessoa: use buriti_confirmar_passo com a prova.' using errcode='22023'; end if;
+  if s.estado not in ('pendente','sugerido') then raise exception 'Passo já resolvido.' using errcode='22023'; end if;
+  nota:=public._buriti_texto(p_nota,'O que foi feito');
+  v:=public._evento_tarefa(t.id,'buriti:'||gen_random_uuid(),'confirmacao','buriti','Feito pelo Buriti: '||nota,
+    jsonb_build_object('passo_id',s.id,'estado','confirmado'));
+  update public.tarefa_passos set estado='confirmado',evento_id=v,confirmado_por=auth.uid(),confirmado_em=now() where id=s.id;
+  update public.tarefas set atualizada_em=now() where id=t.id;
+end $$;
+
+create or replace function public.registrar_feito(p_passo uuid,p_nota text,p_link text default null) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare s public.tarefa_passos; t public.tarefas; nome text; evento uuid;
+begin
+  select * into s from public.tarefa_passos where id=p_passo;
+  t:=public._humano_tarefa(s.tarefa_id,false);
+  if not public.is_admin() and t.responsavel_id is distinct from auth.uid() then
+    raise exception 'Só o responsável ou admin registra que fez.' using errcode='42501'; end if;
+  select * into s from public.tarefa_passos where id=p_passo for update;
+  if not found then raise exception 'Passo inexistente.' using errcode='22023'; end if;
+  if s.executor='buriti' then raise exception 'Este passo é do Buriti.' using errcode='22023'; end if;
+  if t.status in ('concluida','cancelada') or s.estado not in ('pendente','sugerido') then
+    raise exception 'Passo ou tarefa encerrados.' using errcode='22023'; end if;
+  if coalesce(length(btrim(p_nota)),0)=0 or length(p_nota)>2000 then
+    raise exception 'Nota obrigatória, até 2000 caracteres.' using errcode='22023'; end if;
+  if p_link is not null and (length(p_link)>500 or p_link !~ '^https://[^/[:space:]?#]+[^[:space:]]*$') then
+    raise exception 'Link deve começar com https:// e ter até 500 caracteres.' using errcode='22023'; end if;
+  nome:=public._nome_responsavel(auth.uid());
+  evento:=public._evento_tarefa(t.id,'feito:'||gen_random_uuid(),'sugestao','humano',
+    'Feito por '||nome||': '||btrim(p_nota),
+    jsonb_build_object('passo_id',s.id,'nota',btrim(p_nota),'link',p_link,'por',nome));
+  update public.tarefa_passos set estado='sugerido',evento_id=evento,ultimo_feito_id=evento where id=s.id;
+  update public.tarefas set precisa_atencao=true,motivo_atencao=split_part(nome,' ',1)||' registrou um passo; confirmar',
+    atualizada_em=now() where id=t.id;
 end $$;
 
 -- ---------- 2. O Buriti corrige a tarefa que criou ----------
@@ -263,7 +303,8 @@ begin
   motivo:=public._buriti_texto(p_motivo,'Motivo');
   perform public._evento_tarefa(t.id,'status:'||gen_random_uuid(),'status','buriti',
     'Cancelada pelo Buriti a pedido do Victor: '||motivo,jsonb_build_object('antes',t.status,'depois','cancelada'));
-  update public.tarefas set status='cancelada',precisa_atencao=false,motivo_atencao=null,atualizada_em=now() where id=t.id;
+  update public.tarefas set status='cancelada',precisa_atencao=false,motivo_atencao=null,aviso_responsavel=null,
+    atualizada_em=now() where id=t.id;
 end $$;
 
 -- ---------- 3. Avisos só no essencial ----------
@@ -311,7 +352,7 @@ begin
         order by recebida_em desc limit 40) m),'[]'),
     'resumo_tarefas',coalesce((select jsonb_agg(jsonb_build_object('id',t.id,'titulo',t.titulo,'centro_custo',pr.code,
       'responsavel',t.responsavel,'status',t.status,'situacao',t.situacao,'prazo',t.prazo,
-      'precisa_atencao',t.precisa_atencao,'motivo_atencao',t.motivo_atencao,
+      'precisa_atencao',t.precisa_atencao,'motivo_atencao',t.motivo_atencao,'aviso_responsavel',t.aviso_responsavel,
       'ultima_atualizacao',(select jsonb_build_object('resumo',e.resumo,'ocorrido_em',e.ocorrido_em)
         from public.tarefa_eventos e where e.id=t.ultima_atualizacao_id),
       'passos_abertos',(select count(*) from public.tarefa_passos s where s.tarefa_id=t.id and s.estado in ('pendente','sugerido')))
@@ -330,14 +371,15 @@ do $$
 declare f text;
 begin
   foreach f in array array['public._rotulo_situacao(text)','public._buriti_tarefa_propria(uuid)',
-    'public._vigia_aviso_essencial()','public._motivo_automatico(text)','public._limpar_confirmar(uuid)',
+    'public._vigia_aviso_essencial()','public._limpar_confirmar(uuid)',
     'public._decidir_passo(uuid,text,text)'] loop
     execute format('revoke all on function %s from public, anon, authenticated',f);
   end loop;
   foreach f in array array['public.registrar_atualizacao(uuid,text,text,text,uuid[])',
     'public.buriti_editar_tarefa(uuid,jsonb,text)','public.buriti_editar_passos(uuid,jsonb,text)',
     'public.buriti_dispensar_passo(uuid,text)','public.buriti_cancelar_tarefa(uuid,text)',
-    'public.buriti_confirmar_passo(uuid,text)','public.vigia_contexto()'] loop
+    'public.buriti_confirmar_passo(uuid,text)','public.vigia_contexto()','public.buriti_concluir_passo(uuid,text)',
+    'public.registrar_feito(uuid,text,text)'] loop
     execute format('revoke all on function %s from public, anon',f);
     execute format('grant execute on function %s to authenticated',f);
   end loop;
@@ -349,7 +391,7 @@ declare r record;
 begin
   for r in select p.oid,p.proname,p.prosecdef,p.proconfig from pg_proc p
     where p.pronamespace='public'::regnamespace and p.proname in ('_rotulo_situacao','_buriti_tarefa_propria',
-      '_motivo_automatico','_limpar_confirmar','_decidir_passo',
+      '_limpar_confirmar','_decidir_passo','buriti_concluir_passo','registrar_feito',
       '_vigia_aviso_essencial','registrar_atualizacao','buriti_editar_tarefa','buriti_editar_passos',
       'buriti_dispensar_passo','buriti_cancelar_tarefa','buriti_confirmar_passo','vigia_contexto') loop
     if not r.prosecdef or not ('search_path=public, pg_temp'=any(r.proconfig)) or has_function_privilege('anon',r.oid,'EXECUTE') then

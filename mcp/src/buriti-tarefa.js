@@ -102,7 +102,7 @@ export function criarToolsTarefas({ rpc, consultar, centroPorCodigo, rpcOperador
       const id = await resolver(entrada);
       const teto = Math.min(limite, 200);
       const linhas = await consultar('tarefas', sb => {
-        let q = sb.from('tarefas').select('id,project_id,titulo,descricao,responsavel,status,situacao,precisa_atencao,' +
+        let q = sb.from('tarefas').select('id,project_id,titulo,descricao,responsavel,status,situacao,precisa_atencao,aviso_responsavel,' +
           'motivo_atencao,prazo,prazo_motivo,proxima_checagem,criada_em,concluida_em,criada_pelo_buriti,projects(name,code),' +
           'atualizacao:tarefa_eventos!ultima_atualizacao_id(tipo,origem,detalhe,ocorrido_em),' +
           'tarefa_passos(id,ordem,descricao,quem,executor,estado,confirmado_em,evento_id,' +
@@ -119,7 +119,7 @@ export function criarToolsTarefas({ rpc, consultar, centroPorCodigo, rpcOperador
       });
       return { tarefas: linhas.map(({ atualizacao, ...t }) => ({ ...t, ultima_atualizacao: lerAtualizacao(atualizacao),
         tarefa_passos: t.tarefa_passos.map(s => ({ ...s, feito: registroFeito(s) })) })), truncado: linhas.length === teto,
-        nota: 'Leitura escopada pelo RLS. `ultima_atualizacao` é o que o responsável disse por último (situação, texto, link). ' +
+        nota: 'Leitura escopada pelo RLS. `ultima_atualizacao` é o que o responsável disse por último (situação, texto, link); `aviso_responsavel` é o alerta que a atualização dele pôs (travado, confirmar), separado de `motivo_atencao`. ' +
           'Eventos limitados aos 10 últimos de cada tarefa; passos sugeridos ainda exigem confirmação.' };
     },
   };

@@ -3,7 +3,7 @@ window.BuritiTarefasUI = (() => {
   const f = () => window.BuritiTarefas;
   let geracao = 0;
   const ocupados = new Set();
-  const CAMPOS = 'id,project_id,titulo,descricao,responsavel,responsavel_id,status,situacao,precisa_atencao,motivo_atencao,' +
+  const CAMPOS = 'id,project_id,titulo,descricao,responsavel,responsavel_id,status,situacao,precisa_atencao,motivo_atencao,aviso_responsavel,' +
     'prazo,prazo_motivo,criada_em,concluida_em,projects(name,code),' +
     'atualizacao:tarefa_eventos!ultima_atualizacao_id(tipo,origem,detalhe,ocorrido_em),' +
     'tarefa_passos(id,ordem,descricao,quem,executor,estado,evento_id,' +
@@ -123,8 +123,8 @@ window.BuritiTarefasUI = (() => {
       <header class="buriti-cartao__topo"><h3 class="buriti-titulo">${escapeAttr(t.titulo)}</h3>
         <span class="badge ${aberta ? selo.classe : 'badge--active'}">${aberta ? selo.texto : t.status === 'cancelada' ? 'Cancelada' : 'Concluída'}</span></header>
       <div class="buriti-sub">${escapeAttr(t.projects?.code || t.centro_custo || 'Centro indisponível')} ${escapeAttr(t.projects?.name || '')}${t.responsavel ? ` · ${escapeAttr(t.responsavel)}` : ''}${t.prazo ? ` · prazo ${escapeAttr(t.prazo.split('-').reverse().join('/'))}` : ''}</div>
-      ${t.precisa_atencao && Auth.isAdmin() ? `<div class="buriti-bloco buriti-bloco--aviso"><span class="badge badge--warning">precisa de você</span>
-        <p class="buriti-sub">${escapeAttr(t.motivo_atencao || '')}</p></div>` : ''}
+      ${(t.precisa_atencao || t.aviso_responsavel) && Auth.isAdmin() ? `<div class="buriti-bloco buriti-bloco--aviso"><span class="badge badge--warning">precisa de você</span>
+        ${[t.precisa_atencao ? t.motivo_atencao : '', t.aviso_responsavel].filter(Boolean).map(m => `<p class="buriti-sub">${escapeAttr(m)}</p>`).join('')}</div>` : ''}
       ${t.descricao ? `<p class="buriti-cartao__resumo">${f().textoComLinks(t.descricao)}</p>` : ''}
       ${ultimaHTML(t)}
       ${podeAtualizar ? `<div class="buriti-acoes">${botao('atualizar', 'Atualizar', '', true)}</div>` : ''}

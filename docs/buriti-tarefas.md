@@ -197,7 +197,7 @@ o Buriti muda tudo na tarefa que criou, com o ok no chat.
 - **Atualizar** (`registrar_atualizacao(p_tarefa,p_situacao,p_texto,p_link,p_passos)`): responsável ou admin
   escolhe a situação (`em_andamento`, `esperando`, `travado`, `feito`), escreve o que aconteceu e marca os passos
   concluídos (opcional; "feito" marca todos os abertos). Vira evento `atualizacao`; `tarefas.situacao` e
-  `ultima_atualizacao_id` guardam a última. Esperando → `aguardando_terceiro`; travado pede o Victor; passo marcado
+  `ultima_atualizacao_id` guardam a última. Esperando → `aguardando_terceiro`; travado e passo marcado põem um alerta em `aviso_responsavel` (coluna própria, que não apaga o "precisa de você" de outra origem); passo marcado
   fica `sugerido` (quem confirma continua sendo o Victor ou o Buriti com prova). A tela do responsável tem só esse
   botão; "Registrar que fiz" saiu da tela (a RPC continua, por compatibilidade).
 - **Correções do Buriti** (só tarefa `criada_pelo_buriti`): `buriti_editar_tarefa` (título, descrição, prazo, motivo

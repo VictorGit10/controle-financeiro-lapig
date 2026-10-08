@@ -79,7 +79,7 @@ select set_config('t57.e1',public.registrar_atualizacao(current_setting('t57.t')
   array[current_setting('t57.p2')::uuid])::text,false);
 reset role;
 select pg_temp.ok((select situacao='em_andamento' and status='em_andamento' and ultima_atualizacao_id::text=current_setting('t57.e1')
-  and precisa_atencao and motivo_atencao='Arthur atualizou; confirmar' from public.tarefas where id=current_setting('t57.t')::uuid),
+  and not precisa_atencao and aviso_responsavel='Arthur atualizou; confirmar' from public.tarefas where id=current_setting('t57.t')::uuid),
   'situação, última atualização e pedido de confirmação');
 select pg_temp.ok((select estado='sugerido' and ultimo_feito_id::text=current_setting('t57.e1') from public.tarefa_passos
   where id=current_setting('t57.p2')::uuid),'passo marcado fica sugerido');
@@ -94,17 +94,17 @@ select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1'
 set role authenticated;
 select public.registrar_atualizacao(current_setting('t57.t')::uuid,'esperando','Aguardando o retorno da Ranielly.');
 reset role;
-select pg_temp.ok((select status='aguardando_terceiro' and situacao='esperando' and motivo_atencao='Arthur atualizou; confirmar'
+select pg_temp.ok((select status='aguardando_terceiro' and situacao='esperando' and aviso_responsavel='Arthur atualizou; confirmar'
   from public.tarefas where id=current_setting('t57.t')::uuid),'esperando: aguardando terceiro, pedido anterior mantido');
 set role authenticated;
 select public.registrar_atualizacao(current_setting('t57.t')::uuid,'travado','A FUNAPE diz que o ofício não chegou.');
 reset role;
-select pg_temp.ok((select status='em_andamento' and precisa_atencao and motivo_atencao='Arthur: travado'
+select pg_temp.ok((select status='em_andamento' and aviso_responsavel='Arthur: travado'
   from public.tarefas where id=current_setting('t57.t')::uuid),'travado pede o Victor');
 set role authenticated;
 select public.registrar_atualizacao(current_setting('t57.t')::uuid,'em_andamento','A FAPEG reenviou; destravou.');
 reset role;
-select pg_temp.ok((select precisa_atencao and motivo_atencao='Arthur atualizou; confirmar'
+select pg_temp.ok((select aviso_responsavel='Arthur atualizou; confirmar'
   from public.tarefas where id=current_setting('t57.t')::uuid),'saiu do travado; passo marcado ainda pede confirmação');
 
 -- Quem não é o responsável não atualiza (professor do centro, agente, operador). Admin pode.
@@ -181,7 +181,7 @@ set role authenticated;
 select public.buriti_dispensar_passo(current_setting('t57.t2')::uuid,'A ligação já está no retorno.');
 select public.buriti_confirmar_passo(current_setting('t57.t3')::uuid,'Retorno do Arthur registrado em 08/10.');
 reset role;
-select pg_temp.ok((select not precisa_atencao and motivo_atencao is null from public.tarefas where id=current_setting('t57.t')::uuid),
+select pg_temp.ok((select not precisa_atencao and aviso_responsavel is null from public.tarefas where id=current_setting('t57.t')::uuid),
   'confirmado o último passo, o pedido de confirmação sai');
 
 -- Pessoas e o agente não usam as RPCs de correção do Buriti.
@@ -206,7 +206,7 @@ select pg_temp.negado('select public._buriti_tarefa_propria(gen_random_uuid())')
 select public.buriti_cancelar_tarefa(current_setting('t57.t')::uuid,'O Victor pediu para recomeçar.');
 select pg_temp.invalido(format('select public.buriti_editar_tarefa(%L,%L::jsonb,%L)',current_setting('t57.t'),'{"titulo":"z"}','depois do fim'));
 reset role;
-select pg_temp.ok((select status='cancelada' and not precisa_atencao from public.tarefas where id=current_setting('t57.t')::uuid),'cancelada pelo Buriti');
+select pg_temp.ok((select status='cancelada' and not precisa_atencao and aviso_responsavel is null from public.tarefas where id=current_setting('t57.t')::uuid),'cancelada pelo Buriti');
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1',false);
 set role authenticated;
 select pg_temp.invalido(format('select public.registrar_atualizacao(%L,%L,%L)',current_setting('t57.t'),'em_andamento','depois do fim'));
@@ -225,8 +225,8 @@ select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1'
 set role authenticated;
 select public.registrar_atualizacao(current_setting('t57.r')::uuid,'feito','Liguei.');
 reset role;
-select pg_temp.ok((select precisa_atencao and motivo_atencao='Autorizar prorrogação pendente.' from public.tarefas
-  where id=current_setting('t57.r')::uuid),'atualização não sobrescreve o pedido do Buriti');
+select pg_temp.ok((select precisa_atencao and motivo_atencao='Autorizar prorrogação pendente.' and aviso_responsavel='Arthur atualizou; confirmar'
+  from public.tarefas where id=current_setting('t57.r')::uuid),'atualização não sobrescreve o pedido do Buriti');
 set role authenticated;
 select public.registrar_atualizacao(current_setting('t57.r')::uuid,'travado','Ninguém atende.');
 reset role;
@@ -236,8 +236,19 @@ select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1'
 set role authenticated;
 select public.buriti_confirmar_passo(current_setting('t57.rp')::uuid,'Ligação registrada pelo Arthur.');
 reset role;
-select pg_temp.ok((select precisa_atencao and motivo_atencao='Autorizar prorrogação pendente.' from public.tarefas
-  where id=current_setting('t57.r')::uuid),'confirmar o passo não apaga o pedido pendente');
+select pg_temp.ok((select precisa_atencao and motivo_atencao='Autorizar prorrogação pendente.' and aviso_responsavel='Arthur: travado'
+  from public.tarefas where id=current_setting('t57.r')::uuid),'confirmar o passo não apaga o pedido pendente nem o travado');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1',false);
+set role authenticated;
+select public.buriti_pedir_atencao(current_setting('t57.r')::uuid,'Autorizar prorrogação pendente; confirmar');
+reset role;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1',false);
+set role authenticated;
+select public.registrar_atualizacao(current_setting('t57.r')::uuid,'em_andamento','Ainda sem retorno.');
+reset role;
+select pg_temp.ok((select precisa_atencao and motivo_atencao='Autorizar prorrogação pendente; confirmar' from public.tarefas
+  where id=current_setting('t57.r')::uuid),'pedido manual com o mesmo final do automático continua');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1',false);
 -- Dispensar o último passo marcado limpa o "confirmar" (Buriti e admin).
 set role authenticated;
 select set_config('t57.s',public.buriti_criar_tarefa(jsonb_build_object('project_id',current_setting('t57.x'),
@@ -254,13 +265,13 @@ select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1'
 set role authenticated;
 select public.buriti_dispensar_passo(current_setting('t57.s1')::uuid,'Não precisa.');
 reset role;
-select pg_temp.ok((select precisa_atencao and motivo_atencao='Arthur atualizou; confirmar' from public.tarefas
+select pg_temp.ok((select aviso_responsavel='Arthur atualizou; confirmar' from public.tarefas
   where id=current_setting('t57.s')::uuid),'resta um passo marcado: o confirmar fica');
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
 set role authenticated;
 select public.dispensar_passo(current_setting('t57.s2')::uuid,'Também não.');
 reset role;
-select pg_temp.ok((select not precisa_atencao and motivo_atencao is null from public.tarefas
+select pg_temp.ok((select aviso_responsavel is null from public.tarefas
   where id=current_setting('t57.s')::uuid),'dispensado o último pelo admin, o confirmar sai');
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1',false);
 set role authenticated;

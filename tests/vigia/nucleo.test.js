@@ -219,7 +219,7 @@ describe('validação estrita, prazos e avisos', () => {
     const estado = {tarefas:[{id:'t1',status:'em_andamento'},{id:'t2',status:'aguardando_terceiro'}],esclarecer:1,rotina:9,saude:'ok',conta_gmail:'victor@exemplo.invalid',
       resumo_tarefas:[
         {id:'t1',titulo:'Implantar bolsa do Otávio',centro_custo:'30.068',responsavel:'Arthur Pietro',situacao:'feito',prazo:'2026-10-30',
-          precisa_atencao:true,motivo_atencao:'Arthur atualizou; confirmar',ultima_atualizacao:{resumo:'Arthur Pietro · Feito: quadro enviado',ocorrido_em:'2026-10-08T17:00:00Z'}},
+          precisa_atencao:false,aviso_responsavel:'Arthur atualizou; confirmar',ultima_atualizacao:{resumo:'Arthur Pietro · Feito: quadro enviado',ocorrido_em:'2026-10-08T17:00:00Z'}},
         {id:'t2',titulo:'Retorno da ligação',centro_custo:'30.068',responsavel:'Arthur Pietro',situacao:'esperando',prazo:'2026-10-07',precisa_atencao:false}],
       novidades:[{titulo:'Retorno da ligação',origem:'humano',tipo:'atualizacao',resumo:'Arthur Pietro · Esperando alguém: Ranielly retorna amanhã',ocorrido_em:'2026-10-08T15:00:00Z'}],
       esclarecer_lista:[{gmail_thread_id:'th/1',recebida_em:'2026-10-08T12:00:00Z',remetente:'[P2@funape.org.br]',assunto:'Ofício 820/2026',motivo:'demanda_nova'},
