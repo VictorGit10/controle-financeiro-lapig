@@ -113,14 +113,39 @@ export function validarFeito(nota, link = '') {
   return { p_nota: nota.trim(), p_link: url || null };
 }
 
-// A FK ultimo_feito_id preserva a evidência mesmo após confirmação e muitos eventos.
+const seguro = valor => typeof valor === 'string' && !/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(valor) ? valor : null;
+const linkSeguro = valor => { const l = seguro(valor); return l && /^https:\/\//.test(l) ? l : null; };
+
+// A FK ultimo_feito_id preserva a evidência mesmo após confirmação e muitos eventos. Desde a 057 o passo
+// também é marcado por uma atualização da pessoa (tipo 'atualizacao', texto em detalhe.texto).
 export function registroFeito(passo) {
   const e = passo.feito;
-  if (e?.origem !== 'humano' || e.tipo !== 'sugestao' || !e.detalhe?.por) return null;
-  const seguro = valor => typeof valor === 'string' && !/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(valor) ? valor : null;
-  const link = seguro(e.detalhe.link);
-  return { nota: seguro(e.detalhe.nota) || '[Retido]', por: seguro(e.detalhe.por) || '[Retido]',
-    link: link && /^https:\/\//.test(link) ? link : null };
+  if (e?.origem !== 'humano' || !['sugestao', 'atualizacao'].includes(e.tipo) || !e.detalhe?.por) return null;
+  const nota = e.tipo === 'atualizacao' ? e.detalhe.texto : e.detalhe.nota;
+  return { nota: seguro(nota) || '[Retido]', por: seguro(e.detalhe.por) || '[Retido]', link: linkSeguro(e.detalhe.link) };
+}
+
+// Situação que o responsável escolhe ao atualizar (057). A ordem é a do formulário.
+export const SITUACOES = {
+  em_andamento: { texto: 'Em andamento', classe: 'badge--info', icone: 'loader' },
+  esperando: { texto: 'Esperando alguém', classe: 'badge--info', icone: 'hourglass' },
+  travado: { texto: 'Travado', classe: 'badge--warning', icone: 'octagon-alert' },
+  feito: { texto: 'Feito', classe: 'badge--active', icone: 'circle-check' },
+};
+
+export function validarAtualizacao(situacao, texto, link = '') {
+  if (!SITUACOES[situacao]) throw new Error('Escolha a situação.');
+  if (!texto?.trim() || texto.length > 2000) throw new Error('Escreva o que aconteceu (até 2000 caracteres).');
+  if (!seguro(texto)) throw new Error('Tire o endereço de e-mail do texto: o sistema não guarda e-mail de pessoas.');
+  const { p_nota, p_link } = validarFeito(texto, link);
+  return { p_situacao: situacao, p_texto: p_nota, p_link };
+}
+
+// Uma atualização da linha do tempo, pronta para mostrar (ou null se não for uma).
+export function lerAtualizacao(e) {
+  if (e?.tipo !== 'atualizacao' || e.origem !== 'humano' || !SITUACOES[e.detalhe?.situacao]) return null;
+  return { situacao: e.detalhe.situacao, texto: seguro(e.detalhe.texto) || '[Retido]',
+    por: seguro(e.detalhe.por) || '[Retido]', link: linkSeguro(e.detalhe.link), quando: e.ocorrido_em || null };
 }
 
 export function podeRegistrarFeito(tarefa, usuario, admin = false) {
@@ -136,5 +161,6 @@ export function rotuloOrigem(origem) {
 
 if (typeof window !== 'undefined') {
   window.BuritiTarefas = { rotuloOrigem, seloPrazo, ordenarTarefas, dataHora, gmailLink, saudeVigia, ESTADOS_PASSO,
-    seloClassificacao, motivoLegivel, ligadaAutomaticamente, textoComLinks, validarFeito, registroFeito, podeRegistrarFeito };
+    seloClassificacao, motivoLegivel, ligadaAutomaticamente, textoComLinks, validarFeito, registroFeito, podeRegistrarFeito,
+    SITUACOES, validarAtualizacao, lerAtualizacao };
 }

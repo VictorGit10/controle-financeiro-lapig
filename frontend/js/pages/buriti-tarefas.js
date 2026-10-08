@@ -3,8 +3,9 @@ window.BuritiTarefasUI = (() => {
   const f = () => window.BuritiTarefas;
   let geracao = 0;
   const ocupados = new Set();
-  const CAMPOS = 'id,project_id,titulo,descricao,responsavel,responsavel_id,status,precisa_atencao,motivo_atencao,' +
+  const CAMPOS = 'id,project_id,titulo,descricao,responsavel,responsavel_id,status,situacao,precisa_atencao,motivo_atencao,' +
     'prazo,prazo_motivo,criada_em,concluida_em,projects(name,code),' +
+    'atualizacao:tarefa_eventos!ultima_atualizacao_id(tipo,origem,detalhe,ocorrido_em),' +
     'tarefa_passos(id,ordem,descricao,quem,executor,estado,evento_id,' +
     'feito:tarefa_eventos!ultimo_feito_id(tipo,origem,detalhe),' +
     'evento:tarefa_eventos!evento_id(resumo,gmail_thread_id,ocorrido_em)),' +
@@ -69,50 +70,71 @@ window.BuritiTarefasUI = (() => {
     return `<button class="btn ${primaria ? 'btn--primary' : 'btn--secondary'}" data-acao="${acao}" data-id="${escapeAttr(id)}">${texto}</button>`;
   }
 
-  function passoHTML(s, aberta, podeFazer) {
+  // Passos são a lista do que fazer. O responsável não marca passo a passo: responde pelo botão Atualizar (057).
+  function passoHTML(s, aberta, ultimaTexto) {
     const estado = f().ESTADOS_PASSO[s.estado];
     const editavel = aberta && ['pendente', 'sugerido'].includes(s.estado);
     const feito = f().registroFeito(s);
+    const rotulo = s.estado === 'sugerido' ? (feito ? `Feito por ${feito.por} — falta o Victor confirmar` : 'O Buriti achou sinal de que foi feito')
+      : s.estado === 'pendente' ? 'A fazer' : estado.texto;
     return `<li class="buriti-passo">
-      <div class="buriti-bloco__titulo"><i data-lucide="${estado.icone}"></i> ${s.ordem}. ${f().textoComLinks(s.descricao)}</div>
-      <div class="buriti-sub">${s.estado === 'sugerido' && feito ? 'Feito — aguardando o Victor' : estado.texto}${s.quem ? ` · ${escapeAttr(s.quem)}` : ''}</div>
-      ${s.estado === 'sugerido' ? `<div class="buriti-bloco buriti-evidencia"><strong>${feito ? `Feito por ${escapeAttr(feito.por)}${Auth.isAdmin() ? ' — confirmar?' : ''}` : 'Evidência sugerida'}</strong>
-        <p class="buriti-sub">${f().textoComLinks(feito?.nota || s.evento?.resumo || 'Resumo indisponível.')}</p>
-        ${feito?.link ? f().textoComLinks(feito.link) : link(s.evento?.gmail_thread_id)}</div>` : ''}
-      ${editavel && podeFazer && s.executor !== 'buriti' ? `<div class="buriti-acoes">${botao('feito', 'Registrar que fiz', s.id, true)}</div>` : ''}
-      ${editavel && Auth.isAdmin() ? `<div class="buriti-acoes">${botao('confirmar', 'Confirmar', s.id, true)}${botao('dispensar', 'Dispensar', s.id)}</div>` : ''}
+      <div class="buriti-bloco__titulo"><i data-lucide="${estado.icone}"></i> ${f().textoComLinks(s.descricao)}</div>
+      <div class="buriti-sub">${escapeAttr(rotulo)}${s.quem ? ` · ${escapeAttr(s.quem)}` : ''}</div>
+      ${s.estado === 'sugerido' && feito && feito.nota !== ultimaTexto ? `<div class="buriti-sub buriti-evidencia">${f().textoComLinks(feito.nota)} ${feito.link ? f().textoComLinks(feito.link) : ''}</div>` : ''}
+      ${s.estado === 'sugerido' && !feito && Auth.isAdmin() ? `<div class="buriti-sub buriti-evidencia">${f().textoComLinks(s.evento?.resumo || '')} ${link(s.evento?.gmail_thread_id)}</div>` : ''}
+      ${editavel && Auth.isAdmin() ? `<div class="buriti-acoes">${botao('confirmar', 'Confirmar', s.id, s.estado === 'sugerido')}${botao('dispensar', 'Dispensar', s.id)}</div>` : ''}
     </li>`;
   }
 
-  function eventosHTML(eventos) {
-    return eventos.map(e => '<li><div class="buriti-sub">' + escapeAttr(f().dataHora(e.ocorrido_em)) + ' · ' + escapeAttr(f().rotuloOrigem(e.origem)) +
-      '</div><div>' + f().textoComLinks(e.resumo) + '</div>' + (e.detalhe?.link ? f().textoComLinks(e.detalhe.link) : '') +
-      link(e.gmail_thread_id) + '</li>').join('') || '<li>Nenhum evento.</li>';
+  function seloSituacao(situacao) {
+    const s = f().SITUACOES[situacao];
+    return s ? `<span class="badge ${s.classe}">${escapeAttr(s.texto)}</span>` : '';
   }
 
+  // O que o responsável disse por último: é a primeira coisa que o Victor e o Arthur leem no cartão.
+  function ultimaHTML(t) {
+    const a = f().lerAtualizacao(t.atualizacao);
+    if (!a) {
+      return `<div class="buriti-bloco buriti-ultima"><div class="buriti-sub">${t.responsavel ? `${escapeAttr(t.responsavel)} ainda não atualizou.` : 'Sem atualização ainda.'}</div></div>`;
+    }
+    return `<div class="buriti-bloco buriti-ultima">
+      <div class="buriti-ultima__topo">${seloSituacao(a.situacao)}<span class="buriti-sub">${escapeAttr(a.por)} · ${escapeAttr(f().dataHora(a.quando))}</span></div>
+      <p class="buriti-ultima__texto">${f().textoComLinks(a.texto)}</p>${a.link ? f().textoComLinks(a.link) : ''}</div>`;
+  }
+
+  function eventosHTML(eventos) {
+    return eventos.map(e => {
+      const a = f().lerAtualizacao(e);
+      const corpo = a ? `${seloSituacao(a.situacao)} <span>${f().textoComLinks(a.texto)}</span>${a.link ? ' ' + f().textoComLinks(a.link) : ''}`
+        : f().textoComLinks(e.resumo) + (e.detalhe?.link ? ' ' + f().textoComLinks(e.detalhe.link) : '');
+      return '<li><div class="buriti-sub">' + escapeAttr(f().dataHora(e.ocorrido_em)) + ' · ' +
+        escapeAttr(a ? a.por : f().rotuloOrigem(e.origem)) + '</div><div>' + corpo + '</div>' + link(e.gmail_thread_id) + '</li>';
+    }).join('') || '<li>Nenhum registro.</li>';
+  }
+
+  // Cartão em três partes: o que o responsável disse por último (com o botão Atualizar), o que fazer e o histórico.
   function tarefaHTML(t, minhas = false) {
     const aberta = ['em_andamento', 'aguardando_terceiro'].includes(t.status);
     const selo = f().seloPrazo(t.prazo);
     const passos = [...t.tarefa_passos].sort((a, b) => a.ordem - b.ordem);
+    const abertos = passos.filter(s => ['pendente', 'sugerido'].includes(s.estado)).length;
+    const podeAtualizar = aberta && f().podeRegistrarFeito(t, Auth.getUser()?.id, Auth.isAdmin());
     return `<article class="card buriti-cartao" data-tarefa="${escapeAttr(t.id)}">
       <header class="buriti-cartao__topo"><h3 class="buriti-titulo">${escapeAttr(t.titulo)}</h3>
         <span class="badge ${aberta ? selo.classe : 'badge--active'}">${aberta ? selo.texto : t.status === 'cancelada' ? 'Cancelada' : 'Concluída'}</span></header>
-      <div class="buriti-cartao__centro">${escapeAttr(t.projects?.code || t.centro_custo || 'Centro indisponível')} ${escapeAttr(t.projects?.name || '')}</div>
+      <div class="buriti-sub">${escapeAttr(t.projects?.code || t.centro_custo || 'Centro indisponível')} ${escapeAttr(t.projects?.name || '')}${t.responsavel ? ` · ${escapeAttr(t.responsavel)}` : ''}${t.prazo ? ` · prazo ${escapeAttr(t.prazo.split('-').reverse().join('/'))}` : ''}</div>
       ${t.precisa_atencao && Auth.isAdmin() ? `<div class="buriti-bloco buriti-bloco--aviso"><span class="badge badge--warning">precisa de você</span>
         <p class="buriti-sub">${escapeAttr(t.motivo_atencao || '')}</p></div>` : ''}
       ${t.descricao ? `<p class="buriti-cartao__resumo">${f().textoComLinks(t.descricao)}</p>` : ''}
-      <div class="buriti-sub">${t.responsavel ? `Responsável: ${escapeAttr(t.responsavel)} · ` : ''}
-        Prazo: ${t.prazo ? escapeAttr(t.prazo.split('-').reverse().join('/')) : '—'}
-        ${t.prazo_motivo ? ` · ${escapeAttr(t.prazo_motivo)}` : ''}
-        ${t.status === 'aguardando_terceiro' ? ' · Aguardando terceiro' : ''}</div>
-      <ol class="buriti-lista buriti-passos">${passos.map(s => passoHTML(s, aberta, minhas && f().podeRegistrarFeito(t, Auth.getUser()?.id, Auth.isAdmin()))).join('')}</ol>
-      <details class="buriti-bloco" data-linha-tempo><summary>Encaminhamentos · últimos eventos</summary>
+      ${ultimaHTML(t)}
+      ${podeAtualizar ? `<div class="buriti-acoes">${botao('atualizar', 'Atualizar', '', true)}</div>` : ''}
+      <details class="buriti-bloco"${abertos && !minhas ? ' open' : ''}><summary>O que fazer${abertos ? ` · ${abertos} em aberto` : ''}</summary>
+        <ol class="buriti-lista buriti-passos">${passos.map(s => passoHTML(s, aberta, f().lerAtualizacao(t.atualizacao)?.texto)).join('')}</ol></details>
+      <details class="buriti-bloco" data-linha-tempo><summary>Histórico</summary>
         <ul class="buriti-lista" data-eventos>${eventosHTML(t.eventos)}</ul>
-        ${t.eventos.length >= 10 ? botao('historico', 'Ver todos os encaminhamentos') : ''}
+        ${t.eventos.length >= 10 ? botao('historico', 'Ver todo o histórico') : ''}
       </details>
-      <div data-erro></div><div class="buriti-acoes">${botao('nota', 'Nota')}
-        ${Auth.isAdmin() ? botao('responsavel', 'Responsável') : ''}
-        ${aberta && Auth.isAdmin() && !minhas ? botao('concluir', 'Concluir', '', true) : ''}</div>
+      <div data-erro></div>${Auth.isAdmin() ? `<div class="buriti-acoes">${botao('nota', 'Nota')}${botao('responsavel', 'Responsável')}${aberta && !minhas ? botao('concluir', 'Concluir') : ''}</div>` : ''}
     </article>`;
   }
 
@@ -204,20 +226,14 @@ window.BuritiTarefasUI = (() => {
       } catch (erro) { erroCartao(node, erro); }
       return;
     }
-    if (acao === 'feito' && minhas) {
-      createModal({ title: 'Registrar que fiz', saveLabel: 'Registrar',
-        bodyHTML: `<div class="form-group">
-          <label class="form-label" for="buriti-feito-nota">O que você fez?</label>
-          <textarea id="buriti-feito-nota" class="form-input" style="width:100%;" rows="4" maxlength="2000" required></textarea>
-        </div><div class="form-group">
-          <label class="form-label" for="buriti-feito-link">Link (opcional)</label>
-          <input id="buriti-feito-link" class="form-input" style="width:100%;" type="url" placeholder="https://" maxlength="500">
-        </div>`,
-        onSave: async () => {
-          const args = f().validarFeito(document.getElementById('buriti-feito-nota').value, document.getElementById('buriti-feito-link').value);
-          const ok = await agir(node, id, () => rpc('registrar_feito', { p_passo: button.dataset.id, ...args }), atualizar);
-          if (!ok) throw new Error('Não foi possível registrar. Confira o erro no cartão.');
-        } });
+    if (acao === 'atualizar') {
+      try {
+        const t = await ler(consultaTarefa().eq('id', id).single());
+        abrirAtualizar(t, async args => {
+          const ok = await agir(node, id, () => rpc('registrar_atualizacao', { p_tarefa: id, ...args }), atualizar);
+          if (!ok) throw new Error('Não foi possível salvar. Confira o erro no cartão.');
+        });
+      } catch (erro) { erroCartao(node, erro); }
       return;
     }
     if (acao === 'nota') {
@@ -382,6 +398,37 @@ window.BuritiTarefasUI = (() => {
       });
     };
     lucide.createIcons();
+  }
+
+  // Um formulário só: como está, o que aconteceu, passos concluídos (se houver mais de um aberto) e link.
+  function abrirAtualizar(t, salvar) {
+    const abertos = [...t.tarefa_passos].sort((a, b) => a.ordem - b.ordem)
+      .filter(s => s.executor !== 'buriti' && ['pendente', 'sugerido'].includes(s.estado));
+    const atual = t.situacao || 'em_andamento';
+    createModal({ title: 'Atualizar tarefa', saveLabel: 'Salvar', maxWidth: '560px',
+      bodyHTML: `<p class="buriti-sub" style="margin-top:0;">${escapeAttr(t.titulo)}</p>
+        <fieldset class="buriti-opcoes"><legend class="form-label">Como está?</legend>
+          ${Object.entries(f().SITUACOES).map(([valor, s]) => `<label class="buriti-opcao">
+            <input type="radio" name="buriti-situacao" value="${valor}" ${valor === atual ? 'checked' : ''}>
+            <i data-lucide="${s.icone}"></i> ${escapeAttr(s.texto)}</label>`).join('')}
+        </fieldset>
+        <div class="form-group"><label class="form-label" for="buriti-atualizar-texto">O que aconteceu?</label>
+          <textarea id="buriti-atualizar-texto" class="form-input" style="width:100%;" rows="5" maxlength="2000"
+            placeholder="Ex.: Liguei para a FUNAPE. A Ranielly disse que o ofício chegou e responde até sexta."></textarea>
+          <div class="buriti-sub">Sem CPF nem e-mail de pessoas.</div></div>
+        ${abertos.length > 1 ? `<fieldset class="buriti-opcoes"><legend class="form-label">Concluiu algum destes? (opcional)</legend>
+          ${abertos.map(s => `<label class="buriti-opcao"><input type="checkbox" name="buriti-passo" value="${escapeAttr(s.id)}">
+            ${escapeAttr(s.descricao)}</label>`).join('')}
+          <div class="buriti-sub">Com "Feito", todos contam como concluídos.</div></fieldset>` : ''}
+        <div class="form-group"><label class="form-label" for="buriti-atualizar-link">Link (opcional)</label>
+          <input id="buriti-atualizar-link" class="form-input" style="width:100%;" type="url" placeholder="https://" maxlength="500"></div>`,
+      onSave: async () => {
+        const situacao = document.querySelector('input[name="buriti-situacao"]:checked')?.value;
+        const args = f().validarAtualizacao(situacao, document.getElementById('buriti-atualizar-texto').value,
+          document.getElementById('buriti-atualizar-link').value);
+        const passos = [...document.querySelectorAll('input[name="buriti-passo"]:checked')].map(i => i.value);
+        await salvar({ ...args, p_passos: passos.length ? passos : null });
+      } });
   }
 
   async function preencherCentros(rows) {

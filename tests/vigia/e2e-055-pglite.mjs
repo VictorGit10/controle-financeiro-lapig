@@ -1,4 +1,4 @@
-// Teste de ponta a ponta: vigia (núcleo JS real) contra banco com 054+055 (PGlite, sem rede).
+// Teste de ponta a ponta: vigia (núcleo JS real) contra banco com 054+055+057 (PGlite, sem rede).
 // Roda o mesmo SQL sintético de tools/replica-local/rodar-054-pglite.mjs, sem as suítes de
 // asserção SQL. Depende só de .cache/pglite-054 (instalação descrita em tools/replica-local/README.md).
 //
@@ -48,7 +48,7 @@ try {
     'tools/replica-local/sintetico/stub-051.sql', 'tools/replica-local/sintetico/stub-054.sql',
     'database/051_buriti_propostas_do_agente.sql', 'tools/replica-local/sintetico/stub-052.sql',
     'database/052_privacidade_bolsistas_agente.sql', 'database/054_buriti_tarefas.sql',
-    'database/055_buriti_administra_tarefas.sql']) await arquivo(path);
+    'database/055_buriti_administra_tarefas.sql', 'database/057_tarefas_atualizar_e_editar.sql']) await arquivo(path);
   console.log('Migrações 054 e 055 aplicadas.');
 
   // Centro sintético com código reconhecível pelo núcleo (NN.NNN); admin ativa a automação.
@@ -193,9 +193,13 @@ try {
   const atencao = j((await db.query(
     `select precisa_atencao from public.tarefas where id='${tarefaId}'`)).rows[0]);
   ok(atencao.precisa_atencao === true, 'tarefa pede atenção do Victor (passo sugerido)');
-  ok(fim.avisos.some(a => a.tipo === 'sugestao' && a.chave === 'aviso:msg:msg-e2e-1:passo:' + passo5)
-    && fim.avisos.some(a => a.tipo === 'esclarecer'),
-    'avisos: sugestão do passo 5 e mensagem a revisar; nenhum dos passos do Buriti');
+  // 057: sugestão e mensagem a revisar não viram e-mail avulso; ficam 'resumido' e entram no resumo das 8h.
+  const resumidos = j((await db.query(
+    `select chave, tipo, estado from public.vigia_avisos where tipo in ('sugestao','esclarecer') order by chave`)).rows);
+  ok(!fim.avisos.some(a => ['sugestao', 'esclarecer'].includes(a.tipo))
+    && resumidos.some(a => a.tipo === 'sugestao' && a.chave === 'aviso:msg:msg-e2e-1:passo:' + passo5 && a.estado === 'resumido')
+    && resumidos.some(a => a.tipo === 'esclarecer' && a.estado === 'resumido'),
+    'avisos: sugestão do passo 5 e mensagem a revisar ficam para o resumo, fora da fila de envio');
 
   // Reexecução idempotente: mesmos resultados não repetem efeitos.
   await operador(`select public.vigia_registrar('${JSON.stringify({
@@ -213,8 +217,12 @@ try {
   ok(texto.indexOf('Tarefas abertas: 1') >= 0 && texto.indexOf('Precisam de você: 1') >= 0
     && texto.indexOf('https://site.example.org') >= 0,
     'texto do resumo diário coerente (1 aberta, 1 pedindo atenção)');
-  const tarefasLinhas = texto.split('\n').filter(l => l.indexOf('30.068') >= 0);
-  ok(tarefasLinhas.length === 1, 'resumo lista tarefa por título+centro, sem passos do Buriti (análise 1d)');
+  const tarefasLinhas = texto.split('\n').filter(l => l.startsWith('• 30.068 · '));
+  ok(tarefasLinhas.length === 1 && texto.indexOf('Conferir a documentação recebida') < 0
+    && texto.indexOf('Atualizar a planilha de controle') < 0,
+    'resumo lista a tarefa uma vez por centro+título, sem passos do Buriti (análise 1d)');
+  ok(texto.indexOf('PRECISA DE VOCÊ') >= 0 && texto.indexOf('E-MAILS PARA VOCÊ OLHAR') >= 0
+    && texto.indexOf('O QUE MUDOU NAS ÚLTIMAS 24 H') >= 0, 'resumo traz o conteúdo da 057 (tarefas, mudanças e e-mails)');
   const resReg = j((await operador(`select public.vigia_registrar('${JSON.stringify({
     versao: 'vigia-1',
     execucao: { tipo: 'resumo_diario', iniciada_em: new Date(agora + 180000).toISOString(),

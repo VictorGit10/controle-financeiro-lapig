@@ -1,4 +1,4 @@
-import { registroFeito } from '../../frontend/js/components/buriti-tarefas.js';
+import { registroFeito, lerAtualizacao } from '../../frontend/js/components/buriti-tarefas.js';
 
 // Parte pura: escolhe somente os campos do contrato da RPC 054.
 // Validação de conteúdo/PII e autorização continuam no banco.
@@ -69,13 +69,42 @@ export function criarToolsTarefas({ rpc, consultar, centroPorCodigo, rpcOperador
       await rpcOperador('buriti_concluir_tarefa', { p_tarefa: texto(tarefa_id, 'tarefa_id'), p_nota: texto(nota, 'nota') });
       return { ok: true };
     },
+    // Correções da 057, só em tarefa criada pelo Buriti e quando o Victor pede no chat (`motivo` diz o pedido).
+    async editarTarefa({ tarefa_id, motivo, ...campos }) {
+      const p = {};
+      for (const campo of ['titulo', 'descricao', 'prazo', 'prazo_motivo', 'responsavel']) {
+        if (campos[campo] !== undefined) p[campo] = campos[campo] === '' ? null : campos[campo];
+      }
+      if (!Object.keys(p).length) throw new Error('Informe ao menos um campo para mudar.');
+      await rpcOperador('buriti_editar_tarefa', { p_tarefa: texto(tarefa_id, 'tarefa_id'), p, p_motivo: texto(motivo, 'motivo') });
+      return { ok: true };
+    },
+    async editarPassos({ tarefa_id, passos, motivo }) {
+      if (!Array.isArray(passos) || passos.length > 50) throw new Error('passos: lista de até 50.');
+      const lista = passos.map(s => {
+        if (!s.descricao?.trim()) throw new Error('Descrição do passo obrigatória.');
+        return { descricao: s.descricao.trim(), ...(s.quem != null ? { quem: s.quem } : {}),
+          ...(s.executor != null ? { executor: s.executor } : {}), ...(s.evidencia != null ? { evidencia: s.evidencia } : {}) };
+      });
+      await rpcOperador('buriti_editar_passos', { p_tarefa: texto(tarefa_id, 'tarefa_id'), p_passos: lista, p_motivo: texto(motivo, 'motivo') });
+      return { ok: true, nota: 'Passos pendentes que ninguém começou foram trocados; os já marcados ou resolvidos ficaram.' };
+    },
+    async dispensarPasso({ passo_id, motivo }) {
+      await rpcOperador('buriti_dispensar_passo', { p_passo: texto(passo_id, 'passo_id'), p_motivo: texto(motivo, 'motivo') });
+      return { ok: true };
+    },
+    async cancelarTarefa({ tarefa_id, motivo }) {
+      await rpcOperador('buriti_cancelar_tarefa', { p_tarefa: texto(tarefa_id, 'tarefa_id'), p_motivo: texto(motivo, 'motivo') });
+      return { ok: true };
+    },
     async listarTarefas(entrada = {}) {
       const { status = 'abertas', limite = 50 } = entrada;
       const id = await resolver(entrada);
       const teto = Math.min(limite, 200);
       const linhas = await consultar('tarefas', sb => {
-        let q = sb.from('tarefas').select('id,project_id,titulo,descricao,responsavel,status,precisa_atencao,' +
+        let q = sb.from('tarefas').select('id,project_id,titulo,descricao,responsavel,status,situacao,precisa_atencao,' +
           'motivo_atencao,prazo,prazo_motivo,proxima_checagem,criada_em,concluida_em,criada_pelo_buriti,projects(name,code),' +
+          'atualizacao:tarefa_eventos!ultima_atualizacao_id(tipo,origem,detalhe,ocorrido_em),' +
           'tarefa_passos(id,ordem,descricao,quem,executor,estado,confirmado_em,evento_id,' +
           'feito:tarefa_eventos!ultimo_feito_id(tipo,origem,detalhe)), ' +
           'eventos:tarefa_eventos!tarefa_eventos_tarefa_id_fkey(id,tipo,origem,resumo,detalhe,gmail_thread_id,ocorrido_em,criado_em)')
@@ -88,8 +117,10 @@ export function criarToolsTarefas({ rpc, consultar, centroPorCodigo, rpcOperador
         else if (status !== 'todas') q = q.eq('status', status === 'concluidas' ? 'concluida' : status);
         return q;
       });
-      return { tarefas: linhas.map(t => ({ ...t, tarefa_passos: t.tarefa_passos.map(s => ({ ...s, feito: registroFeito(s) })) })), truncado: linhas.length === teto,
-        nota: 'Leitura escopada pelo RLS. Eventos limitados aos 10 últimos de cada tarefa; passos sugeridos ainda exigem confirmação humana.' };
+      return { tarefas: linhas.map(({ atualizacao, ...t }) => ({ ...t, ultima_atualizacao: lerAtualizacao(atualizacao),
+        tarefa_passos: t.tarefa_passos.map(s => ({ ...s, feito: registroFeito(s) })) })), truncado: linhas.length === teto,
+        nota: 'Leitura escopada pelo RLS. `ultima_atualizacao` é o que o responsável disse por último (situação, texto, link). ' +
+          'Eventos limitados aos 10 últimos de cada tarefa; passos sugeridos ainda exigem confirmação.' };
     },
   };
 }

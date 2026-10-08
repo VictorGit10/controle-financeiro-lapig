@@ -189,3 +189,25 @@ Limites conhecidos (revisão do Kimi K3, 07/10/2026): `buriti_criar_tarefa` acei
 tarefa num centro fora do escopo do login agente fica invisível para a tool `tarefas` (só o admin a vê) — o
 MCP resolve o centro pelo login agente, então isso só acontece chamando a RPC direto. As tools do operador não
 têm chave de idempotência: se `criar_tarefa` der erro de rede, conferir com `tarefas` antes de repetir.
+
+## Atualizar, corrigir e avisar menos (057, 08/10/2026)
+Pedido do Victor: o Buriti não conseguia corrigir o que criou, a tela do Arthur confundia e chegavam e-mails
+genéricos do vigia toda hora. Decisões dele (08/10): resumo diário com conteúdo; botão Atualizar com situação;
+o Buriti muda tudo na tarefa que criou, com o ok no chat.
+- **Atualizar** (`registrar_atualizacao(p_tarefa,p_situacao,p_texto,p_link,p_passos)`): responsável ou admin
+  escolhe a situação (`em_andamento`, `esperando`, `travado`, `feito`), escreve o que aconteceu e marca os passos
+  concluídos (opcional; "feito" marca todos os abertos). Vira evento `atualizacao`; `tarefas.situacao` e
+  `ultima_atualizacao_id` guardam a última. Esperando → `aguardando_terceiro`; travado pede o Victor; passo marcado
+  fica `sugerido` (quem confirma continua sendo o Victor ou o Buriti com prova). A tela do responsável tem só esse
+  botão; "Registrar que fiz" saiu da tela (a RPC continua, por compatibilidade).
+- **Correções do Buriti** (só tarefa `criada_pelo_buriti`): `buriti_editar_tarefa` (título, descrição, prazo, motivo
+  do prazo, responsável), `buriti_editar_passos` (troca os passos que ninguém começou; os marcados ou resolvidos
+  ficam), `buriti_dispensar_passo`, `buriti_cancelar_tarefa`. Todas pedem `motivo` e gravam evento com antes e
+  depois. No MCP: `editar_tarefa`, `editar_passos`, `dispensar_passo`, `cancelar_tarefa`.
+- **Avisos**: o gatilho `trg_vigia_aviso_essencial` deixa na fila só resumo diário, prazo de hoje/vencido e uma falha
+  do vigia a cada 12 h; o resto entra como `resumido`. No Apps Script, falha sem banco avisa no máximo a cada 6 h.
+- **Resumo das 8h** com conteúdo (`vigia_contexto` ganhou `resumo_tarefas`, `novidades` e `esclarecer_lista`): o que
+  precisa do Victor, situação e última atualização de cada tarefa, o que mudou em 24 h e os e-mails a olhar com o
+  link do Gmail. Vai só por e-mail (da conta do Victor para ela mesma), nunca pelo ntfy.
+Testes: `node tools/replica-local/rodar-057-pglite.mjs` (prova a lacuna antes, roda 057 e repete o roteiro da 055) e
+`node tests/vigia/e2e-055-pglite.mjs` (vigia real contra 054+055+057).

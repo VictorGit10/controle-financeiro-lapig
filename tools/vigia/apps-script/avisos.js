@@ -13,5 +13,14 @@ var VigiaAvisos = (function () {
       return { estado: 'enviado', canal: 'email' };
     } catch (_) { return { estado: 'falhou', motivo: 'envio_falhou' }; }
   }
-  return { enviar: enviar };
+  // Resumo diário (057): só por e-mail, da conta do Victor para ela mesma. Nunca pelo ntfy, porque leva
+  // o conteúdo (assuntos, o que a equipe escreveu) e o ntfy é um serviço de fora.
+  function enviarEmail(config, texto, titulo) {
+    try {
+      if (!config.EMAIL_AVISO) return { estado: 'falhou', motivo: 'sem_canal' };
+      MailApp.sendEmail({ to: config.EMAIL_AVISO, subject: titulo || 'Vigia LAPIG', body: texto });
+      return { estado: 'enviado', canal: 'email' };
+    } catch (_) { return { estado: 'falhou', motivo: 'envio_falhou' }; }
+  }
+  return { enviar: enviar, enviarEmail: enviarEmail };
 })();

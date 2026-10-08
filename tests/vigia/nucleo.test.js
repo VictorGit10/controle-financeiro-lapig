@@ -215,4 +215,26 @@ describe('validação estrita, prazos e avisos', () => {
     expect(R.textoResumoDiario({tarefas:[fixtures.tarefa]},'2026-10-05')).toContain('Auditoria semanal');
     expect(R.textoAviso({titulo:'CPF 123 456 789 09'})).not.toContain('123');
   });
+  it('resumo da 057 traz o conteúdo: o que precisa do Victor, situação, o que mudou e os e-mails com link', () => {
+    const estado = {tarefas:[{id:'t1',status:'em_andamento'},{id:'t2',status:'aguardando_terceiro'}],esclarecer:1,rotina:9,saude:'ok',conta_gmail:'victor@exemplo.invalid',
+      resumo_tarefas:[
+        {id:'t1',titulo:'Implantar bolsa do Otávio',centro_custo:'30.068',responsavel:'Arthur Pietro',situacao:'feito',prazo:'2026-10-30',
+          precisa_atencao:true,motivo_atencao:'Arthur atualizou; confirmar',ultima_atualizacao:{resumo:'Arthur Pietro · Feito: quadro enviado',ocorrido_em:'2026-10-08T17:00:00Z'}},
+        {id:'t2',titulo:'Retorno da ligação',centro_custo:'30.068',responsavel:'Arthur Pietro',situacao:'esperando',prazo:'2026-10-07',precisa_atencao:false}],
+      novidades:[{titulo:'Retorno da ligação',origem:'humano',tipo:'atualizacao',resumo:'Arthur Pietro · Esperando alguém: Ranielly retorna amanhã',ocorrido_em:'2026-10-08T15:00:00Z'}],
+      esclarecer_lista:[{gmail_thread_id:'th/1',recebida_em:'2026-10-08T12:00:00Z',remetente:'[P2@funape.org.br]',assunto:'Ofício 820/2026',motivo:'demanda_nova'},
+        {gmail_thread_id:'th2',recebida_em:'2026-10-08T12:30:00Z',remetente:'[P3]',assunto:'CPF 529.982.247-25',motivo:'x'}],
+      site_url:'https://exemplo.invalid/'};
+    const texto = R.textoResumoDiario(estado,'2026-10-08');
+    expect(texto).toContain('Precisam de você: 1');
+    expect(texto).toContain('PRECISA DE VOCÊ\n• 30.068 · Implantar bolsa do Otávio — Arthur Pietro · Feito · prazo 30/10 (faltam 22 dias)');
+    expect(texto).toContain('  Precisa de você: Arthur atualizou; confirmar');
+    expect(texto).toContain('Última atualização (08/10 14:00): Arthur Pietro · Feito: quadro enviado');
+    expect(texto).toContain('Retorno da ligação — Arthur Pietro · Esperando alguém · prazo 07/10 (vencido há 1 dia)');
+    expect(texto).toContain('O QUE MUDOU NAS ÚLTIMAS 24 H\n• 08/10 12:00 · Retorno da ligação — Pessoa: Arthur Pietro · Esperando alguém: Ranielly retorna amanhã');
+    expect(texto).toContain('• 08/10 09:00 · [P2@funape.org.br] — "Ofício 820/2026" (assunto novo, sem tarefa)');
+    expect(texto).toContain('https://mail.google.com/mail/?authuser=victor%40exemplo.invalid#all/th%2F1');
+    expect(texto).not.toContain('529.982');
+    expect(texto).toContain('[retido: parece ter CPF]');
+  });
 });

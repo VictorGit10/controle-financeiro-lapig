@@ -254,7 +254,7 @@ describe('triagem: rótulos e ligadas automaticamente', () => {
 
 describe('Minhas tarefas e atribuição', () => {
   const atribuir = () => { admin = false; db.tarefas[0].responsavel_id = 'arthur'; db.tarefas[0].responsavel = 'Arthur Pietro'; };
-  it('filtra pelo usuário, mostra links e ações de execução sem decisões administrativas', async () => {
+  it('filtra pelo usuário, mostra links e o botão Atualizar sem decisões administrativas', async () => {
     atribuir();
     db.tarefas[0].descricao = 'Documento: https://exemplo.invalid/doc';
     db.tarefas[0].tarefa_passos[0].descricao = 'Enviar https://exemplo.invalid/passo';
@@ -263,67 +263,95 @@ describe('Minhas tarefas e atribuição', () => {
     expect(chamadas.find(c => c[0] === 'tarefas')).toContainEqual(['eq', 'responsavel_id', 'arthur']);
     expect(root.querySelector('a[href="https://exemplo.invalid/doc"]')).not.toBeNull();
     expect(root.querySelector('a[href="https://exemplo.invalid/passo"]')).not.toBeNull();
-    expect(root.querySelector('[data-acao="feito"]')).not.toBeNull();
-    expect(root.querySelector('[data-acao="nota"]')).not.toBeNull();
-    expect(root.querySelector('[data-acao="confirmar"], [data-acao="dispensar"], [data-acao="concluir"], [data-acao="responsavel"]')).toBeNull();
+    expect(root.querySelector('[data-acao="atualizar"]')).not.toBeNull();
+    expect(root.textContent).toContain('Arthur Pietro ainda não atualizou.');
+    expect(root.querySelector('[data-acao="feito"], [data-acao="nota"], [data-acao="confirmar"], [data-acao="dispensar"], [data-acao="concluir"], [data-acao="responsavel"]')).toBeNull();
   });
-  it('registra feito via modal, valida entrada e apresenta espera de confirmação', async () => {
+  it('atualiza pelo formulário: situação, texto, passos e link; mostra a última atualização', async () => {
     atribuir();
+    db.tarefas[0].tarefa_passos[0].estado = 'pendente';
+    db.tarefas[0].tarefa_passos.push({ id: 'p2', ordem: 2, descricao: 'Ligar para a FUNAPE', estado: 'pendente', executor: 'pessoa' },
+      { id: 'pb', ordem: 3, descricao: 'Passo do Buriti', estado: 'pendente', executor: 'buriti' });
     await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    root.querySelector('[data-acao="feito"]').click();
-    await expect(modal.onSave()).rejects.toThrow('nota');
-    document.getElementById('buriti-feito-nota').value = 'Enviei ao Conecta';
-    document.getElementById('buriti-feito-link').value = 'javascript:alert(1)';
+    root.querySelector('[data-acao="atualizar"]').click();
+    await vi.waitFor(() => expect(document.getElementById('buriti-atualizar-texto')).not.toBeNull());
+    expect([...document.querySelectorAll('input[name="buriti-situacao"]')].map(i => i.value)).toEqual(['em_andamento', 'esperando', 'travado', 'feito']);
+    expect(document.querySelector('input[name="buriti-situacao"]:checked').value).toBe('em_andamento');
+    // Só os passos de pessoa abertos podem ser marcados.
+    expect([...document.querySelectorAll('input[name="buriti-passo"]')].map(i => i.value)).toEqual(['p-t1', 'p2']);
+    await expect(modal.onSave()).rejects.toThrow('Escreva o que aconteceu');
+    document.getElementById('buriti-atualizar-texto').value = 'Falei com fulano@funape.org.br';
+    await expect(modal.onSave()).rejects.toThrow('e-mail');
+    document.getElementById('buriti-atualizar-texto').value = 'Liguei; a Ranielly retorna amanhã.';
+    document.getElementById('buriti-atualizar-link').value = 'javascript:alert(1)';
     await expect(modal.onSave()).rejects.toThrow('https://');
     expect(supabaseClient.rpc).not.toHaveBeenCalled();
-    document.getElementById('buriti-feito-link').value = 'https://exemplo.invalid/doc';
+    document.getElementById('buriti-atualizar-link').value = 'https://exemplo.invalid/doc';
+    // O happy-dom não desmarca o rádio do mesmo grupo fora de <form>; o navegador desmarca.
+    document.querySelector('input[name="buriti-situacao"][value="em_andamento"]').checked = false;
+    document.querySelector('input[name="buriti-situacao"][value="esperando"]').checked = true;
+    document.querySelector('input[name="buriti-passo"][value="p2"]').checked = true;
     supabaseClient.rpc.mockImplementation(async (nome, args) => {
-      db.tarefas[0].tarefa_passos[0].feito = { tipo: 'sugestao', origem: 'humano', detalhe: { nota: args.p_nota, link: args.p_link, por: 'Arthur Pietro' } };
+      db.tarefas[0].situacao = args.p_situacao;
+      db.tarefas[0].atualizacao = { tipo: 'atualizacao', origem: 'humano', ocorrido_em: '2026-10-08T14:00:00Z',
+        detalhe: { situacao: args.p_situacao, texto: args.p_texto, link: args.p_link, por: 'Arthur Pietro' } };
       return { error: null };
     });
     await modal.onSave();
-    expect(supabaseClient.rpc).toHaveBeenCalledWith('registrar_feito', { p_passo: 'p-t1', p_nota: 'Enviei ao Conecta', p_link: 'https://exemplo.invalid/doc' });
-    expect(root.textContent).toContain('Feito — aguardando o Victor');
-    expect(root.textContent).toContain('Enviei ao Conecta');
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('registrar_atualizacao', { p_tarefa: 't1', p_situacao: 'esperando',
+      p_texto: 'Liguei; a Ranielly retorna amanhã.', p_link: 'https://exemplo.invalid/doc', p_passos: ['p2'] });
+    await vi.waitFor(() => expect(root.querySelector('.buriti-ultima').textContent).toContain('Liguei; a Ranielly retorna amanhã.'));
+    expect(root.querySelector('.buriti-ultima').textContent).toContain('Esperando alguém');
+    expect(root.querySelector('.buriti-ultima a').href).toBe('https://exemplo.invalid/doc');
   });
-  it('modal de feito empilha rótulos e campos no formulário padrão, com largura total', async () => {
+  it('com um passo só, o formulário não pede para marcar passos', async () => {
+    atribuir();
+    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    root.querySelector('[data-acao="atualizar"]').click();
+    await vi.waitFor(() => expect(document.getElementById('buriti-atualizar-texto')).not.toBeNull());
+    expect(document.querySelector('input[name="buriti-passo"]')).toBeNull();
+    document.getElementById('buriti-atualizar-texto').value = 'Pronto.';
+    document.querySelector('input[name="buriti-situacao"][value="em_andamento"]').checked = false;
+    document.querySelector('input[name="buriti-situacao"][value="feito"]').checked = true;
+    await modal.onSave();
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('registrar_atualizacao', { p_tarefa: 't1', p_situacao: 'feito',
+      p_texto: 'Pronto.', p_link: null, p_passos: null });
+  });
+  it('formulário Atualizar empilha rótulos e campos no formulário padrão, com largura total', async () => {
     atribuir();
     const style = document.createElement('style');
     style.textContent = readFileSync(resolve('frontend/css/style.css'), 'utf8');
-    root.append(style);
     await window.BuritiTarefasUI.tarefas(root, 'todas', true);
     // Modal fica fora de .buriti-pagina no site: precisa do estilo global do formulário.
     document.head.append(style);
     try {
-      root.querySelector('[data-acao="feito"]').click();
-      const nota = document.getElementById('buriti-feito-nota');
-      const link = document.getElementById('buriti-feito-link');
-      expect(nota.parentElement).not.toBe(link.parentElement);
-      for (const campo of [nota, link]) {
+      root.querySelector('[data-acao="atualizar"]').click();
+      await vi.waitFor(() => expect(document.getElementById('buriti-atualizar-texto')).not.toBeNull());
+      const texto = document.getElementById('buriti-atualizar-texto');
+      const link = document.getElementById('buriti-atualizar-link');
+      for (const campo of [texto, link]) {
         const grupo = campo.closest('.form-group');
-        expect(grupo.children).toHaveLength(2);
         expect(grupo.firstElementChild.htmlFor).toBe(campo.id);
         expect(getComputedStyle(grupo).display).toBe('flex');
         expect(getComputedStyle(grupo).flexDirection).toBe('column');
         expect(getComputedStyle(campo).width).toBe('100%');
       }
-      expect(nota.parentElement.nextElementSibling).toBe(link.parentElement);
+      expect(texto.closest('.form-group')).not.toBe(link.closest('.form-group'));
     } finally { style.remove(); }
   });
-  it.each([true, false])('Registrar que fiz só aparece em Minhas tarefas (admin=%s)', async perfilAdmin => {
+  it.each([true, false])('Atualizar aparece para o responsável em qualquer aba; decisões só para o admin (admin=%s)', async perfilAdmin => {
     atribuir(); admin = perfilAdmin;
     await window.BuritiTarefasUI.tarefas(root);
-    expect(root.querySelector('[data-acao="feito"]')).toBeNull();
+    expect(root.querySelector('[data-tarefa="t1"] [data-acao="atualizar"]')).not.toBeNull();
     expect(Boolean(root.querySelector('[data-acao="confirmar"]'))).toBe(perfilAdmin);
     expect(Boolean(root.querySelector('[data-acao="dispensar"]'))).toBe(perfilAdmin);
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    expect(root.querySelector('[data-acao="feito"]')).not.toBeNull();
+    expect(root.querySelector('[data-acao="feito"]')).toBeNull();
   });
-  it('professor do escopo que não é responsável apenas lê e anota', async () => {
+  it('professor do escopo que não é responsável apenas lê', async () => {
     admin = false;
     await window.BuritiTarefasUI.tarefas(root);
-    expect(root.querySelector('[data-acao="feito"], [data-acao="confirmar"], [data-acao="concluir"]')).toBeNull();
-    expect(root.querySelector('[data-acao="nota"]')).not.toBeNull();
+    expect(root.querySelector('[data-acao="atualizar"], [data-acao="confirmar"], [data-acao="concluir"], [data-acao="nota"]')).toBeNull();
+    expect(root.querySelectorAll('[data-tarefa]')).toHaveLength(2);
   });
   it('centro fora do escopo vem só da RPC restrita e falha não vira vazio', async () => {
     atribuir(); db.tarefas[0].projects = null;
@@ -337,12 +365,11 @@ describe('Minhas tarefas e atribuição', () => {
     expect(root.querySelector('[role="alert"]')).not.toBeNull();
     expect(root.textContent).not.toContain('Nenhuma tarefa');
   });
-  it('responsável em tarefa encerrada pode anotar, mas não registrar feito', async () => {
+  it('responsável em tarefa encerrada não atualiza mais', async () => {
     atribuir(); db.tarefas[0].status = 'cancelada';
     await window.BuritiTarefasUI.tarefas(root, 'todas', true);
     expect(root.textContent).toContain('Cancelada');
-    expect(root.querySelector('[data-acao="feito"]')).toBeNull();
-    expect(root.querySelector('[data-acao="nota"]')).not.toBeNull();
+    expect(root.querySelector('[data-acao="atualizar"]')).toBeNull();
   });
   it('menu só some com consulta bem-sucedida sem atribuições e expõe falha em banner', async () => {
     root.innerHTML = '<li data-minhas-tarefas hidden></li><li data-minhas-status hidden role="alert"></li>';
@@ -371,12 +398,19 @@ describe('Minhas tarefas e atribuição', () => {
     root.querySelector('[data-acao="responsavel"]').click();
     await vi.waitFor(() => expect(root.textContent).toContain('Falha de usuários'));
   });
-  it('admin vê nome, nota e link do feito para confirmar', async () => {
+  it('admin vê nome, nota e link do feito para confirmar (registro antigo e atualização)', async () => {
     db.tarefas[0].tarefa_passos[0].feito = { tipo: 'sugestao', origem: 'humano', detalhe: { por: 'Arthur Pietro', nota: 'Enviei', link: 'https://exemplo.invalid/doc' } };
     await window.BuritiTarefasUI.tarefas(root);
-    expect(root.textContent).toContain('Feito por Arthur Pietro — confirmar?');
+    expect(root.textContent).toContain('Feito por Arthur Pietro — falta o Victor confirmar');
     expect(root.querySelector('.buriti-evidencia').textContent).toContain('Enviei');
     expect(root.querySelector('.buriti-evidencia a').href).toBe('https://exemplo.invalid/doc');
+    // Marcado por uma atualização: o texto já está no destaque, não repete no passo.
+    const detalhe = { situacao: 'feito', texto: 'Tudo enviado', por: 'Arthur Pietro' };
+    db.tarefas[0].tarefa_passos[0].feito = { tipo: 'atualizacao', origem: 'humano', detalhe };
+    db.tarefas[0].atualizacao = { tipo: 'atualizacao', origem: 'humano', detalhe, ocorrido_em: '2026-10-08T14:00:00Z' };
+    await window.BuritiTarefasUI.tarefas(root);
+    expect(root.querySelector('[data-tarefa="t1"] .buriti-ultima').textContent).toContain('Tudo enviado');
+    expect(root.querySelector('[data-tarefa="t1"] .buriti-evidencia')).toBeNull();
   });
   it('carrega encaminhamentos além dos dez recentes, com filtro por tarefa', async () => {
     atribuir();

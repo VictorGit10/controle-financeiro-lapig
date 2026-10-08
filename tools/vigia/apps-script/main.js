@@ -32,13 +32,28 @@ var VigiaMain = (function () {
     var nativo = e && /^(TypeError|ReferenceError|RangeError|SyntaxError)$/.test(e.name);
     return 'execucao_falhou: ' + ((e && e.name) || 'Error') + (nativo ? ' (' + e.message + ')' : '') + ' em ' + (linhas || '?');
   }
+  // Desde a 057 o banco só põe na fila o essencial: resumo diário, prazo de hoje/vencido e falha do vigia.
+  var ASSUNTOS = { alerta_prazo: 'Vigia LAPIG · prazo de tarefa', saude: 'Vigia LAPIG · falha na checagem' };
   function entregar(db, config, avisos, ctx) {
     (avisos || []).forEach(function (aviso) {
-      var tarefa = (ctx.tarefas || []).find(function (t) { return t.id === aviso.tarefa_id; }) || { titulo: 'Triagem do vigia' };
-      var texto = aviso.tipo === 'resumo_diario' ? VigiaResumo.textoResumoDiario(Object.assign({}, ctx, { site_url: config.SITE_URL }), aviso.dia) : VigiaResumo.textoAviso(Object.assign({}, tarefa, { tipo: aviso.tipo, site_url: config.SITE_URL, mapa: ctx.mapa }));
-      var envio = VigiaAvisos.enviar(config, texto, 'Vigia LAPIG', aviso.tipo === 'alerta_prazo' ? 4 : 3);
+      var envio;
+      if (aviso.tipo === 'resumo_diario') {
+        var texto = VigiaResumo.textoResumoDiario(Object.assign({}, ctx, { site_url: config.SITE_URL, conta_gmail: config.VICTOR_EMAIL || config.EMAIL_AVISO }), aviso.dia);
+        envio = VigiaAvisos.enviarEmail(config, texto, 'Resumo do vigia · ' + String(aviso.dia || '').split('-').reverse().slice(0, 2).join('/'));
+      } else {
+        var tarefa = (ctx.tarefas || []).find(function (t) { return t.id === aviso.tarefa_id; }) || { titulo: 'Vigia' };
+        envio = VigiaAvisos.enviar(config, VigiaResumo.textoAviso(Object.assign({}, tarefa, { tipo: aviso.tipo, site_url: config.SITE_URL, mapa: ctx.mapa })),
+          ASSUNTOS[aviso.tipo] || 'Vigia LAPIG', aviso.tipo === 'alerta_prazo' ? 4 : 3);
+      }
       db.rpc('vigia_registrar', { p: { versao: VERSAO, avisos_resultados: [Object.assign({ chave: aviso.chave }, envio)] } });
     });
+  }
+  // Falha sem banco (login, rede) não passa pela fila: um aviso a cada 6 h, não um a cada 30 min.
+  function avisarFalha(config) {
+    var cache = CacheService.getScriptCache();
+    if (cache.get('vigia_falha_avisada')) return;
+    VigiaAvisos.enviar(config, 'O vigia falhou na checagem. Veja Execuções no Apps Script ou a página Buriti.\n' + (config.SITE_URL || ''), ASSUNTOS.saude, 4);
+    cache.put('vigia_falha_avisada', '1', 21600);
   }
   function executar(tipo) {
     var lock = LockService.getScriptLock();
@@ -88,7 +103,7 @@ var VigiaMain = (function () {
       if (db && execucao && !terminou) {
         try { db.rpc('vigia_registrar', { p: { versao: VERSAO, execucao: { id: execucao, terminada_em: new Date().toISOString(), erros: [{ codigo: chaveErro(e) }] } } }); } catch (_) { /* O monitor externo verá execução sem fim. */ }
       }
-      if (config) VigiaAvisos.enviar(config, 'Vigia requer atenção. Consulte a página Buriti.\n' + (config.SITE_URL || ''), 'Vigia LAPIG', 4);
+      if (config) { try { avisarFalha(config); } catch (_) { /* Sem cache ou sem envio: a página mostra o vigia atrasado. */ } }
       throw new Error(chaveErro(e));
     } finally { lock.releaseLock(); }
   }

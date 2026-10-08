@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { criarToolsTarefas, montarPayloadTarefa } from '../mcp/src/buriti-tarefa.js';
-import { seloPrazo, ordenarTarefas, saudeVigia, gmailLink, textoComLinks, validarFeito, registroFeito, podeRegistrarFeito } from '../frontend/js/components/buriti-tarefas.js';
+import { seloPrazo, ordenarTarefas, saudeVigia, gmailLink, textoComLinks, validarFeito, registroFeito, podeRegistrarFeito,
+  lerAtualizacao, validarAtualizacao } from '../frontend/js/components/buriti-tarefas.js';
 
 describe('selos e ordenação do Buriti', () => {
   const hoje = new Date(2026, 9, 6, 23, 59);
@@ -36,6 +37,50 @@ describe('selos e ordenação do Buriti', () => {
 const ID = '12345678-1234-1234-1234-123456789012';
 const entrada = { titulo: ' Implantar bolsas ', passos: [{ descricao: ' Atualizar quadro ', quem: '[P1]', evidencia: { tipo: 'email', contem_todos: ['30.068'] } }],
   prazo: '2026-10-30', chaves: [{ tipo: 'centro_custo', valor: '30.068' }] };
+
+describe('correções do Buriti (057) e leitura da atualização', () => {
+  it('editar_tarefa manda só os campos informados; vazio apaga; exige motivo e algum campo', async () => {
+    const rpcOperador = vi.fn().mockResolvedValue(null);
+    const tools = criarToolsTarefas({ rpcOperador });
+    await tools.editarTarefa({ tarefa_id: ID, titulo: 'Novo', prazo: '', motivo: 'Pedido do Victor' });
+    expect(rpcOperador).toHaveBeenCalledWith('buriti_editar_tarefa', { p_tarefa: ID, p: { titulo: 'Novo', prazo: null }, p_motivo: 'Pedido do Victor' });
+    await expect(tools.editarTarefa({ tarefa_id: ID, motivo: 'x' })).rejects.toThrow('ao menos um campo');
+    await expect(tools.editarTarefa({ tarefa_id: ID, titulo: 'x', motivo: ' ' })).rejects.toThrow('motivo');
+  });
+  it('editar_passos, dispensar e cancelar chamam as RPCs do operador com o motivo', async () => {
+    const rpcOperador = vi.fn().mockResolvedValue(null);
+    const tools = criarToolsTarefas({ rpcOperador });
+    await tools.editarPassos({ tarefa_id: ID, passos: [{ descricao: ' Contar o retorno ', quem: 'Arthur' }], motivo: 'Passo único' });
+    expect(rpcOperador).toHaveBeenCalledWith('buriti_editar_passos', { p_tarefa: ID, p_passos: [{ descricao: 'Contar o retorno', quem: 'Arthur' }], p_motivo: 'Passo único' });
+    await expect(tools.editarPassos({ tarefa_id: ID, passos: [{ descricao: ' ' }], motivo: 'x' })).rejects.toThrow('Descrição');
+    await tools.dispensarPasso({ passo_id: 'p1', motivo: 'Não precisa' });
+    expect(rpcOperador).toHaveBeenCalledWith('buriti_dispensar_passo', { p_passo: 'p1', p_motivo: 'Não precisa' });
+    await tools.cancelarTarefa({ tarefa_id: ID, motivo: 'Recomeçar' });
+    expect(rpcOperador).toHaveBeenCalledWith('buriti_cancelar_tarefa', { p_tarefa: ID, p_motivo: 'Recomeçar' });
+  });
+  it('lista traz a última atualização do responsável já lida, sem e-mail', async () => {
+    const atualizacao = { tipo: 'atualizacao', origem: 'humano', ocorrido_em: '2026-10-08T14:00:00Z',
+      detalhe: { situacao: 'esperando', texto: 'Liguei; retorno amanhã', por: 'Arthur Pietro', link: 'https://exemplo.invalid/x' } };
+    const rows = [{ id: ID, tarefa_passos: [], eventos: [], atualizacao }];
+    const q = { then: resolve => resolve(rows) };
+    for (const m of ['select', 'order', 'limit', 'eq', 'in']) q[m] = () => q;
+    const tools = criarToolsTarefas({ consultar: async (nome, fn) => fn({ from: () => q }) });
+    const [t] = (await tools.listarTarefas()).tarefas;
+    expect(t.atualizacao).toBeUndefined();
+    expect(t.ultima_atualizacao).toEqual({ situacao: 'esperando', texto: 'Liguei; retorno amanhã', por: 'Arthur Pietro',
+      link: 'https://exemplo.invalid/x', quando: '2026-10-08T14:00:00Z' });
+    expect(lerAtualizacao({ ...atualizacao, detalhe: { ...atualizacao.detalhe, texto: 'de a@b.com' } }).texto).toBe('[Retido]');
+    expect(lerAtualizacao({ ...atualizacao, origem: 'buriti' })).toBeNull();
+    expect(registroFeito({ feito: atualizacao }).nota).toBe('Liguei; retorno amanhã');
+  });
+  it('validarAtualizacao exige situação conhecida, texto sem e-mail e link https', () => {
+    expect(validarAtualizacao('feito', ' Pronto ')).toEqual({ p_situacao: 'feito', p_texto: 'Pronto', p_link: null });
+    expect(() => validarAtualizacao('quase', 'x')).toThrow('situação');
+    expect(() => validarAtualizacao('feito', ' ')).toThrow('Escreva');
+    expect(() => validarAtualizacao('feito', 'de a@b.com')).toThrow('e-mail');
+    expect(() => validarAtualizacao('feito', 'ok', 'http://x.example')).toThrow('https://');
+  });
+});
 
 describe('tools de tarefas sem rede', () => {
   it('monta o contrato p da 054, sem campos externos ao payload', () => {
@@ -75,7 +120,7 @@ describe('tools de tarefas sem rede', () => {
     const consultar = async (nome, fn) => fn({ from });
     const tools = criarToolsTarefas({ consultar, centroPorCodigo: async () => ({ id: ID }) });
     const result = await tools.listarTarefas({ centro_de_custo: '30.068' });
-    expect(result.tarefas).toEqual(rows);
+    expect(result.tarefas).toEqual(rows.map(t => ({ ...t, ultima_atualizacao: null })));
     expect(from).toHaveBeenCalledWith('tarefas');
     expect(chamadas).toContainEqual(['in', 'status', ['em_andamento', 'aguardando_terceiro']]);
     expect(chamadas).toContainEqual(['eq', 'project_id', ID]);

@@ -24,7 +24,7 @@ import { rpcOperador } from './operador.js';
 export const BUCKET = 'propostas-agente';
 
 export const { proporTarefa, listarTarefas, criarTarefa, concluirMeuPasso, confirmarPasso, anotarTarefa, pedirAtencao,
-  concluirTarefa } = criarToolsTarefas({ rpc, consultar, centroPorCodigo, rpcOperador });
+  concluirTarefa, editarTarefa, editarPassos, dispensarPasso, cancelarTarefa } = criarToolsTarefas({ rpc, consultar, centroPorCodigo, rpcOperador });
 
 async function mapaAtivo() {
   return consultar('mapa conta → rubrica', (sb) =>

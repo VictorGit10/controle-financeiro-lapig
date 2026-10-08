@@ -2344,3 +2344,13 @@ img { max-width: 100%; display: block; }
   .buriti-acoes .btn { min-height: 44px; flex: 1 1 auto; }
   .buriti-cartao__topo { align-items: flex-start; flex-wrap: wrap; }
 }
+
+/* Tarefas (057): última atualização em destaque e o formulário Atualizar com opções grandes, para o celular. */
+.buriti-ultima { border-left: 3px solid var(--accent); }
+.buriti-ultima__topo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.buriti-ultima__texto { margin: 0; white-space: pre-wrap; line-height: 1.45; }
+.buriti-opcoes { border: 0; padding: 0; margin: 0 0 var(--sp-3); display: flex; flex-direction: column; gap: 6px; }
+.buriti-opcao { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--border-color);
+  border-radius: 8px; cursor: pointer; overflow-wrap: anywhere; }
+.buriti-opcao svg { width: 16px; height: 16px; flex-shrink: 0; }
+.buriti-opcao:has(input:checked) { border-color: var(--accent); background: var(--bg-elevated); }

@@ -9,7 +9,7 @@ const fonte = fs.readFileSync(build(), 'utf8');
 const copiar = v => JSON.parse(JSON.stringify(v));
 
 function sandbox(opcoes = {}) {
-  const estado = { requisicoes: [], queries: [], logs: [], emails: [], mensagens: {}, eventos: {}, capturas: [], finalizacoes: [], avisos: {}, auth:0, locks:0, releases:0, triggers:[], expurgos:0 };
+  const estado = { requisicoes: [], queries: [], logs: [], emails: [], mensagens: {}, eventos: {}, capturas: [], finalizacoes: [], avisos: {}, auth:0, locks:0, releases:0, triggers:[], expurgos:0, cache:{} };
   const config = { SUPABASE_URL:'https://banco.exemplo.invalid',SUPABASE_ANON_KEY:'fake-anon-secret',VIGIA_EMAIL:'vigia@exemplo.invalid',VIGIA_SENHA:'fake-password-secret',SITE_URL:'https://site.exemplo.invalid/#buriti',EMAIL_AVISO:'aviso@exemplo.invalid',...opcoes.config };
   let mensagens = opcoes.mensagens || [fixtures.mensagens.envio, fixtures.mensagens.github];
   const ctx = { versao_esquema:1,tarefas:[copiar(fixtures.tarefa)],cursor_em:'2026-10-05T16:00:00.000Z',vinculos:[],pendentes:[],alertas_emitidos:[],esclarecer:0,rotina:0,saude:'ok',...opcoes.contexto };
@@ -40,6 +40,7 @@ function sandbox(opcoes = {}) {
     PropertiesService:{getScriptProperties:()=>({getProperties:()=>({...config})})},
     LockService:{getScriptLock:()=>({tryLock:()=>{estado.locks++;return !opcoes.ocupado;},releaseLock:()=>estado.releases++})},
     MailApp:{sendEmail:email=>{if(opcoes.mailFalha) throw new Error('mail fake secret');estado.emails.push(email);}},
+    CacheService:{getScriptCache:()=>({get:k=>estado.cache[k]||null,put:(k,v)=>{estado.cache[k]=v;}})},
     GmailApp:{
       search:(q, start, max)=>{
         estado.queries.push(q);
@@ -121,6 +122,21 @@ describe('Vigia.gs com serviços falsos, sem rede', () => {
     expect(()=>global.checar()).toThrow('rpc_vigia_capturar_http_500');
     expect(estado.requisicoes.some(r=>r.url.includes('ollama.com'))).toBe(false);
     expect(estado.finalizacoes[0].execucao.erros[0].codigo).toBe('rpc_vigia_capturar_http_500');expect(estado.releases).toBe(1);
+  });
+  it('falha repetida avisa uma vez só (a cada 6 h), com assunto claro', () => {
+    const s=sandbox({capturaFalha:true});
+    expect(()=>s.global.checar()).toThrow('rpc_vigia_capturar_http_500');
+    expect(()=>s.global.checar()).toThrow('rpc_vigia_capturar_http_500');
+    const falhas=s.estado.emails.filter(e=>e.subject==='Vigia LAPIG · falha na checagem');
+    expect(falhas).toHaveLength(1);expect(falhas[0].body).not.toContain('fake');
+  });
+  it('resumo diário com conteúdo sai só por e-mail, mesmo com ntfy configurado', () => {
+    const s=sandbox({mensagens:[],config:{NTFY_TOPICO:'topico-sintetico'},contexto:{tarefas:[],resumo_tarefas:[],
+      esclarecer_lista:[{gmail_thread_id:'th1',recebida_em:'2026-10-06T12:00:00Z',remetente:'[P1]',assunto:'Ofício novo',motivo:'demanda_nova'}]}});
+    s.global.resumoDiario();
+    expect(s.estado.requisicoes.some(r=>r.url.startsWith('https://ntfy.sh/'))).toBe(false);
+    expect(s.estado.emails[0].subject).toBe('Resumo do vigia · 06/10');
+    expect(s.estado.emails[0].body).toContain('"Ofício novo" (assunto novo, sem tarefa)');
   });
   it('modelo offline deixa captura para próxima execução e depois processa', () => {
     const s=sandbox({mensagens:[fixtures.mensagens.exigencia],config:{OLLAMA_API_KEY:'fake-ollama-secret'},modeloFalha:true});

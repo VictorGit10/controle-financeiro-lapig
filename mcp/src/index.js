@@ -29,7 +29,8 @@ import {
   planoDeTrabalho,
 } from './tools.js';
 import { proporBalancete, proporPlano, listarPropostas, perguntar, proporTarefa, listarTarefas, criarTarefa, concluirMeuPasso,
-  confirmarPasso, anotarTarefa, pedirAtencao, concluirTarefa } from './buriti.js';
+  confirmarPasso, anotarTarefa, pedirAtencao, concluirTarefa, editarTarefa, editarPassos, dispensarPasso,
+  cancelarTarefa } from './buriti.js';
 
 // Enquadramento que vale para TODAS as tools. Fica aqui, e não repetido dentro
 // de cada descrição, por dois motivos: o cliente lê isto uma vez no handshake —
@@ -561,6 +562,71 @@ buriti(
   },
   concluirTarefa,
   OPERA
+);
+
+// Correções (057): só em tarefa criada pelo Buriti e só quando o Victor pede no chat. Cada uma fica na linha
+// do tempo com o antes e o depois; `motivo` registra o pedido dele.
+buriti(
+  'editar_tarefa',
+  {
+    title: 'Editar tarefa do Buriti',
+    description: 'Muda título, descrição, prazo, motivo do prazo ou responsável de uma tarefa que o Buriti criou. ' +
+      'Só quando o Victor pede no chat. Campo omitido fica como está; string vazia apaga (descrição, prazo).',
+    inputSchema: {
+      tarefa_id: z.string(),
+      titulo: z.string().min(1).max(300).optional(),
+      descricao: z.string().max(10000).optional(),
+      prazo: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/).optional().describe('AAAA-MM-DD, ou vazio para tirar o prazo.'),
+      prazo_motivo: z.string().max(1000).optional(),
+      responsavel: z.string().max(300).optional().describe('Nome como está no sistema; vazio tira o responsável.'),
+      motivo: z.string().min(1).max(2000).describe('O pedido do Victor, em uma frase.'),
+    },
+  },
+  editarTarefa,
+  OPERA
+);
+
+buriti(
+  'editar_passos',
+  {
+    title: 'Refazer passos da tarefa do Buriti',
+    description: 'Troca os passos que ninguém começou (pendentes, sem registro da pessoa) pela lista nova. ' +
+      'Passos já marcados, confirmados ou dispensados ficam. Só tarefa criada pelo Buriti, a pedido do Victor.',
+    inputSchema: {
+      tarefa_id: z.string(),
+      passos: z.array(z.object({
+        descricao: z.string().min(1).max(1000),
+        executor: z.enum(['buriti', 'pessoa']).optional().describe('Padrão: pessoa.'),
+        quem: z.string().max(300).optional(),
+        evidencia: z.record(z.string(), z.unknown()).optional(),
+      })).max(50),
+      motivo: z.string().min(1).max(2000).describe('O pedido do Victor, em uma frase.'),
+    },
+  },
+  editarPassos,
+  OPERA
+);
+
+buriti(
+  'dispensar_passo',
+  {
+    title: 'Dispensar passo da tarefa do Buriti',
+    description: 'Marca um passo como dispensado (não precisa mais). Só tarefa criada pelo Buriti, a pedido do Victor.',
+    inputSchema: { passo_id: z.string(), motivo: z.string().min(1).max(2000) },
+  },
+  dispensarPasso,
+  OPERA
+);
+
+buriti(
+  'cancelar_tarefa',
+  {
+    title: 'Cancelar tarefa do Buriti',
+    description: 'Cancela uma tarefa que o Buriti criou, quando o Victor pede no chat. Tarefa cancelada não volta pelo Buriti.',
+    inputSchema: { tarefa_id: z.string(), motivo: z.string().min(1).max(2000) },
+  },
+  cancelarTarefa,
+  { ...OPERA, destructiveHint: true }
 );
 
 const transporte = new StdioServerTransport();
