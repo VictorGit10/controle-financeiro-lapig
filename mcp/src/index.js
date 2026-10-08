@@ -369,7 +369,7 @@ buriti(
       'PROPOSTA para um humano revisar e aplicar; não grava orçamento.\n\n' +
       'Leva avisos da soma das rubricas, do total frente ao plano ativo e da ordem ' +
       'das versões. Outros modelos/formatos são recusados, sem preenchimento manual ' +
-      'pelo agente. Refazer com o mesmo tipo e data (ou nome, se não houver data) ' +
+      'pelo agente. Refazer com o mesmo tipo e data (ou conteúdo do arquivo, se não houver data) ' +
       'substitui a pendente anterior. simular: true mostra os avisos sem subir arquivo nem criar proposta.',
     inputSchema: {
       caminho: z.string().min(1).describe('Caminho local do DOCX ou PDF no computador onde o MCP roda.'),

@@ -13,7 +13,7 @@ const extraido = () => ({ data: {
   desembolsos: [],
 }, warnings: [] });
 const montar = (op = {}) => montarPropostaPlano({
-  extraido: extraido(), arquivoNome: 'sintetico.docx', tipo: 'remanejamento', ...op,
+  extraido: extraido(), arquivoNome: 'sintetico.docx', tipo: 'remanejamento', hashArquivo: '0123456789abcdef', ...op,
 });
 function browserParse(html) {
   const anterior = Object.getOwnPropertyDescriptor(globalThis, 'DOMParser');
@@ -34,8 +34,11 @@ describe('montarPropostaPlano (dados sintéticos)', () => {
     expect(p.payload.extraido).toEqual(ex);
     expect(ex).toEqual(original);
     expect(p.chave).toBe('remanejamento:2026-10-08');
+    expect(montar({ hashArquivo: 'fedcba9876543210' }).chave).toBe(p.chave);
     delete ex.data.data_documento;
-    expect(montar({ extraido: ex }).chave).toBe('remanejamento:sintetico.docx');
+    expect(montar({ extraido: ex }).chave).toBe('remanejamento:0123456789abcdef');
+    expect(montar({ extraido: ex, arquivoNome: 'renomeado.docx' }).chave).toBe(montar({ extraido: ex }).chave);
+    expect(montar({ extraido: ex, hashArquivo: 'fedcba9876543210' }).chave).toBe('remanejamento:fedcba9876543210');
   });
   it('total diferente é aviso com os dois valores, nunca bloqueio ou recálculo', () => {
     const p = montar({ planoAtivo: { valor_total_plano: 1000 } });
@@ -173,6 +176,25 @@ describe('Conferência do resumo PROAD com despesas, CIP e DAO (sintético)', ()
     expect(avisosDeSoma(ex)).toEqual([]);
     expect(montar({ extraido: ex }).payload.conferencias.soma_rubricas_diverge).toBe(false);
   });
+
+  it('resumo no fim da mesma tabela não descarta as rubricas anteriores', () => {
+    const rubricasHtml = linha('Plano de Aplicação dos Recursos Financeiros', 'Valor (R$)') +
+      linha('a-Pessoal', '396.000,00', true) + linha('Bolsas', '396.000,00') +
+      linha('b-Serviços de Terceiros P. Jurídica', '10.000,00', true) +
+      linha('c-Passagens', '20.000,00', true) + linha('d-Diárias', '26.820,00', true) +
+      linha('e-Material de Consumo', '20.000,00', true) +
+      linha('f-Investimento', '40.000,00', true) + linha('Equipamentos', '40.000,00');
+    const semResumo = browserParse('<table>' + rubricasHtml + '</table>');
+    const comResumo = browserParse('<table>' + rubricasHtml +
+      linha('Previsão de despesas do projeto', '512.820,00') +
+      linha('Previsão de custos indiretos', '110.880,00') +
+      linha('D.A.O da Fundação', '69.300,00') +
+      linha('Total do plano', '693.000,00') + '</table>');
+    expect(semResumo.data.rubricas.map(r => r.valor_previsto))
+      .toEqual([396000, 10000, 20000, 26820, 20000, 40000]);
+    expect(comResumo.data.rubricas.slice(0, semResumo.data.rubricas.length))
+      .toEqual(semResumo.data.rubricas);
+  });
   it('avisa divergência real de despesas mesmo que rubricas + CIP + DAO fechem o total geral', () => {
     const ex = browserParse(layout({ despesas: '512.821,00' }));
     expect(avisosDeSoma(ex)).toHaveLength(1);
@@ -193,5 +215,57 @@ describe('Conferência do resumo PROAD com despesas, CIP e DAO (sintético)', ()
     const ex = browserParse(layout({ despesas: null, [campo]: null }));
     expect(avisosDeSoma(ex)).toHaveLength(1);
     expect(avisosDeSoma(ex)[0]).not.toContain('Com CIP e DAO declarados');
+  });
+});
+
+describe('Tabela única PROAD com receita, desembolso e despesas (sintético)', () => {
+  const linha = (celulas, forte = false) => '<tr>' + celulas.map(c =>
+    '<td>' + (forte ? '<strong>' + c + '</strong>' : c) + '</td>').join('') + '</tr>';
+  const prefixo =
+    linha(['II.a Receita']) + linha(['Valor Total do Plano', 'R$ 1.000.000,00']) +
+    linha(['II.b Desembolso']) +
+    linha(['01', 'No ato da assinatura', 'Capital', '-', '1.000.000,00']) +
+    linha(['Custeio', '1.000.000,00']) + linha(['Valor Total =', '1.000.000,00']);
+  const titulo = linha(['Plano de Aplicação dos Recursos Financeiros', 'Valor (R$)']);
+  const despesas =
+    linha(['a - Pessoal', 'Total', 'R$864.000,00'], true) + linha(['Bolsas', 'R$864.000,00']) +
+    linha(['b - Serviços de Terceiros P. Jurídica', 'Total', 'R$ 73.000,00'], true) +
+    linha(['Taxa de serviço para terceiros', 'R$50.000,00']) +
+    linha(['Taxa de inscrição para eventos', 'R$8.000,00']) +
+    linha(['Taxa para publicação em revistas científicas', 'R$15.000,00']) +
+    linha(['c – Passagens e Despesas com Locomoção', 'Total', 'R$ 32.000,00'], true) +
+    linha(['Despesas com locomoção, passagens aéreas e terrestres, ...', 'R$ 32.000,00']) +
+    linha(['d – Despesas com diárias', 'Total', 'R$ 31.000,00'], true) +
+    linha(['e – Material de Consumo', 'Total', 'R$ 0,00'], true) +
+    linha(['f– Investimento', 'Total', 'R$ 0,00'], true) +
+    linha(['g- Ganho econômico****', 'Total', 'R$ 0,00'], true);
+  const esperado = [
+    ['a.bolsas', 864000], ['b', 50000], ['b', 8000],
+    ['b', 15000], ['c', 32000], ['d', 31000],
+  ];
+  it.each(['2- Previsão de Despesas (a+b+c+d+e+f+g)',
+    '1- Previsão de Despesas (a+b+c+d+e+f+g)',
+    'Previsão de Despesas (a+b+c+d+e+f+g)'])('exclui receita e desembolso anteriores ao cabeçalho (%s)', rotulo => {
+    const ex = browserParse('<table>' + prefixo + titulo +
+      linha([rotulo, 'Total', 'R$1.000.000,00']) + despesas + '</table>');
+    expect(ex.data.rubricas.map(r => [r.rubrica_code, r.valor_previsto])).toEqual(esperado);
+    expect(ex.data.valor_total_plano).toBe(1000000);
+    expect(ex.warnings.filter(w => /soma das rubricas|fallback/i.test(w))).toEqual([]);
+    expect(montar({ extraido: ex }).payload.conferencias.soma_rubricas_diverge).toBe(false);
+  });
+  it('preserva rubricas e avisos da tabela sem o cabeçalho de previsão', () => {
+    const ex = browserParse('<table>' + titulo + despesas +
+      linha(['Total', 'R$1.000.000,00']) + '</table>');
+    expect(ex.data.rubricas.map(r => [r.rubrica_code, r.valor_previsto])).toEqual(esperado);
+    expect(ex.data.rubricas.map(r => r.descricao_livre)).toEqual([
+      null, 'Taxa de serviço para terceiros', 'Taxa de inscrição para eventos',
+      'Taxa para publicação em revistas científicas',
+      'Despesas com locomoção, passagens aéreas e terrestres, ...', null,
+    ]);
+    expect(ex.data.valor_total_plano).toBe(1000000);
+    expect(ex.warnings).toEqual([
+      'Valor CIP não detectado — preencha manualmente se aplicável.',
+      'Valor DAO não detectado — preencha manualmente se aplicável.',
+    ]);
   });
 });
