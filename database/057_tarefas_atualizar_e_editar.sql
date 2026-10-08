@@ -29,6 +29,43 @@ language sql immutable security definer set search_path=public,pg_temp as $$
     when 'travado' then 'Travado' when 'feito' then 'Feito' end;
 $$;
 
+-- Motivos de "precisa de você" que a própria atualização põe e tira. Os demais (pedido do Buriti, prazo,
+-- mensagem do vigia) só saem por quem os resolve.
+create function public._motivo_automatico(p text) returns boolean
+language sql immutable security definer set search_path=public,pg_temp as $$
+  select p is null or p like '%; confirmar' or p like '%: travado';
+$$;
+
+-- Sem passo da pessoa esperando confirmação, o aviso "; confirmar" sai. Vale para confirmar e dispensar,
+-- pelo Victor na página ou pelo Buriti.
+create function public._limpar_confirmar(p_tarefa uuid) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  if not exists(select 1 from public.tarefa_passos where tarefa_id=p_tarefa and estado='sugerido' and ultimo_feito_id is not null) then
+    update public.tarefas set precisa_atencao=false,motivo_atencao=null
+     where id=p_tarefa and coalesce(motivo_atencao,'') like '%; confirmar';
+  end if;
+end $$;
+
+-- Decisão do admin (054) com duas correções: passo apagado entre a leitura e o lock é recusado, e o aviso de
+-- confirmação sai quando não resta passo marcado pela pessoa.
+create or replace function public._decidir_passo(p_passo uuid,p_nota text,p_estado text) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare s public.tarefa_passos; t public.tarefas; v uuid;
+begin
+  select * into s from public.tarefa_passos where id=p_passo;
+  t:=public._humano_tarefa(s.tarefa_id);
+  select * into s from public.tarefa_passos where id=p_passo for update;
+  if not found then raise exception 'Passo inexistente.' using errcode='22023'; end if;
+  if t.status in ('concluida','cancelada') or s.estado in ('confirmado','dispensado') then
+    raise exception 'Passo ou tarefa encerrados.' using errcode='22023'; end if;
+  v:=public._evento_tarefa(t.id,'humano:'||gen_random_uuid(),'confirmacao','humano',
+    coalesce(nullif(btrim(p_nota),''),'Passo '||p_estado||'.'),jsonb_build_object('passo_id',s.id,'estado',p_estado));
+  update public.tarefa_passos set estado=p_estado,evento_id=v,confirmado_por=auth.uid(),confirmado_em=now() where id=s.id;
+  update public.tarefas set atualizada_em=now() where id=t.id;
+  perform public._limpar_confirmar(t.id);
+end $$;
+
 create function public.registrar_atualizacao(p_tarefa uuid,p_situacao text,p_texto text,
   p_link text default null,p_passos uuid[] default null) returns uuid
 language plpgsql security definer set search_path=public,pg_temp as $$
@@ -62,8 +99,10 @@ begin
     jsonb_build_object('situacao',p_situacao,'texto',texto,'link',p_link,'por',nome,'passos',to_jsonb(marcados)));
   update public.tarefa_passos set estado='sugerido',evento_id=evento,ultimo_feito_id=evento where id=any(marcados);
   -- "Precisa de você": travado pede o Victor; passo marcado pede confirmação; saiu do travado, o aviso de
-  -- travado sai (ou volta a ser o de confirmar, se ainda há passo da pessoa esperando). Outro motivo fica.
-  if p_situacao='travado' then motivo:=primeiro||': travado';
+  -- travado sai (ou volta a ser o de confirmar, se ainda há passo da pessoa esperando). Motivo que não é
+  -- destes dois automáticos (pedido do Buriti, prazo, mensagem) nunca é sobrescrito: segue até alguém resolver.
+  if not public._motivo_automatico(t.motivo_atencao) then motivo:=t.motivo_atencao;
+  elsif p_situacao='travado' then motivo:=primeiro||': travado';
   elsif cardinality(marcados)>0 then motivo:=primeiro||' atualizou; confirmar';
   elsif coalesce(t.motivo_atencao,'') like '%: travado' then
     motivo:=case when exists(select 1 from public.tarefa_passos where tarefa_id=t.id and estado='sugerido'
@@ -86,6 +125,7 @@ begin
   select * into s from public.tarefa_passos where id=p_passo;
   t:=public._buriti_tarefa(s.tarefa_id);
   select * into s from public.tarefa_passos where id=p_passo for update;
+  if not found then raise exception 'Passo inexistente.' using errcode='22023'; end if;
   if s.executor<>'pessoa' then raise exception 'Passo do Buriti: use buriti_concluir_passo.' using errcode='22023'; end if;
   if s.estado not in ('pendente','sugerido') then raise exception 'Passo já resolvido.' using errcode='22023'; end if;
   prova:=public._buriti_texto(p_prova,'Prova');
@@ -93,10 +133,7 @@ begin
     jsonb_build_object('passo_id',s.id,'estado','confirmado','prova',prova));
   update public.tarefa_passos set estado='confirmado',evento_id=v,confirmado_por=auth.uid(),confirmado_em=now() where id=s.id;
   update public.tarefas set atualizada_em=now() where id=t.id;
-  if not exists(select 1 from public.tarefa_passos where tarefa_id=t.id and estado='sugerido' and ultimo_feito_id is not null) then
-    update public.tarefas set precisa_atencao=false,motivo_atencao=null
-     where id=t.id and coalesce(motivo_atencao,'') like '%; confirmar';
-  end if;
+  perform public._limpar_confirmar(t.id);
 end $$;
 
 -- ---------- 2. O Buriti corrige a tarefa que criou ----------
@@ -208,12 +245,14 @@ begin
   select * into s from public.tarefa_passos where id=p_passo;
   t:=public._buriti_tarefa_propria(s.tarefa_id);
   select * into s from public.tarefa_passos where id=p_passo for update;
+  if not found then raise exception 'Passo inexistente.' using errcode='22023'; end if;
   if s.estado not in ('pendente','sugerido') then raise exception 'Passo já resolvido.' using errcode='22023'; end if;
   motivo:=public._buriti_texto(p_motivo,'Motivo');
   v:=public._evento_tarefa(t.id,'buriti:'||gen_random_uuid(),'confirmacao','buriti',
     'Passo dispensado pelo Buriti a pedido do Victor: '||motivo,jsonb_build_object('passo_id',s.id,'estado','dispensado'));
   update public.tarefa_passos set estado='dispensado',evento_id=v,confirmado_por=auth.uid(),confirmado_em=now() where id=s.id;
   update public.tarefas set atualizada_em=now() where id=t.id;
+  perform public._limpar_confirmar(t.id);
 end $$;
 
 create function public.buriti_cancelar_tarefa(p_tarefa uuid,p_motivo text) returns void
@@ -245,9 +284,10 @@ end $$;
 create trigger trg_vigia_aviso_essencial before insert on public.vigia_avisos
 for each row execute function public._vigia_aviso_essencial();
 
--- O que já estava na fila para virar e-mail avulso entra no próximo resumo.
+-- O que já estava na fila para virar e-mail avulso entra no próximo resumo. Falha do vigia ainda não
+-- entregue fica na fila: é aviso essencial.
 update public.vigia_avisos set estado='resumido',atualizado_em=now()
- where estado in ('pendente','falhou') and tipo<>'resumo_diario'
+ where estado in ('pendente','falhou') and tipo not in ('resumo_diario','saude')
    and not (tipo='alerta_prazo' and chave ~ ':(D-0|vencido)$');
 
 -- ---------- 4. Conteúdo do resumo diário ----------
@@ -290,7 +330,8 @@ do $$
 declare f text;
 begin
   foreach f in array array['public._rotulo_situacao(text)','public._buriti_tarefa_propria(uuid)',
-    'public._vigia_aviso_essencial()'] loop
+    'public._vigia_aviso_essencial()','public._motivo_automatico(text)','public._limpar_confirmar(uuid)',
+    'public._decidir_passo(uuid,text,text)'] loop
     execute format('revoke all on function %s from public, anon, authenticated',f);
   end loop;
   foreach f in array array['public.registrar_atualizacao(uuid,text,text,text,uuid[])',
@@ -308,6 +349,7 @@ declare r record;
 begin
   for r in select p.oid,p.proname,p.prosecdef,p.proconfig from pg_proc p
     where p.pronamespace='public'::regnamespace and p.proname in ('_rotulo_situacao','_buriti_tarefa_propria',
+      '_motivo_automatico','_limpar_confirmar','_decidir_passo',
       '_vigia_aviso_essencial','registrar_atualizacao','buriti_editar_tarefa','buriti_editar_passos',
       'buriti_dispensar_passo','buriti_cancelar_tarefa','buriti_confirmar_passo','vigia_contexto') loop
     if not r.prosecdef or not ('search_path=public, pg_temp'=any(r.proconfig)) or has_function_privilege('anon',r.oid,'EXECUTE') then
@@ -319,7 +361,7 @@ begin
   end loop;
   if not exists(select 1 from pg_trigger where tgname='trg_vigia_aviso_essencial') then
     raise exception '057: falta o gatilho dos avisos'; end if;
-  if exists(select 1 from public.vigia_avisos where estado in ('pendente','falhou') and tipo not in ('resumo_diario','alerta_prazo')) then
+  if exists(select 1 from public.vigia_avisos where estado in ('pendente','falhou') and tipo not in ('resumo_diario','alerta_prazo','saude')) then
     raise exception '057: aviso avulso ainda na fila'; end if;
 end $$;
 commit;

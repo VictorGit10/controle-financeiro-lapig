@@ -212,7 +212,65 @@ set role authenticated;
 select pg_temp.invalido(format('select public.registrar_atualizacao(%L,%L,%L)',current_setting('t57.t'),'em_andamento','depois do fim'));
 reset role;
 
+-- BLOCO 2b — achados da revisão do GPT-6.1 Sol (08/10): pedido do Buriti não some; dispensar limpa o
+-- "confirmar"; passo inexistente é recusado.
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1',false);
+set role authenticated;
+select set_config('t57.r',public.buriti_criar_tarefa(jsonb_build_object('project_id',current_setting('t57.x'),
+  'titulo','Revisão: pedido pendente','passos',jsonb_build_array(jsonb_build_object('descricao','Ligar','quem','Arthur'))),'arthur')::text,false);
+select public.buriti_pedir_atencao(current_setting('t57.r')::uuid,'Autorizar prorrogação pendente.');
+reset role;
+select set_config('t57.rp',pg_temp.passo(current_setting('t57.r'),1),false);
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1',false);
+set role authenticated;
+select public.registrar_atualizacao(current_setting('t57.r')::uuid,'feito','Liguei.');
+reset role;
+select pg_temp.ok((select precisa_atencao and motivo_atencao='Autorizar prorrogação pendente.' from public.tarefas
+  where id=current_setting('t57.r')::uuid),'atualização não sobrescreve o pedido do Buriti');
+set role authenticated;
+select public.registrar_atualizacao(current_setting('t57.r')::uuid,'travado','Ninguém atende.');
+reset role;
+select pg_temp.ok((select motivo_atencao='Autorizar prorrogação pendente.' from public.tarefas
+  where id=current_setting('t57.r')::uuid),'travado também não sobrescreve o pedido do Buriti');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1',false);
+set role authenticated;
+select public.buriti_confirmar_passo(current_setting('t57.rp')::uuid,'Ligação registrada pelo Arthur.');
+reset role;
+select pg_temp.ok((select precisa_atencao and motivo_atencao='Autorizar prorrogação pendente.' from public.tarefas
+  where id=current_setting('t57.r')::uuid),'confirmar o passo não apaga o pedido pendente');
+-- Dispensar o último passo marcado limpa o "confirmar" (Buriti e admin).
+set role authenticated;
+select set_config('t57.s',public.buriti_criar_tarefa(jsonb_build_object('project_id',current_setting('t57.x'),
+  'titulo','Revisão: dispensar','passos',jsonb_build_array(jsonb_build_object('descricao','A','quem','Arthur'),
+    jsonb_build_object('descricao','B','quem','Arthur'))),'arthur')::text,false);
+reset role;
+select set_config('t57.s1',pg_temp.passo(current_setting('t57.s'),1),false);
+select set_config('t57.s2',pg_temp.passo(current_setting('t57.s'),2),false);
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000e1',false);
+set role authenticated;
+select public.registrar_atualizacao(current_setting('t57.s')::uuid,'feito','Os dois.');
+reset role;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1',false);
+set role authenticated;
+select public.buriti_dispensar_passo(current_setting('t57.s1')::uuid,'Não precisa.');
+reset role;
+select pg_temp.ok((select precisa_atencao and motivo_atencao='Arthur atualizou; confirmar' from public.tarefas
+  where id=current_setting('t57.s')::uuid),'resta um passo marcado: o confirmar fica');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000a1',false);
+set role authenticated;
+select public.dispensar_passo(current_setting('t57.s2')::uuid,'Também não.');
+reset role;
+select pg_temp.ok((select not precisa_atencao and motivo_atencao is null from public.tarefas
+  where id=current_setting('t57.s')::uuid),'dispensado o último pelo admin, o confirmar sai');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-0000000000d1',false);
+set role authenticated;
+select pg_temp.invalido(format('select public.buriti_dispensar_passo(%L,%L)',gen_random_uuid(),'x'));
+select pg_temp.invalido(format('select public.buriti_confirmar_passo(%L,%L)',gen_random_uuid(),'x'));
+reset role;
+
 -- BLOCO 3 — avisos: só resumo diário, prazo de hoje/vencido e uma falha do vigia a cada 12 h.
+-- Falhas anteriores (de outro roteiro ou da fila antiga) ficam fora da janela de 12 h deste bloco.
+update public.vigia_avisos set criado_em=now()-interval '13 hours' where tipo='saude';
 insert into public.vigia_avisos(chave,texto,tipo) values
   ('t57:esclarecer','Há uma mensagem para revisar.','esclarecer'),
   ('t57:sugestao','Há uma tarefa para revisar.','sugestao'),

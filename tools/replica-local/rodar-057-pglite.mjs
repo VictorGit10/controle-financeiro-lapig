@@ -42,11 +42,14 @@ try {
   } finally { await sql('rollback;'); }
   if (!detectou) throw new Error('Roteiro não detectou a lacuna antes da 057.');
   // Aviso avulso que já estava na fila antes da 057 tem de sair dela.
-  await sql(`insert into public.vigia_avisos(chave,texto,tipo) values('antigo:esclarecer','Há uma mensagem para revisar.','esclarecer');`);
+  // Falha do vigia ainda não entregue é essencial: fica na fila (achado da revisão de 08/10).
+  await sql(`insert into public.vigia_avisos(chave,texto,tipo) values('antigo:esclarecer','Há uma mensagem para revisar.','esclarecer'),
+    ('antigo:saude','A checagem requer revisão.','saude');`);
   const antes = (await db.query(helpers)).rows;
   await arquivo('database/057_tarefas_atualizar_e_editar.sql');
-  const fila = (await db.query("select estado from public.vigia_avisos where chave='antigo:esclarecer'")).rows;
+  const fila = (await db.query("select chave,estado from public.vigia_avisos where chave like 'antigo:%' order by chave")).rows;
   if (fila[0]?.estado !== 'resumido') throw new Error('057 deixou aviso antigo na fila.');
+  if (fila[1]?.estado !== 'pendente') throw new Error('057 tirou da fila uma falha do vigia não entregue.');
   await arquivo('tests/sql/test_057_tarefas_atualizar_e_editar.sql');
   // As regras da 055 continuam valendo depois da 057.
   await arquivo('tests/sql/test_055_buriti_administra_tarefas.sql');
