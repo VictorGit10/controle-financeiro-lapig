@@ -85,6 +85,16 @@ gh workflow run migracao.yml -R $R --ref main -f modo=aplicar \
   for o mesmo. Se o banco mudar entre o ensaio e o aplicar (alguém usou o sistema), ele para sem aplicar:
   ensaiar de novo.
 
+## Escritas automáticas (vigia) e quando disparar
+
+O vigia grava nas `vigia_*` a cada 30 min (por volta de :10 e :40, hora UTC do log do GitHub). Até 09/10/2026
+isso fazia o cofre parar ("A cópia restaurada não bate com a produção", "Os dados da produção mudaram desde a
+cópia") ou mudar o código de aprovação entre o ensaio e o aplicar. A correção está no cofre
+(`scripts/tabelas-vivas.txt`: vigia_* e audit_logs; ver o README dele): nessas tabelas a produção pode mudar
+sozinha. Se aparecer de novo um desses erros numa tabela que não está na lista, é uso real do sistema ou uma
+automação nova: entender antes de repetir; se for automação que só grava sozinha, propor a tabela na lista
+(mudança no cofre, que o Victor cola). `tarefa_eventos` fica fora de propósito: pessoas também gravam nela.
+
 ## Quando dá erro
 
 - **Recusado na leitura:** o arquivo usa algo proibido (lista abaixo). Corrigir a migração, novo commit, ensaiar de novo.
@@ -108,6 +118,7 @@ gh workflow run migracao.yml -R $R --ref main -f modo=aplicar \
   `public.bloqueia_escrita_do_agente()`. SECURITY DEFINER sempre com `set search_path`.
 - Não tocar `is_agente`, `is_admin`, `allowed_project_ids`, `assert_project_allowed`, `contem_cpf`,
   `bloqueia_escrita_do_agente` (o cofre recusa).
+- Linha NOVA em tabela comum com valores fixos: nada de `gen_random_uuid()`/`now()` que acabe na linha (nem por chave que aponte para o id novo, nem pela cópia que a auditoria guarda): a produção e o ensaio gerariam valores diferentes e a conferência dentro da transação desfaz a migração. Ex.: 059, `md5('lapig:projeto:30.121')::uuid` e datas fixas.
 - Até 90 KB.
 
 ## Quando o próprio cofre precisa mudar

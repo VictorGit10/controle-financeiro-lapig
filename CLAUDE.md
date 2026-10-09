@@ -41,6 +41,7 @@ Antes de mexer em qualquer área coberta por uma migração, leia a linha dela e
 - nada de papéis, extensões, `ALTER DEFAULT PRIVILEGES`, COPY, `set role`/`search_path` de sessão, nem as palavras `net.`, `http(`, `dblink`, `cron.`, `vault.`, `password`, `service_role` no texto (recusa por leitura);
 - tabela nova: RLS ligado, `revoke ... from anon` (tabela e função) e o gatilho `trg_bloqueia_agente` **BEFORE INSERT OR UPDATE OR DELETE FOR EACH STATEMENT**, sem WHEN; SECURITY DEFINER sempre com `set search_path`;
 - não tocar `is_agente`, `is_admin`, `allowed_project_ids`, `assert_project_allowed`, `contem_cpf`, `bloqueia_escrita_do_agente` (o cofre recusa; mudança nelas é decisão à parte);
+- linha NOVA em tabela comum com valores fixos: nada de `gen_random_uuid()`/`now()` que acabe na linha (nem por chave que aponte para o id novo, nem pela cópia que a auditoria guarda): a produção e o ensaio gerariam valores diferentes e a conferência dentro da transação desfaz a migração. Ex.: 059, `md5('lapig:projeto:30.121')::uuid` e datas fixas;
 - até 90 KB. Policy, view, SECURITY DEFINER ou DO/EXECUTE fazem o relatório pedir revisão técnica: rode a revisão do SQL do commit por outra IA e mande o resumo ao Victor junto.
 
 ## Detailed Documentation
