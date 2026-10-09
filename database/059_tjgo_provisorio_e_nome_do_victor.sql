@@ -20,8 +20,10 @@ begin
     end if;
     -- id fixo (não gen_random_uuid): o id aparece na atribuição e na auditoria, e o cofre só aplica se o
     -- efeito for idêntico ao do ensaio. Com id aleatório o código de aprovação mudava a cada execução.
-    insert into public.projects (id, name, code, active, notes)
+    -- Datas fixas pelo mesmo motivo: a auditoria guarda a linha inteira (com created_at/updated_at).
+    insert into public.projects (id, name, code, active, created_at, updated_at, notes)
     values (md5('lapig:projeto:30.121')::uuid, 'TJGO', '30.121', true,
+      '2026-10-09 12:00:00-03', '2026-10-09 12:00:00-03',
       'Cadastro provisório feito pelo Claude em 09/10/2026 a pedido do Victor (contrato 23/2026 TJGO × UFG × FUNAPE; '
       || '1º Termo Aditivo assinado em 07/10/2026). Falta: vigência, saldo, plano de trabalho e pasta do Drive.')
     returning id into v;
