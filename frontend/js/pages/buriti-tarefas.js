@@ -113,7 +113,7 @@ window.BuritiTarefasUI = (() => {
   }
 
   // Cartão em três partes: o que o responsável disse por último (com o botão Atualizar), o que fazer e o histórico.
-  function tarefaHTML(t, minhas = false, { semTopo = false } = {}) {
+  function tarefaHTML(t, { semTopo = false } = {}) {
     const aberta = ['em_andamento', 'aguardando_terceiro'].includes(t.status);
     const selo = f().seloPrazo(t.prazo);
     const passos = [...t.tarefa_passos].sort((a, b) => a.ordem - b.ordem);
@@ -128,13 +128,13 @@ window.BuritiTarefasUI = (() => {
       ${t.descricao ? `<p class="buriti-cartao__resumo">${f().textoComLinks(t.descricao)}</p>` : ''}
       ${ultimaHTML(t)}
       ${podeAtualizar ? `<div class="buriti-acoes">${botao('atualizar', 'Atualizar', '', true)}</div>` : ''}
-      <details class="buriti-bloco"${abertos && !minhas ? ' open' : ''}><summary>O que fazer${abertos ? ` · ${abertos} em aberto` : ''}</summary>
+      <details class="buriti-bloco"${abertos ? ' open' : ''}><summary>O que fazer${abertos ? ` · ${abertos} em aberto` : ''}</summary>
         <ol class="buriti-lista buriti-passos">${passos.map(s => passoHTML(s, aberta, f().lerAtualizacao(t.atualizacao)?.texto)).join('')}</ol></details>
       <details class="buriti-bloco" data-linha-tempo><summary>Histórico</summary>
         <ul class="buriti-lista" data-eventos>${eventosHTML(t.eventos)}</ul>
         ${t.eventos.length >= 10 ? botao('historico', 'Ver todo o histórico') : ''}
       </details>
-      <div data-erro></div>${Auth.isAdmin() ? `<div class="buriti-acoes">${botao('nota', 'Nota')}${botao('responsavel', 'Responsável')}${aberta ? botao('prazo', 'Prazo') : ''}${aberta && !minhas ? botao('concluir', 'Concluir') : ''}</div>` : ''}
+      <div data-erro></div>${Auth.isAdmin() ? `<div class="buriti-acoes">${botao('nota', 'Nota')}${botao('responsavel', 'Responsável')}${aberta ? botao('prazo', 'Prazo') : ''}${aberta ? botao('concluir', 'Concluir') : ''}</div>` : ''}
     </article>`;
   }
 
@@ -144,11 +144,11 @@ window.BuritiTarefasUI = (() => {
       .order('id', { referencedTable: 'eventos' }).limit(10, { referencedTable: 'eventos' });
   }
 
-  async function atualizarTarefa(node, id, filtro, minhas) {
+  async function atualizarTarefa(node, id, filtro) {
     const t = await ler(consultaTarefa().eq('id', id).single());
     await preencherCentros([t]);
     if (!node.isConnected) return;
-    if ((minhas && t.responsavel_id !== Auth.getUser()?.id) || (filtro === 'abertas' && !['em_andamento', 'aguardando_terceiro'].includes(t.status)) ||
+    if ((filtro === 'abertas' && !['em_andamento', 'aguardando_terceiro'].includes(t.status)) ||
       (filtro === 'concluidas' && t.status !== 'concluida')) {
       const lista = node.parentElement;
       node.remove();
@@ -157,7 +157,7 @@ window.BuritiTarefasUI = (() => {
     }
     const aberto = node.querySelector('[data-linha-tempo]')?.open;
     const temp = document.createElement('div');
-    temp.innerHTML = tarefaHTML(t, minhas);
+    temp.innerHTML = tarefaHTML(t);
     const novo = temp.firstElementChild;
     novo.querySelector('[data-linha-tempo]').open = aberto;
     node.replaceWith(novo);
@@ -186,8 +186,11 @@ window.BuritiTarefasUI = (() => {
       atual = await recarregar() || node;
       return true;
     } catch (e) {
-      if (!atual.isConnected && pai?.isConnected) pai.append(atual);
-      erroCartao(atual, e);
+      // O redesenho da tela de Atividades troca os cartões: o erro vai para o cartão atual.
+      const alvo = atual.isConnected ? atual
+        : [...document.querySelectorAll('[data-tarefa],[data-msg]')].find(n => (n.dataset.tarefa || n.dataset.msg) === chave);
+      if (alvo) erroCartao(alvo, e);
+      else if (pai?.isConnected) { pai.append(atual); erroCartao(atual, e); }
       return false;
     } finally {
       ocupados.delete(chave);
@@ -198,13 +201,13 @@ window.BuritiTarefasUI = (() => {
   async function rpc(nome, args) { await ler(supabaseClient.rpc(nome, args)); }
 
   // depois(id): a tela de Atividades redesenha a linha da tarefa depois de cada ação que gravou.
-  async function acaoTarefa(e, filtro, minhas, depois = null) {
+  async function acaoTarefa(e, filtro, depois = null) {
     const button = e.target.closest('[data-acao]');
     const node = button?.closest('[data-tarefa]');
     if (!node) return;
     const id = node.dataset.tarefa, acao = button.dataset.acao;
     const atualizar = async () => {
-      const novo = await atualizarTarefa(node, id, filtro, minhas);
+      const novo = await atualizarTarefa(node, id, filtro);
       if (depois) await depois(id);
       return novo;
     };
@@ -278,33 +281,6 @@ window.BuritiTarefasUI = (() => {
       await agir(node, id, () => rpc(acao === 'confirmar' ? 'confirmar_passo' : 'dispensar_passo',
         { p_passo: button.dataset.id, p_nota: null }), atualizar);
     }
-  }
-
-  async function tarefas(root, filtro = 'abertas', minhas = false) {
-    const vez = ++geracao;
-    root.innerHTML = `<div class="buriti-abas" role="group" aria-label="Filtro de tarefas">
-      ${(minhas ? ['todas', 'abertas', 'concluidas'] : ['abertas', 'concluidas']).map(v => `<button class="btn ${v === filtro ? 'btn--primary' : 'btn--ghost'}" data-filtro="${v}" aria-pressed="${v === filtro}">${v === 'abertas' ? 'Abertas' : v === 'todas' ? 'Todas' : 'Concluídas'}</button>`).join('')}</div>
-      <div class="buriti-coluna" data-cartoes><p class="buriti-sub">Consultando tarefas…</p></div>`;
-    root.onclick = e => {
-      const valor = e.target.closest('[data-filtro]')?.dataset.filtro;
-      if (valor) tarefas(root, valor, minhas);
-      else acaoTarefa(e, filtro, minhas);
-    };
-    try {
-      const rows = await lerTudo(() => {
-        const q = consultaTarefa().order('prazo', { ascending: true, nullsFirst: false }).order('id');
-        if (minhas) q.eq('responsavel_id', Auth.getUser()?.id);
-        return filtro === 'abertas' ? q.in('status', ['em_andamento', 'aguardando_terceiro']) : filtro === 'concluidas' ? q.eq('status', 'concluida') : q;
-      });
-      await preencherCentros(rows);
-      if (vez !== geracao || !root.isConnected) return;
-      root.querySelector('[data-cartoes]').innerHTML = rows.length ? f().ordenarTarefas(rows).map(t => tarefaHTML(t, minhas)).join('')
-        : '<p class="buriti-sub">Nenhuma tarefa neste filtro.</p>';
-    } catch (e) {
-      if (vez !== geracao || !root.isConnected) return;
-      root.querySelector('[data-cartoes]').innerHTML = aviso('Não foi possível consultar as tarefas.', e);
-    }
-    lucide.createIcons();
   }
 
   function mensagemHTML(m, candidatas, escolhasDisponiveis) {
@@ -504,6 +480,6 @@ window.BuritiTarefasUI = (() => {
   }
 
   function sair() { geracao++; }
-  return { tarefas, triagem, saude, sair, atualizarMenu, escolherResponsavel,
+  return { triagem, saude, sair, atualizarMenu, escolherResponsavel,
     cartao: tarefaHTML, acao: acaoTarefa, consultaTarefa, preencherCentros, lerTudo, ler, aviso };
 })();

@@ -72,7 +72,7 @@ window.AtividadesPage = (() => {
           ${quemHTML(t)}
         </span>
       </button>
-      <div class="ativ__detalhe" ${aberto ? '' : 'hidden'}>${aberto ? ui().cartao(t, false, { semTopo: true }) : ''}</div>
+      <div class="ativ__detalhe" ${aberto ? '' : 'hidden'}>${aberto ? ui().cartao(t, { semTopo: true }) : ''}</div>
     </li>`;
   }
 
@@ -230,7 +230,7 @@ window.AtividadesPage = (() => {
   async function aoClicar(e) {
     if (e.target.closest('.ativ__detalhe')) {
       // Não use closest('[data-id]'): os botões do cartão também têm data-id (o do passo).
-      await ui().acao(e, 'todas', false, depois);
+      await ui().acao(e, 'todas', depois);
       return;
     }
     const chip = e.target.closest('[data-filtro]');
@@ -249,7 +249,7 @@ window.AtividadesPage = (() => {
       if (abertos.has(id)) { abertos.delete(id); detalhe.hidden = true; detalhe.innerHTML = ''; }
       else {
         abertos.add(id);
-        detalhe.innerHTML = ui().cartao(lista.find(t => t.id === id), false, { semTopo: true });
+        detalhe.innerHTML = ui().cartao(lista.find(t => t.id === id), { semTopo: true });
         detalhe.hidden = false;
         lucide.createIcons();
       }

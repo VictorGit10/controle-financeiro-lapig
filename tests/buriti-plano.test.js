@@ -101,7 +101,8 @@ describe('montarPropostaPlano (dados sintéticos)', () => {
 });
 
 describe('DOCX PROAD sintético no Node', () => {
-  it('extrai o mesmo que o site sobre o HTML real do mammoth, sem a equipe', async () => {
+  // O DOCX real do mammoth passa dos 5 s padrão quando a suíte inteira roda em paralelo.
+  it('extrai o mesmo que o site sobre o HTML real do mammoth, sem a equipe', { timeout: 20000 }, async () => {
     const bytes = docxSintetico();
     const { value: html } = await mammoth.convertToHtml({ buffer: bytes });
     const ex = await lerPlano(bytes, 'sintetico.DOCX');

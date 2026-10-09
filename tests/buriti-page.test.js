@@ -6,6 +6,7 @@ import { escapeAttr, escapeAttrJs } from '../frontend/js/pure-fns.js';
 import * as f from '../frontend/js/components/buriti-tarefas.js';
 
 const controlador = readFileSync(resolve('frontend/js/pages/buriti-tarefas.js'), 'utf8');
+const atividades = readFileSync(resolve('frontend/js/pages/atividades.js'), 'utf8');
 const pagina = readFileSync(resolve('frontend/js/pages/buriti.js'), 'utf8');
 let db, erros, chamadas, root, page, admin, modal;
 const tarefa = (id = 't1') => ({ id, titulo: `Tarefa ${id}`, status: 'em_andamento', prazo: '2026-10-30',
@@ -54,56 +55,73 @@ beforeEach(() => {
   vi.stubGlobal('createModal', opts => { modal = opts; root.insertAdjacentHTML('beforeend', opts.bodyHTML); });
   vi.stubGlobal('supabaseClient', { from, rpc: vi.fn().mockResolvedValue({ data: null, error: null }) });
   new Function(controlador)();
+  new Function(atividades)();
   page = new Function(`${pagina}\nreturn BuritiPage;`)();
 });
 afterEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
-describe('Tarefas no DOM', () => {
+// A lista antiga (BuritiTarefasUI.tarefas) virou a tela de Atividades: a garantia de cada teste
+// passa pela linha ([data-abrir] abre o cartão) mais as ações do cartão, ou pelo cartão direto.
+const abrir = id => {
+  root.querySelector(`[data-id="${id}"] [data-abrir]`).click();
+  return root.querySelector(`[data-id="${id}"] .ativ__detalhe`);
+};
+const detalheDe = id => root.querySelector(`[data-id="${id}"] .ativ__detalhe`);
+
+describe('Cartões de tarefa na tela de Atividades', () => {
   it('renderiza estados e evidências com escape e recolhe a linha do tempo', async () => {
     db.tarefas[0].tarefa_passos.push(...['pendente', 'confirmado', 'dispensado'].map((estado, i) => ({ id: `x${i}`, ordem: i + 2, descricao: estado, estado })));
-    await window.BuritiTarefasUI.tarefas(root);
-    expect(root.textContent).toContain('precisa de você');
-    expect(root.textContent).toContain('<img src=x');
-    expect(root.querySelector('img')).toBeNull();
-    expect(root.querySelector('a').href).toBe('https://mail.google.com/mail/u/0/#all/thread1');
-    expect(root.querySelector('[data-linha-tempo]').open).toBe(false);
-    expect(root.querySelector('[data-tarefa="t1"]').querySelectorAll('[data-acao="confirmar"]')).toHaveLength(2);
+    await window.AtividadesPage.render(root);
+    const detalhe = abrir('t1');
+    expect(detalhe.textContent).toContain('precisa de você');
+    expect(detalhe.textContent).toContain('<img src=x');
+    expect(detalhe.querySelector('img')).toBeNull();
+    expect(detalhe.querySelector('a').href).toBe('https://mail.google.com/mail/u/0/#all/thread1');
+    expect(detalhe.querySelector('[data-linha-tempo]').open).toBe(false);
+    expect(detalhe.querySelectorAll('[data-acao="confirmar"]')).toHaveLength(2);
   });
-  it('confirma e recarrega só o cartão alvo, preservando a linha do tempo', async () => {
-    await window.BuritiTarefasUI.tarefas(root);
-    const outro = root.querySelector('[data-tarefa="t2"]');
-    root.querySelector('[data-linha-tempo]').open = true;
+  it('confirma o passo pelo cartão aberto e a tela relê a tarefa', async () => {
+    await window.AtividadesPage.render(root);
+    abrir('t1');
     supabaseClient.rpc.mockImplementation(async () => { db.tarefas[0].tarefa_passos[0].estado = 'confirmado'; return { error: null }; });
-    root.querySelector('[data-acao="confirmar"]').click();
-    await vi.waitFor(() => expect(root.querySelector('[data-tarefa="t1"]').textContent).toContain('Confirmado'));
+    detalheDe('t1').querySelector('[data-acao="confirmar"]').click();
+    await vi.waitFor(() => expect(detalheDe('t1').textContent).toContain('Confirmado'));
     expect(supabaseClient.rpc).toHaveBeenCalledWith('confirmar_passo', { p_passo: 'p-t1', p_nota: null });
-    expect(root.querySelector('[data-tarefa="t2"]')).toBe(outro);
-    expect(root.querySelector('[data-linha-tempo]').open).toBe(true);
+    // A tela nova redesenha a lista inteira depois da ação (a tarefa pode mudar de grupo), então a
+    // identidade dos demais nós e o estado aberto do histórico deixaram de ser garantidos.
   });
   it('erro de ação fica no cartão, sem remover os demais', async () => {
-    await window.BuritiTarefasUI.tarefas(root);
+    await window.AtividadesPage.render(root);
+    abrir('t1');
     supabaseClient.rpc.mockResolvedValue({ error: { message: 'Passo encerrado.' } });
-    root.querySelector('[data-acao="dispensar"]').click();
-    await vi.waitFor(() => expect(root.textContent).toContain('Passo encerrado.'));
-    expect(root.querySelectorAll('[data-tarefa]')).toHaveLength(2);
+    detalheDe('t1').querySelector('[data-acao="dispensar"]').click();
+    await vi.waitFor(() => expect(detalheDe('t1').textContent).toContain('Passo encerrado.'));
+    expect(root.querySelectorAll('.ativ__item')).toHaveLength(2);
   });
-  it('concluir pede confirmação e remove a tarefa do filtro aberto', async () => {
-    await window.BuritiTarefasUI.tarefas(root);
+  it('concluir pede confirmação, tira a tarefa das abertas e a concluída abre sem Concluir', async () => {
+    await window.AtividadesPage.render(root);
+    abrir('t1');
     confirmAction.mockResolvedValueOnce(false);
-    root.querySelector('[data-acao="concluir"]').click();
-    await vi.waitFor(() => expect(confirmAction).toHaveBeenCalled());
+    detalheDe('t1').querySelector('[data-acao="concluir"]').click();
+    await vi.waitFor(() => expect(confirmAction).toHaveBeenCalledWith(expect.stringContaining('passo em aberto')));
     expect(supabaseClient.rpc).not.toHaveBeenCalled();
-    supabaseClient.rpc.mockImplementation(async () => { db.tarefas[0].status = 'concluida'; return { error: null }; });
-    root.querySelector('[data-acao="concluir"]').click();
-    await vi.waitFor(() => expect(root.querySelectorAll('[data-tarefa]')).toHaveLength(1));
+    supabaseClient.rpc.mockImplementation(async (nome, args) => {
+      if (nome === 'concluir_tarefa') { const t = db.tarefas.find(x => x.id === args.p_tarefa); t.status = 'concluida'; t.concluida_em = new Date().toISOString(); }
+      if (nome === 'confirmar_passo') db.tarefas.flatMap(t => t.tarefa_passos).find(s => s.id === args.p_passo).estado = 'confirmado';
+      return { error: null };
+    });
+    detalheDe('t1').querySelector('[data-acao="concluir"]').click();
+    await vi.waitFor(() => expect(root.querySelectorAll('.ativ__item')).toHaveLength(1));
+    expect(supabaseClient.rpc).toHaveBeenCalledWith('confirmar_passo', { p_passo: 'p-t1', p_nota: null });
     expect(supabaseClient.rpc).toHaveBeenCalledWith('concluir_tarefa', { p_tarefa: 't1', p_nota: null });
-    await window.BuritiTarefasUI.tarefas(root, 'concluidas');
-    expect(root.textContent).toContain('Concluída');
-    expect(root.querySelector('[data-acao="concluir"]')).toBeNull();
+    root.querySelector('[data-encerradas]').click();
+    await vi.waitFor(() => expect(root.querySelector('[data-id="t1"]').textContent).toContain('Concluída'));
+    expect(abrir('t1').querySelector('[data-acao="concluir"]')).toBeNull();
   });
   it('registra nota com o contrato exato e valida texto vazio', async () => {
-    await window.BuritiTarefasUI.tarefas(root);
-    root.querySelector('[data-acao="nota"]').click();
+    await window.AtividadesPage.render(root);
+    abrir('t1');
+    detalheDe('t1').querySelector('[data-acao="nota"]').click();
     await expect(modal.onSave()).rejects.toThrow('Escreva');
     document.getElementById('buriti-nota').value = 'Revisar amanhã';
     await modal.onSave();
@@ -111,15 +129,17 @@ describe('Tarefas no DOM', () => {
   });
   it('falha de leitura tem banner e nunca se apresenta como ausência de tarefas', async () => {
     erros.tarefas = { message: 'rede indisponível' };
-    await window.BuritiTarefasUI.tarefas(root);
-    expect(root.textContent).toContain('Não foi possível consultar as tarefas');
-    expect(root.textContent).not.toContain('Nenhuma tarefa');
+    await window.AtividadesPage.render(root);
+    expect(root.querySelector('[role="alert"]')).not.toBeNull();
+    expect(root.textContent).toContain('Não foi possível consultar as atividades');
+    expect(root.textContent).not.toContain('Nenhuma atividade');
   });
   it('pagina sem omitir a tarefa que ultrapassa o primeiro lote', async () => {
     db.tarefas = Array.from({ length: 201 }, (_, i) => tarefa(`t${i}`));
-    await window.BuritiTarefasUI.tarefas(root);
-    expect(root.querySelectorAll('[data-tarefa]')).toHaveLength(201);
-    expect(chamadas.filter(c => c[0] === 'tarefas')).toHaveLength(2);
+    await window.AtividadesPage.render(root);
+    expect(root.querySelectorAll('.ativ__item')).toHaveLength(201);
+    // Só a leitura paginada usa range; o menu consulta tarefas sem paginar.
+    expect(chamadas.filter(c => c[0] === 'tarefas' && c.some(p => p[0] === 'range'))).toHaveLength(2);
   });
 });
 
@@ -252,28 +272,31 @@ describe('triagem: rótulos e ligadas automaticamente', () => {
 });
 
 
-describe('Minhas tarefas e atribuição', () => {
+describe('Atribuição e permissões no cartão', () => {
   const atribuir = () => { admin = false; db.tarefas[0].responsavel_id = 'arthur'; db.tarefas[0].responsavel = 'Arthur Pietro'; };
-  it('filtra pelo usuário, mostra links e o botão Atualizar sem decisões administrativas', async () => {
+  it('professor vê só as próprias tarefas, com links e Atualizar, sem decisões administrativas', async () => {
     atribuir();
+    // A tela nova não filtra por responsável na consulta: o RLS devolve só o escopo dele, simulado aqui.
+    db.tarefas = [db.tarefas[0]];
     db.tarefas[0].descricao = 'Documento: https://exemplo.invalid/doc';
     db.tarefas[0].tarefa_passos[0].descricao = 'Enviar https://exemplo.invalid/passo';
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    expect(root.querySelectorAll('[data-tarefa]')).toHaveLength(1);
-    expect(chamadas.find(c => c[0] === 'tarefas')).toContainEqual(['eq', 'responsavel_id', 'arthur']);
-    expect(root.querySelector('a[href="https://exemplo.invalid/doc"]')).not.toBeNull();
-    expect(root.querySelector('a[href="https://exemplo.invalid/passo"]')).not.toBeNull();
-    expect(root.querySelector('[data-acao="atualizar"]')).not.toBeNull();
-    expect(root.textContent).toContain('Arthur Pietro ainda não atualizou.');
-    expect(root.querySelector('[data-acao="feito"], [data-acao="nota"], [data-acao="confirmar"], [data-acao="dispensar"], [data-acao="concluir"], [data-acao="responsavel"]')).toBeNull();
+    await window.AtividadesPage.render(root);
+    expect(root.querySelectorAll('.ativ__item')).toHaveLength(1);
+    const detalhe = abrir('t1');
+    expect(detalhe.querySelector('a[href="https://exemplo.invalid/doc"]')).not.toBeNull();
+    expect(detalhe.querySelector('a[href="https://exemplo.invalid/passo"]')).not.toBeNull();
+    expect(detalhe.querySelector('[data-acao="atualizar"]')).not.toBeNull();
+    expect(detalhe.textContent).toContain('Arthur Pietro ainda não atualizou.');
+    expect(detalhe.querySelector('[data-acao="feito"], [data-acao="nota"], [data-acao="confirmar"], [data-acao="dispensar"], [data-acao="concluir"], [data-acao="responsavel"]')).toBeNull();
   });
   it('atualiza pelo formulário: situação, texto, passos e link; mostra a última atualização', async () => {
     atribuir();
     db.tarefas[0].tarefa_passos[0].estado = 'pendente';
     db.tarefas[0].tarefa_passos.push({ id: 'p2', ordem: 2, descricao: 'Ligar para a FUNAPE', estado: 'pendente', executor: 'pessoa' },
       { id: 'pb', ordem: 3, descricao: 'Passo do Buriti', estado: 'pendente', executor: 'buriti' });
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    root.querySelector('[data-acao="atualizar"]').click();
+    await window.AtividadesPage.render(root);
+    abrir('t1');
+    detalheDe('t1').querySelector('[data-acao="atualizar"]').click();
     await vi.waitFor(() => expect(document.getElementById('buriti-atualizar-texto')).not.toBeNull());
     expect([...document.querySelectorAll('input[name="buriti-situacao"]')].map(i => i.value)).toEqual(['em_andamento', 'esperando', 'travado', 'feito']);
     expect(document.querySelector('input[name="buriti-situacao"]:checked').value).toBe('em_andamento');
@@ -300,22 +323,23 @@ describe('Minhas tarefas e atribuição', () => {
     await modal.onSave();
     expect(supabaseClient.rpc).toHaveBeenCalledWith('registrar_atualizacao', { p_tarefa: 't1', p_situacao: 'esperando',
       p_texto: 'Liguei; a Ranielly retorna amanhã.', p_link: 'https://exemplo.invalid/doc', p_passos: ['p2'] });
-    await vi.waitFor(() => expect(root.querySelector('.buriti-ultima').textContent).toContain('Liguei; a Ranielly retorna amanhã.'));
-    expect(root.querySelector('.buriti-ultima').textContent).toContain('Esperando alguém');
-    expect(root.querySelector('.buriti-ultima a').href).toBe('https://exemplo.invalid/doc');
+    await vi.waitFor(() => expect(detalheDe('t1').querySelector('.buriti-ultima').textContent).toContain('Liguei; a Ranielly retorna amanhã.'));
+    expect(detalheDe('t1').querySelector('.buriti-ultima').textContent).toContain('Esperando alguém');
+    expect(detalheDe('t1').querySelector('.buriti-ultima a').href).toBe('https://exemplo.invalid/doc');
   });
   it('admin vê o aviso do responsável junto do pedido manual, sem um apagar o outro', async () => {
     db.tarefas[0].motivo_atencao = 'Autorizar prorrogação'; db.tarefas[0].aviso_responsavel = 'Arthur: travado';
     db.tarefas[1].precisa_atencao = false; db.tarefas[1].aviso_responsavel = 'Arthur atualizou; confirmar';
-    await window.BuritiTarefasUI.tarefas(root);
-    const um = root.querySelector('[data-tarefa="t1"] .buriti-bloco--aviso').textContent;
+    await window.AtividadesPage.render(root);
+    const um = abrir('t1').querySelector('.buriti-bloco--aviso').textContent;
     expect(um).toContain('Autorizar prorrogação'); expect(um).toContain('Arthur: travado');
-    expect(root.querySelector('[data-tarefa="t2"] .buriti-bloco--aviso').textContent).toContain('Arthur atualizou; confirmar');
+    expect(abrir('t2').querySelector('.buriti-bloco--aviso').textContent).toContain('Arthur atualizou; confirmar');
   });
   it('com um passo só, o formulário não pede para marcar passos', async () => {
     atribuir();
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    root.querySelector('[data-acao="atualizar"]').click();
+    await window.AtividadesPage.render(root);
+    abrir('t1');
+    detalheDe('t1').querySelector('[data-acao="atualizar"]').click();
     await vi.waitFor(() => expect(document.getElementById('buriti-atualizar-texto')).not.toBeNull());
     expect(document.querySelector('input[name="buriti-passo"]')).toBeNull();
     document.getElementById('buriti-atualizar-texto').value = 'Pronto.';
@@ -329,11 +353,12 @@ describe('Minhas tarefas e atribuição', () => {
     atribuir();
     const style = document.createElement('style');
     style.textContent = readFileSync(resolve('frontend/css/style.css'), 'utf8');
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    await window.AtividadesPage.render(root);
     // Modal fica fora de .buriti-pagina no site: precisa do estilo global do formulário.
     document.head.append(style);
     try {
-      root.querySelector('[data-acao="atualizar"]').click();
+      abrir('t1');
+      detalheDe('t1').querySelector('[data-acao="atualizar"]').click();
       await vi.waitFor(() => expect(document.getElementById('buriti-atualizar-texto')).not.toBeNull());
       const texto = document.getElementById('buriti-atualizar-texto');
       const link = document.getElementById('buriti-atualizar-link');
@@ -347,37 +372,40 @@ describe('Minhas tarefas e atribuição', () => {
       expect(texto.closest('.form-group')).not.toBe(link.closest('.form-group'));
     } finally { style.remove(); }
   });
-  it.each([true, false])('Atualizar aparece para o responsável em qualquer aba; decisões só para o admin (admin=%s)', async perfilAdmin => {
+  it.each([true, false])('Atualizar aparece para o responsável; decisões só para o admin (admin=%s)', async perfilAdmin => {
     atribuir(); admin = perfilAdmin;
-    await window.BuritiTarefasUI.tarefas(root);
-    expect(root.querySelector('[data-tarefa="t1"] [data-acao="atualizar"]')).not.toBeNull();
-    expect(Boolean(root.querySelector('[data-acao="confirmar"]'))).toBe(perfilAdmin);
-    expect(Boolean(root.querySelector('[data-acao="dispensar"]'))).toBe(perfilAdmin);
-    expect(root.querySelector('[data-acao="feito"]')).toBeNull();
+    await window.AtividadesPage.render(root);
+    const detalhe = abrir('t1');
+    expect(detalhe.querySelector('[data-acao="atualizar"]')).not.toBeNull();
+    expect(Boolean(detalhe.querySelector('[data-acao="confirmar"]'))).toBe(perfilAdmin);
+    expect(Boolean(detalhe.querySelector('[data-acao="dispensar"]'))).toBe(perfilAdmin);
+    expect(detalhe.querySelector('[data-acao="feito"]')).toBeNull();
   });
   it('professor do escopo que não é responsável apenas lê', async () => {
     admin = false;
-    await window.BuritiTarefasUI.tarefas(root);
-    expect(root.querySelector('[data-acao="atualizar"], [data-acao="confirmar"], [data-acao="concluir"], [data-acao="nota"]')).toBeNull();
-    expect(root.querySelectorAll('[data-tarefa]')).toHaveLength(2);
+    await window.AtividadesPage.render(root);
+    expect(root.querySelectorAll('.ativ__item')).toHaveLength(2);
+    expect(abrir('t1').querySelector('[data-acao="atualizar"], [data-acao="confirmar"], [data-acao="concluir"], [data-acao="nota"]')).toBeNull();
   });
   it('centro fora do escopo vem só da RPC restrita e falha não vira vazio', async () => {
     atribuir(); db.tarefas[0].projects = null;
     supabaseClient.rpc.mockResolvedValue({ data: [{ tarefa_id: 't1', centro_custo: '30.068' }] });
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    expect(root.textContent).toContain('30.068');
+    await window.AtividadesPage.render(root);
+    expect(root.querySelector('[data-id="t1"]').textContent).toContain('30.068');
     expect(supabaseClient.rpc).toHaveBeenCalledWith('centros_das_tarefas', { p_ids: ['t1'] });
     expect(chamadas.some(c => c[0] === 'projects')).toBe(false);
     supabaseClient.rpc.mockResolvedValue({ error: { message: 'rede' } });
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
+    await window.AtividadesPage.render(root);
     expect(root.querySelector('[role="alert"]')).not.toBeNull();
-    expect(root.textContent).not.toContain('Nenhuma tarefa');
+    expect(root.textContent).not.toContain('Nenhuma atividade');
   });
-  it('responsável em tarefa encerrada não atualiza mais', async () => {
+  it('responsável em tarefa encerrada não atualiza mais', () => {
     atribuir(); db.tarefas[0].status = 'cancelada';
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    expect(root.textContent).toContain('Cancelada');
-    expect(root.querySelector('[data-acao="atualizar"]')).toBeNull();
+    // A lista de encerradas da tela nova só consulta concluídas; a garantia ficou no cartão.
+    const temp = document.createElement('div');
+    temp.innerHTML = window.BuritiTarefasUI.cartao(db.tarefas[0]);
+    expect(temp.textContent).toContain('Cancelada');
+    expect(temp.querySelector('[data-acao="atualizar"]')).toBeNull();
   });
   it('menu só some com consulta bem-sucedida sem atribuições e expõe falha em banner', async () => {
     root.innerHTML = '<li data-minhas-tarefas hidden></li><li data-minhas-status hidden role="alert"></li>';
@@ -398,8 +426,9 @@ describe('Minhas tarefas e atribuição', () => {
   });
   it('admin escolhe somente humanos e chama atribuir_tarefa; falha de usuários tem banner', async () => {
     db.app_users = [{ user_id: 'arthur', display_name: 'Arthur Pietro', role: 'professor' }, { user_id: 'agente', display_name: 'Buriti', role: 'agente' }, { user_id: 'vigia', display_name: 'Vigia', role: 'automacao' }];
-    await window.BuritiTarefasUI.tarefas(root);
-    root.querySelector('[data-acao="responsavel"]').click();
+    await window.AtividadesPage.render(root);
+    abrir('t1');
+    detalheDe('t1').querySelector('[data-acao="responsavel"]').click();
     await vi.waitFor(() => expect(document.getElementById('buriti-responsavel')).not.toBeNull());
     const select = document.getElementById('buriti-responsavel');
     expect([...select.options].map(o => o.value)).toEqual(['', 'arthur']);
@@ -407,29 +436,31 @@ describe('Minhas tarefas e atribuição', () => {
     await modal.onSave();
     expect(supabaseClient.rpc).toHaveBeenCalledWith('atribuir_tarefa', { p_tarefa: 't1', p_user: 'arthur' });
     erros.app_users = { message: 'Falha de usuários' };
-    root.querySelector('[data-acao="responsavel"]').click();
+    detalheDe('t1').querySelector('[data-acao="responsavel"]').click();
     await vi.waitFor(() => expect(root.textContent).toContain('Falha de usuários'));
   });
-  it('admin vê nome, nota e link do feito para confirmar (registro antigo e atualização)', async () => {
+  it('admin vê nome, nota e link do feito para confirmar (registro antigo e atualização)', () => {
+    // A garantia é do HTML do cartão: chamada direta, sem a lista.
     db.tarefas[0].tarefa_passos[0].feito = { tipo: 'sugestao', origem: 'humano', detalhe: { por: 'Arthur Pietro', nota: 'Enviei', link: 'https://exemplo.invalid/doc' } };
-    await window.BuritiTarefasUI.tarefas(root);
-    expect(root.textContent).toContain('Feito por Arthur Pietro — falta o Victor confirmar');
-    expect(root.querySelector('.buriti-evidencia').textContent).toContain('Enviei');
-    expect(root.querySelector('.buriti-evidencia a').href).toBe('https://exemplo.invalid/doc');
+    const temp = document.createElement('div');
+    temp.innerHTML = window.BuritiTarefasUI.cartao(db.tarefas[0]);
+    expect(temp.textContent).toContain('Feito por Arthur Pietro — falta o Victor confirmar');
+    expect(temp.querySelector('.buriti-evidencia').textContent).toContain('Enviei');
+    expect(temp.querySelector('.buriti-evidencia a').href).toBe('https://exemplo.invalid/doc');
     // Marcado por uma atualização: o texto já está no destaque, não repete no passo.
     const detalhe = { situacao: 'feito', texto: 'Tudo enviado', por: 'Arthur Pietro' };
     db.tarefas[0].tarefa_passos[0].feito = { tipo: 'atualizacao', origem: 'humano', detalhe };
     db.tarefas[0].atualizacao = { tipo: 'atualizacao', origem: 'humano', detalhe, ocorrido_em: '2026-10-08T14:00:00Z' };
-    await window.BuritiTarefasUI.tarefas(root);
-    expect(root.querySelector('[data-tarefa="t1"] .buriti-ultima').textContent).toContain('Tudo enviado');
-    expect(root.querySelector('[data-tarefa="t1"] .buriti-evidencia')).toBeNull();
+    temp.innerHTML = window.BuritiTarefasUI.cartao(db.tarefas[0]);
+    expect(temp.querySelector('.buriti-ultima').textContent).toContain('Tudo enviado');
+    expect(temp.querySelector('.buriti-evidencia')).toBeNull();
   });
   it('carrega encaminhamentos além dos dez recentes, com filtro por tarefa', async () => {
-    atribuir();
     db.tarefa_eventos = Array.from({ length: 205 }, (_, i) => ({ id: String(i), tarefa_id: 't1', resumo: 'Nota ' + i, origem: 'humano' }));
     db.tarefas[0].eventos = db.tarefa_eventos.slice(0, 10);
-    await window.BuritiTarefasUI.tarefas(root, 'todas', true);
-    root.querySelector('[data-acao="historico"]').click();
+    await window.AtividadesPage.render(root);
+    abrir('t1');
+    detalheDe('t1').querySelector('[data-acao="historico"]').click();
     await vi.waitFor(() => expect(root.querySelectorAll('[data-eventos] li')).toHaveLength(205));
     expect(chamadas.filter(c => c[0] === 'tarefa_eventos')).toHaveLength(2);
     expect(chamadas.find(c => c[0] === 'tarefa_eventos')).toContainEqual(['eq', 'tarefa_id', 't1']);
