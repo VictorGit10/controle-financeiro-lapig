@@ -180,7 +180,9 @@ window.AtividadesPage = (() => {
       ui().lerTudo(() => supabaseClient.from('app_users').select('user_id,display_name,role').in('role', ['admin', 'professor'])
         .order('display_name').order('user_id')),
     ]);
-    centros = c; pessoas = p.filter(x => x.display_name);
+    // Login sem nome no sistema (o do Victor, em 09/10) continua valendo para "fica com você"; os outros sem
+    // nome ficam fora do @, que procura pelo nome.
+    centros = c; pessoas = p.filter(x => x.display_name || x.user_id === eu());
   }
 
   function previa() {

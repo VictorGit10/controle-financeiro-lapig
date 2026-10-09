@@ -129,6 +129,19 @@ describe('tela de Atividades', () => {
     expect(args.p_responsavel).toBe('arthur');
     expect(campo.value).toBe('');
   });
+  it('login sem nome no sistema anota para si mesmo', async () => {
+    db.app_users[0].display_name = null;
+    await window.AtividadesPage.render(root);
+    const campo = root.querySelector('[data-anotar-texto]');
+    campo.value = '30.068 remanejar rubricas';
+    campo.dispatchEvent(new Event('input'));
+    expect(root.querySelector('[data-anotar-previa]').textContent).toBe('30.068 · Remanejar rubricas · sem prazo · com você');
+    root.querySelector('[data-anotar]').dispatchEvent(new Event('submit', { cancelable: true }));
+    await vi.waitFor(() => expect(supabaseClient.rpc.mock.calls.some(c => c[0] === 'criar_tarefa_na_tela')).toBe(true));
+    const [, args] = supabaseClient.rpc.mock.calls.find(c => c[0] === 'criar_tarefa_na_tela');
+    expect(args.p_responsavel).toBe('victor');
+    expect(args.p.passos).toEqual([{ descricao: 'Remanejar rubricas' }]);
+  });
   it('entrada inválida não chama o banco', async () => {
     await window.AtividadesPage.render(root);
     root.querySelector('[data-anotar-texto]').value = 'remanejar sem centro';
