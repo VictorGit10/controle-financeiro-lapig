@@ -80,7 +80,7 @@ try {
   if (JSON.stringify(antes058) !== JSON.stringify(depois)) throw new Error('058 alterou helper protegido.');
   // 059: como em produção, o admin está sem nome; o 30.121 não existe.
   // O stub.sql simplifica projects; em produção a coluna notes existe desde a 001.
-  await sql(`alter table public.projects add column if not exists notes text; update public.app_users set display_name=null where role='admin';`);
+  await sql(`alter table public.projects add column if not exists notes text; update public.app_users set display_name=null, email='victor.sintetico@exemplo.invalid' where role='admin';`);
   if ((await db.query("select 1 from public.projects where code='30.121'")).rows.length) throw new Error('stub já tem 30.121');
   await arquivo('database/059_tjgo_provisorio_e_nome_do_victor.sql');
   const p = (await db.query("select id,name,active from public.projects where code='30.121'")).rows;
@@ -88,6 +88,12 @@ try {
   const nome = (await db.query("select display_name from public.app_users where role='admin'")).rows.map(r => r.display_name);
   if (p.length !== 1 || p[0].name !== 'TJGO' || !p[0].active || ag < 1 || nome.join() !== 'Victor Amaral') throw new Error('059 não fez o esperado');
   // Rodar de novo para: o admin já tem nome (achou 0).
+  // Sem agente, a 059 para (não passa no vazio).
+  let semAgente = false;
+  await sql("begin; update public.app_users set display_name=null where role='admin'; update public.app_users set role='professor' where role='agente';");
+  try { await arquivo('database/059_tjgo_provisorio_e_nome_do_victor.sql'); } catch (e) { semAgente = e.message.includes('exatamente 1 login agente'); }
+  await sql('rollback;');
+  if (!semAgente) throw new Error('059 sem agente não parou');
   let parou = false;
   try { await arquivo('database/059_tjgo_provisorio_e_nome_do_victor.sql'); } catch (e) { parou = e.message.includes('esperava 1 admin'); await sql('rollback;'); }
   if (!parou) throw new Error('059 repetida não parou');

@@ -7,7 +7,7 @@
 -- 2. O 30.121 entra no escopo do Buriti (login de papel 'agente', que só lê e propõe).
 -- 3. O login do Victor ganha nome no sistema ("Victor Amaral"): estava vazio, a tela mostrava um nome
 --    montado do e-mail e o Buriti não o achava como responsável de tarefa. Identificado como o único admin
---    sem nome; se houver zero ou mais de um, a migração para.
+--    sem nome cujo e-mail começa por "victor"; se houver zero ou mais de um, a migração para.
 begin;
 
 do $$
@@ -25,12 +25,15 @@ begin
     returning id into v;
   end if;
 
+  -- Exatamente um agente (revisão do Kimi K3): com zero, o escopo sairia no vazio e a migração passaria.
+  if (select count(*) from public.app_users where role = 'agente') <> 1 then
+    raise exception '059: esperava exatamente 1 login agente'; end if;
   insert into public.user_projects (user_id, project_id)
   select user_id, v from public.app_users where role = 'agente'
   on conflict (user_id, project_id) do nothing;
 
   update public.app_users set display_name = 'Victor Amaral'
-   where role = 'admin' and coalesce(btrim(display_name), '') = '';
+   where role = 'admin' and coalesce(btrim(display_name), '') = '' and lower(email) like 'victor%';
   get diagnostics n = row_count;
   if n <> 1 then raise exception '059: esperava 1 admin sem nome, achou %', n; end if;
 end $$;
