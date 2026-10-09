@@ -382,6 +382,10 @@ describe('Minhas tarefas e atribuição', () => {
   it('menu só some com consulta bem-sucedida sem atribuições e expõe falha em banner', async () => {
     root.innerHTML = '<li data-minhas-tarefas hidden></li><li data-minhas-status hidden role="alert"></li>';
     await window.BuritiTarefasUI.atualizarMenu();
+    // Admin vê Atividades sempre (é onde ele anota); os demais, só com tarefa atribuída.
+    expect(root.querySelector('[data-minhas-tarefas]').hidden).toBe(false);
+    admin = false;
+    await window.BuritiTarefasUI.atualizarMenu();
     expect(root.querySelector('[data-minhas-tarefas]').hidden).toBe(true);
     atribuir();
     await window.BuritiTarefasUI.atualizarMenu();

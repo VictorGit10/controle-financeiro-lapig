@@ -113,16 +113,16 @@ window.BuritiTarefasUI = (() => {
   }
 
   // Cartão em três partes: o que o responsável disse por último (com o botão Atualizar), o que fazer e o histórico.
-  function tarefaHTML(t, minhas = false) {
+  function tarefaHTML(t, minhas = false, { semTopo = false } = {}) {
     const aberta = ['em_andamento', 'aguardando_terceiro'].includes(t.status);
     const selo = f().seloPrazo(t.prazo);
     const passos = [...t.tarefa_passos].sort((a, b) => a.ordem - b.ordem);
     const abertos = passos.filter(s => ['pendente', 'sugerido'].includes(s.estado)).length;
     const podeAtualizar = aberta && f().podeRegistrarFeito(t, Auth.getUser()?.id, Auth.isAdmin());
-    return `<article class="card buriti-cartao" data-tarefa="${escapeAttr(t.id)}">
-      <header class="buriti-cartao__topo"><h3 class="buriti-titulo">${escapeAttr(t.titulo)}</h3>
+    return `<article class="card buriti-cartao${semTopo ? ' buriti-cartao--detalhe' : ''}" data-tarefa="${escapeAttr(t.id)}">
+      ${semTopo ? '' : `<header class="buriti-cartao__topo"><h3 class="buriti-titulo">${escapeAttr(t.titulo)}</h3>
         <span class="badge ${aberta ? selo.classe : 'badge--active'}">${aberta ? selo.texto : t.status === 'cancelada' ? 'Cancelada' : 'Concluída'}</span></header>
-      <div class="buriti-sub">${escapeAttr(t.projects?.code || t.centro_custo || 'Centro indisponível')} ${escapeAttr(t.projects?.name || '')}${t.responsavel ? ` · ${escapeAttr(t.responsavel)}` : ''}${t.prazo ? ` · prazo ${escapeAttr(t.prazo.split('-').reverse().join('/'))}` : ''}</div>
+      <div class="buriti-sub">${escapeAttr(t.projects?.code || t.centro_custo || 'Centro indisponível')} ${escapeAttr(t.projects?.name || '')}${t.responsavel ? ` · ${escapeAttr(t.responsavel)}` : ''}${t.prazo ? ` · prazo ${escapeAttr(t.prazo.split('-').reverse().join('/'))}` : ''}</div>`}
       ${(t.precisa_atencao || t.aviso_responsavel) && Auth.isAdmin() ? `<div class="buriti-bloco buriti-bloco--aviso"><span class="badge badge--warning">precisa de você</span>
         ${[t.precisa_atencao ? t.motivo_atencao : '', t.aviso_responsavel].filter(Boolean).map(m => `<p class="buriti-sub">${escapeAttr(m)}</p>`).join('')}</div>` : ''}
       ${t.descricao ? `<p class="buriti-cartao__resumo">${f().textoComLinks(t.descricao)}</p>` : ''}
@@ -134,7 +134,7 @@ window.BuritiTarefasUI = (() => {
         <ul class="buriti-lista" data-eventos>${eventosHTML(t.eventos)}</ul>
         ${t.eventos.length >= 10 ? botao('historico', 'Ver todo o histórico') : ''}
       </details>
-      <div data-erro></div>${Auth.isAdmin() ? `<div class="buriti-acoes">${botao('nota', 'Nota')}${botao('responsavel', 'Responsável')}${aberta && !minhas ? botao('concluir', 'Concluir') : ''}</div>` : ''}
+      <div data-erro></div>${Auth.isAdmin() ? `<div class="buriti-acoes">${botao('nota', 'Nota')}${botao('responsavel', 'Responsável')}${aberta ? botao('prazo', 'Prazo') : ''}${aberta && !minhas ? botao('concluir', 'Concluir') : ''}</div>` : ''}
     </article>`;
   }
 
@@ -197,12 +197,17 @@ window.BuritiTarefasUI = (() => {
 
   async function rpc(nome, args) { await ler(supabaseClient.rpc(nome, args)); }
 
-  async function acaoTarefa(e, filtro, minhas) {
+  // depois(id): a tela de Atividades redesenha a linha da tarefa depois de cada ação que gravou.
+  async function acaoTarefa(e, filtro, minhas, depois = null) {
     const button = e.target.closest('[data-acao]');
     const node = button?.closest('[data-tarefa]');
     if (!node) return;
     const id = node.dataset.tarefa, acao = button.dataset.acao;
-    const atualizar = () => atualizarTarefa(node, id, filtro, minhas);
+    const atualizar = async () => {
+      const novo = await atualizarTarefa(node, id, filtro, minhas);
+      if (depois) await depois(id);
+      return novo;
+    };
     if (acao === 'historico') {
       button.disabled = true;
       try {
@@ -249,8 +254,26 @@ window.BuritiTarefasUI = (() => {
     }
     if (!Auth.isAdmin()) return;
     if (acao === 'concluir') {
-      if (!await confirmAction('Concluir esta tarefa? Todos os passos precisam estar confirmados ou dispensados.')) return;
-      await agir(node, id, () => rpc('concluir_tarefa', { p_tarefa: id, p_nota: null }), atualizar);
+      // Passo em aberto: o admin confirma junto (é o caso da atividade que ele mesmo anotou).
+      const abertos = [...node.querySelectorAll('[data-acao="confirmar"]')].map(b => b.dataset.id);
+      const pergunta = abertos.length
+        ? `Concluir esta tarefa? ${abertos.length === 1 ? 'O passo em aberto será confirmado' : `Os ${abertos.length} passos em aberto serão confirmados`} junto.`
+        : 'Concluir esta tarefa?';
+      if (!await confirmAction(pergunta)) return;
+      await agir(node, id, async () => {
+        for (const passo of abertos) await rpc('confirmar_passo', { p_passo: passo, p_nota: null });
+        await rpc('concluir_tarefa', { p_tarefa: id, p_nota: null });
+      }, atualizar);
+    } else if (acao === 'prazo') {
+      const atual = (await ler(supabaseClient.from('tarefas').select('prazo').eq('id', id).single())).prazo || '';
+      createModal({ title: 'Prazo da tarefa', saveLabel: 'Salvar',
+        bodyHTML: `<label class="form-label" for="buriti-prazo">Prazo (deixe vazio para tirar)</label>
+          <input id="buriti-prazo" class="form-input" type="date" value="${escapeAttr(atual)}">`,
+        onSave: async () => {
+          const prazo = document.getElementById('buriti-prazo').value || null;
+          const ok = await agir(node, id, () => rpc('atualizar_prazo', { p_tarefa: id, p_prazo: prazo, p_motivo: null }), atualizar);
+          if (!ok) throw new Error('Não foi possível salvar o prazo. Confira o erro no cartão.');
+        } });
     } else if (['confirmar', 'dispensar'].includes(acao)) {
       await agir(node, id, () => rpc(acao === 'confirmar' ? 'confirmar_passo' : 'dispensar_passo',
         { p_passo: button.dataset.id, p_nota: null }), atualizar);
@@ -470,16 +493,17 @@ window.BuritiTarefasUI = (() => {
     try {
       const rows = await ler(supabaseClient.from('tarefas').select('id').eq('responsavel_id', usuario).limit(1));
       if (vez !== consultaMenu || usuario !== Auth.getUser()?.id) return null;
-      item.hidden = rows.length === 0;
+      item.hidden = rows.length === 0 && !Auth.isAdmin();
       return rows.length > 0;
     } catch {
       if (vez !== consultaMenu || usuario !== Auth.getUser()?.id) return null;
       item.hidden = false;
-      if (status) { status.hidden = false; status.textContent = 'Não foi possível consultar suas tarefas. Abra Minhas tarefas para tentar novamente.'; }
+      if (status) { status.hidden = false; status.textContent = 'Não foi possível consultar suas tarefas. Abra Atividades para tentar novamente.'; }
       return null;
     }
   }
 
   function sair() { geracao++; }
-  return { tarefas, triagem, saude, sair, atualizarMenu, escolherResponsavel };
+  return { tarefas, triagem, saude, sair, atualizarMenu, escolherResponsavel,
+    cartao: tarefaHTML, acao: acaoTarefa, consultaTarefa, preencherCentros, lerTudo, ler, aviso };
 })();

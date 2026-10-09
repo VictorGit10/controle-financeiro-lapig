@@ -481,7 +481,7 @@ buriti(
     title: 'Criar tarefa (Buriti operador)',
     description: 'Cria a tarefa que o Victor pediu no chat, já valendo (sem proposta). Passos com executor ' +
       '"buriti" são do Buriti (ele faz e marca com concluir_meu_passo); "pessoa" são do responsável, que os vê ' +
-      'em Minhas tarefas. `responsavel` é o nome como está no sistema (ex.: "Arthur"). Nunca CPF, e-mail ou ' +
+      'em Atividades. `responsavel` é o nome como está no sistema (ex.: "Arthur"). Nunca CPF, e-mail ou ' +
       'telefone de pessoa física em título, descrição ou passos; endereços técnicos só em evidencia.',
     inputSchema: {
       centro_de_custo: z.string().optional().describe('Código do centro de custo (ex.: 30.068).'),

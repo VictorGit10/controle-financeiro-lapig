@@ -68,13 +68,12 @@ const BuritiPage = (() => {
       <p class="buriti-intro">O <strong>Buriti</strong> propõe; você revisa, aplica e acompanha.</p>
       <div data-saude><p class="buriti-sub">Consultando saúde do vigia…</p></div>
       <div class="buriti-abas" role="tablist" aria-label="Buriti">
-        ${[['propostas', 'Propostas'], ['tarefas', 'Tarefas'], ...(Auth.isAdmin() ? [['triagem', 'Triagem']] : [])].map(([s, nome]) =>
+        ${[['propostas', 'Propostas'], ...(Auth.isAdmin() ? [['triagem', 'Triagem']] : [])].map(([s, nome]) =>
           `<button role="tab" aria-selected="${secao === s}" class="btn ${secao === s ? 'btn--primary' : 'btn--ghost'}" onclick="BuritiPage.trocarSecao('${s}')">${nome}</button>`).join('')}
       </div><div data-conteudo role="tabpanel"></div></div>`;
     contentEl = containerEl.querySelector('[data-conteudo]');
     const saude = window.BuritiTarefasUI.saude(containerEl.querySelector('[data-saude]'));
-    if (secao === 'tarefas') await window.BuritiTarefasUI.tarefas(contentEl);
-    else if (secao === 'triagem') await window.BuritiTarefasUI.triagem(contentEl);
+    if (secao === 'triagem') await window.BuritiTarefasUI.triagem(contentEl);
     else await refresh();
     await saude;
   }
@@ -233,7 +232,7 @@ const BuritiPage = (() => {
         if (error) { erroCartao(id, error); throw new Error(error.message); }
         await atualizarProposta(id);
         await window.BuritiTarefasUI.atualizarMenu();
-        showToast('Tarefa criada. Acompanhe na aba Tarefas.', 'success');
+        showToast('Tarefa criada. Acompanhe em Atividades.', 'success');
       }, 'Criar tarefa — escolher responsável');
     } catch (e) { erroCartao(id, e); }
     finally { ocupados.delete(id); }

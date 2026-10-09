@@ -27,7 +27,7 @@ CI runs on GitHub Actions (`.github/workflows/ci.yml`) on push/PR to main/master
 
 ## Database Setup
 
-Execute SQL scripts in `database/` **in numerical order** (001 → 053). Utility scripts are in `database/utils/` and test SQL in `tests/sql/`. Script `000_reset_completo.sql` is destructive — drops all tables and data. Never run it unless intentionally resetting.
+Execute SQL scripts in `database/` **in numerical order** (001 → 058). Utility scripts are in `database/utils/` and test SQL in `tests/sql/`. Script `000_reset_completo.sql` is destructive — drops all tables and data. Never run it unless intentionally resetting.
 
 Antes de mexer em qualquer área coberta por uma migração, leia a linha dela em **[docs/migracoes.md](docs/migracoes.md)** (025–053: tabelas, RPCs e o gotcha operacional de cada uma) e o cabeçalho do próprio `.sql`. Regras que valem para toda migração nova, aprendidas nelas:
 - `create or replace` reescreve os atributos da função: repita `security definer`/`invoker`, `set search_path = public, pg_temp` e o guard (lição da 036).

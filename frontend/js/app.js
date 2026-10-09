@@ -63,10 +63,11 @@ const App = (() => {
     // O link explícito prevalece sobre a página inicial. Só a entrada sem
     // centros precisa aguardar a consulta do menu; os demais abrem já.
     let destino = primeiraPagina ? null : paginaAtual;
-    if (!destino && window.location.hash === '#minhas-tarefas') destino = 'minhas-tarefas';
+    // #minhas-tarefas é o link dos e-mails antigos ao Arthur: a tela agora é Atividades.
+    if (!destino && ['#atividades', '#minhas-tarefas'].includes(window.location.hash)) destino = 'atividades';
     if (!destino) {
       const semCentros = !Auth.isAdmin() && Auth.getAllowedProjectIds().length === 0;
-      destino = semCentros && await tarefas === true ? 'minhas-tarefas' : 'projetos';
+      destino = semCentros && await tarefas === true ? 'atividades' : 'projetos';
     }
     // Uma resposta lenta não pode trocar a tela escolhida enquanto carregava,
     // nem navegar com a sessão anterior depois de logout/troca de usuário.

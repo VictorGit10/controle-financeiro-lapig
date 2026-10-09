@@ -18,7 +18,7 @@ beforeEach(() => {
     <input id="login-email"><input id="login-password"><button id="login-btn"><span class="btn__text"></span><span class="btn__loader"></span></button>
     </form><div id="login-error" hidden><span id="login-error-text"></span></div></div>
     <div id="app" hidden><button id="sidebar-toggle"></button><aside id="sidebar"><ul>
-      <li data-minhas-tarefas hidden><button class="sidebar__link" data-page="minhas-tarefas"></button></li>
+      <li data-minhas-tarefas hidden><button class="sidebar__link" data-page="atividades"></button></li>
       <li data-minhas-status role="alert" hidden></li><li data-admin><button class="sidebar__link" data-page="usuarios"></button></li>
       <li><button class="sidebar__link" data-page="projetos"></button></li></ul></aside>
       <span id="user-email"></span><span id="user-avatar"></span><button id="logout-btn"></button>
@@ -48,7 +48,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('Router', new Function(routerSource + '\nreturn Router;')());
   renders = {};
-  for (const name of ['projetos', 'minhas-tarefas', 'usuarios', 'holders']) {
+  for (const name of ['projetos', 'atividades', 'usuarios', 'holders']) {
     renders[name] = vi.fn(container => { container.textContent = name; });
     Router.register(name, { title: name, render: renders[name] });
   }
@@ -67,9 +67,9 @@ async function entrar() {
 }
 
 describe('página de entrada após autenticação', () => {
-  it('Arthur sem centros e com tarefa cai em Minhas tarefas sem renderizar Projetos', async () => {
+  it('Arthur sem centros e com tarefa cai em Atividades sem renderizar Projetos', async () => {
     await entrar();
-    expect(Router.getCurrent()).toBe('minhas-tarefas');
+    expect(Router.getCurrent()).toBe('atividades');
     expect(renders.projetos).not.toHaveBeenCalled();
     expect(consultas.filter(([table]) => table === 'tarefas')).toHaveLength(1);
   });
@@ -79,7 +79,7 @@ describe('página de entrada após autenticação', () => {
     role = papel; centros = escopo; if (!atribuidas) tarefas = [];
     await entrar();
     expect(Router.getCurrent()).toBe('projetos');
-    expect(renders['minhas-tarefas']).not.toHaveBeenCalled();
+    expect(renders['atividades']).not.toHaveBeenCalled();
   });
   it('falha de consulta mantém banner e acesso ao menu, sem tratar como lista vazia', async () => {
     erroTarefas = { message: 'Falha de rede' };
@@ -94,13 +94,13 @@ describe('página de entrada após autenticação', () => {
     expect(Router.getCurrent()).toBeNull();
     expect(document.getElementById('login-screen').hidden).toBe(false);
     await entrar();
-    expect(Router.getCurrent()).toBe('minhas-tarefas');
+    expect(Router.getCurrent()).toBe('atividades');
     expect(renders.projetos).not.toHaveBeenCalled();
   });
   it('respeita o link com sessão restaurada e não depende de haver atribuições', async () => {
     window.location.hash = '#minhas-tarefas'; sessionUser = user; role = 'admin'; tarefas = [];
     await Auth.checkSession();
-    expect(Router.getCurrent()).toBe('minhas-tarefas');
+    expect(Router.getCurrent()).toBe('atividades');
     expect(document.getElementById('app').hidden).toBe(false);
   });
   it('ignora hash desconhecido e mantém o destino atual numa reinicialização', async () => {
@@ -119,12 +119,12 @@ describe('página de entrada após autenticação', () => {
     await supabaseClient.auth.signOut();
     centros = [];
     await entrar();
-    expect(Router.getCurrent()).toBe('minhas-tarefas');
+    expect(Router.getCurrent()).toBe('atividades');
     await supabaseClient.auth.signOut();
     user = { id: 'outro', email: 'outro@exemplo.invalid' };
     tarefas = [{ id: 't2', responsavel_id: 'outro' }];
     await entrar();
-    expect(renders['minhas-tarefas']).toHaveBeenCalledTimes(2);
+    expect(renders['atividades']).toHaveBeenCalledTimes(2);
   });
   it('resultado lento não substitui navegação feita pelo usuário', async () => {
     sessionUser = user;

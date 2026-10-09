@@ -169,9 +169,9 @@ nome. A tarefa pede confirmação ao Victor. `ultimo_feito_id` preserva o últim
 após confirmação e depois de dez outros eventos. Tarefas encerradas e passos decididos recusam feito.
 Todas as decisões e atribuições exigem admin; professor no escopo e responsável podem registrar nota.
 
-**Minhas tarefas** filtra pelo login, ordena por prazo e oferece Registrar que fiz e Nota. O menu some
-somente após consulta bem-sucedida sem atribuições; falhas têm banner. A aba Tarefas permite ao admin
-escolher o responsável e destaca nome, nota e link para confirmação. O MCP devolve o rótulo e `feito`
+**Atividades** (058) é a única tela de tarefas: substituiu Minhas tarefas e a aba Tarefas da página
+Buriti; o cartão de cada tarefa é o mesmo (Atualizar, Nota, Responsável, Prazo, Concluir). Ver
+`docs/pages.md`. O MCP devolve o rótulo e `feito`
 (nota/link/por) por passo, sem ler perfis ou regras.
 
 Validação: `npm test`, `npm run lint` e `bash tools/replica-local/rodar-054.sh`.

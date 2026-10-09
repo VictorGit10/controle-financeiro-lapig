@@ -195,37 +195,36 @@ sem ler mensagens, remetentes ou endereços técnicos das regras de evidência. 
 `responsavel` (nome) e `feito` por passo (nota/link/por), pela FK `ultimo_feito_id`,
 independentemente do limite de eventos recentes.
 
-## Minhas tarefas (`minhas-tarefas.js`)
+## Atividades (`atividades.js`, mig. 058)
 
-**Link direto:** acrescente `#minhas-tarefas` ao endereço do site. No servidor local:
-`http://localhost:8080/#minhas-tarefas` (também funciona com `index.html#minhas-tarefas`).
-Sem sessão, o site mostra o login e abre a página depois de autenticar; com sessão
-restaurada, abre diretamente. O link tem prioridade sobre a página inicial e
-continua válido mesmo sem tarefas atribuídas (a página informa a ausência).
+Substitui a antiga Minhas tarefas e a aba Tarefas da página Buriti (pedido do Victor em 09/10/2026:
+uma tela só, sem telas sobrepostas). Lista única das tarefas abertas que o login enxerga (o RLS decide:
+admin vê todas; o Arthur, as dele; professor, as dos seus centros).
 
-**Entrada sem link direto:** não-admin com tarefas atribuídas e nenhum centro de
-custo entra em Minhas tarefas. Quem tem centros, admin ou usuário sem tarefas
-mantém Projetos como página inicial. A decisão reaproveita a consulta do menu;
-falha mantém o banner de indisponibilidade e o acesso a Minhas tarefas pelo menu.
+- **Grupos** (`grupoAtividade`): *Precisa de atenção* (vence em até 2 dias, vencida, travada e, para o
+  admin, passo marcado como feito esperando confirmação ou pedido de atenção), *Em andamento* e *Esperando
+  alguém* (`aguardando_terceiro` ou situação "esperando"). "Por projeto" agrupa a mesma lista por centro.
+- **Linha**: título, centro, próximo passo (`proximoPasso`; para o admin, "Confirmar: …" primeiro; some
+  quando repete o título), último movimento (atualização do responsável ou evento mais recente, sem
+  criação/troca de responsável), prazo em palavras (`prazoCurto`), motivo curto e quem está com ela
+  ("Você" para o próprio login).
+- **Filtros**: Tudo / Comigo / Com <pessoa> / Sem responsável, só quando há mais de um responsável na lista.
+  Filtro e vista ficam no `localStorage` (com try/catch; sem ele, volta ao padrão).
+- **Clique na linha** abre o cartão completo da 054–057 (`BuritiTarefasUI.cartao(t, false, { semTopo: true })`)
+  com todas as ações; depois de cada ação a tarefa é relida (`depois`) e muda de grupo se for o caso.
+  Concluir, para o admin, confirma junto os passos em aberto (caso da atividade que ele mesmo anotou).
+  Prazo (admin) usa `atualizar_prazo`.
+- **Anotar** (só admin): uma linha como no caderno, `30.068 remanejar rubricas até 20/10 @Arthur`.
+  `lerCaptura` exige o código de um centro cadastrado, aceita data dd/mm[/aa] (sem ano e já passada há mais
+  de um mês = ano seguinte) e `@nome` (prefixo de qualquer parte do nome, sem acento; ambíguo ou
+  desconhecido é recusado); sem @ fica com quem anota. A prévia aparece enquanto se digita. Grava por
+  `criar_tarefa_na_tela` (um passo de pessoa igual ao título).
+- **Concluídas**: últimos 60 dias.
 
-Rota `minhas-tarefas`, acessível pelo menu para qualquer login com tarefa atribuída.
-O menu é consultado no boot/reentrada e ao abrir a página ou atribuir uma tarefa;
-só some quando a consulta confirma ausência de atribuições. Erros mostram banner,
-inclusive na página, sem parecer lista vazia.
-
-Cartões compartilhados com a aba Tarefas, filtrados por `responsavel_id = Auth.getUser().id`,
-ordenados por prazo, com filtros Todas/Abertas/Concluídas. Exibem centro, descrição com
-links seguros, selo de prazo, passos, estado **Feito — aguardando o Victor** e encaminhamentos
-recolhíveis/paginados. O código do centro fora do escopo vem de `centros_das_tarefas`;
-a linha do projeto e seus dados financeiros continuam protegidos pelo RLS normal.
-
-**Registrar que fiz** aparece somente nesta página, inclusive para admin que tenha
-tarefa atribuída. O modal usa grupos de formulário em coluna, com rótulo acima
-do campo e largura total. Exige nota e aceita link HTTPS opcional; chama
-`registrar_feito` e recarrega o cartão. **Nota** usa `registrar_nota`.
-Passos decididos/tarefas encerradas não oferecem registro de feito. Não-admin não
-vê ações de confirmar, dispensar, concluir ou atribuir. A interface prioriza celular,
-com botões de pelo menos 44 px e quebra de links longos.
+**Link direto:** `#atividades`; `#minhas-tarefas` (dos e-mails antigos ao Arthur) também abre Atividades.
+Sem sessão, mostra o login e abre depois de autenticar. **Entrada sem link:** não-admin sem centros e com
+tarefa atribuída entra em Atividades; os demais mantêm Projetos. O item do menu aparece sempre para o admin
+e, para os demais, quando a consulta confirma tarefa atribuída; falha mostra banner, sem parecer lista vazia.
 
 ## UsuariosPage (`usuarios.js`) — admin-only
 
