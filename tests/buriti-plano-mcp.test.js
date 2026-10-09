@@ -45,10 +45,42 @@ describe('proporPlano (banco e storage dublês, arquivo sintético)', () => {
     expect(armazenar).toHaveBeenCalledWith('propostas-agente', expect.stringMatching(/^projeto-x\//),
       expect.any(Buffer), ext === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     expect(rpc).toHaveBeenLastCalledWith('criar_proposta', expect.objectContaining({
-      p_tipo: 'plano', p_project_id: 'projeto-x', p_chave: 'remanejamento:sintetico.' + ext,
+      p_tipo: 'plano', p_project_id: 'projeto-x', p_chave: 'remanejamento:3cb586da5baba730',
       p_arquivo_path: armazenar.mock.calls[0][1],
       p_payload: expect.objectContaining({ tipo: 'remanejamento', extraido: ex() }),
     }));
+  });
+
+  it('mesmos bytes reenviados com outro nome mantêm a chave; bytes diferentes mudam a chave', async () => {
+    await proporPlano(entrada());
+    const primeira = rpc.mock.calls.find(c => c[0] === 'criar_proposta')[1].p_chave;
+    const renomeado = join(pasta, 'renomeado.docx');
+    await writeFile(renomeado, 'bytes sintéticos');
+    await proporPlano({ ...entrada(), caminho: renomeado });
+    const segunda = rpc.mock.calls.filter(c => c[0] === 'criar_proposta')[1][1].p_chave;
+    expect(segunda).toBe(primeira);
+    await writeFile(renomeado, 'outros bytes sintéticos');
+    await proporPlano({ ...entrada(), caminho: renomeado });
+    const terceira = rpc.mock.calls.filter(c => c[0] === 'criar_proposta')[2][1].p_chave;
+    expect(terceira).toMatch(/^remanejamento:[a-f0-9]{16}$/);
+    expect(terceira).not.toBe(primeira);
+    expect(rpc.mock.calls.filter(c => c[0] === 'criar_proposta').map(c => c[1].p_payload.extraido))
+      .toEqual([ex(), ex(), ex()]);
+  });
+  it('mesmos bytes com outro tipo não compartilham a chave', async () => {
+    await proporPlano(entrada());
+    await proporPlano({ ...entrada(), tipo: 'original' });
+    const chaves = rpc.mock.calls.filter(c => c[0] === 'criar_proposta').map(c => c[1].p_chave);
+    expect(chaves).toEqual(['remanejamento:3cb586da5baba730', 'original:3cb586da5baba730']);
+  });
+  it('data do documento continua prevalecendo sobre nome e conteúdo', async () => {
+    const e = ex(); e.data.data_documento = '2026-10-08'; lerPlano.mockResolvedValue(e);
+    await proporPlano(entrada());
+    const renomeado = join(pasta, 'outro.docx');
+    await writeFile(renomeado, 'outros bytes sintéticos');
+    await proporPlano({ ...entrada(), caminho: renomeado });
+    expect(rpc.mock.calls.filter(c => c[0] === 'criar_proposta').map(c => c[1].p_chave))
+      .toEqual(['remanejamento:2026-10-08', 'remanejamento:2026-10-08']);
   });
   it('recusa PtFormatError com a mensagem do modelo e não consulta/grava', async () => {
     lerPlano.mockRejectedValue(new PtFormatError('Modelo Prefeitura: sem tabela PROAD.', 'prefeitura-fomento'));

@@ -104,12 +104,18 @@ function findTabelaCanonica(doc) {
 
 function parseLinhas(tabela) {
   const out = [];
-  const trs = tabela.querySelectorAll('tr');
+  const trs = Array.from(tabela.querySelectorAll('tr'));
+  const inicioDespesas = trs.findIndex((tr, i) =>
+    /^(?:[12]\s*[-–—]?\s*)?previs[ãa]o de despesas\b/i.test(textOf(tr.firstElementChild))
+    && trs.slice(i + 1).some(linha => RE_TOPLEVEL.test(textOf(linha))));
+  // O Word pode juntar receita, desembolso e despesas na mesma tabela.
+  // Só abre a seção se houver rubrica a–h depois; resumo final não descarta rubricas.
+  const linhas = inicioDespesas < 0 ? trs : trs.slice(inicioDespesas + 1);
   let currentTop = null;             // letra a–h do pai atual
   let pendingTopValue = null;        // valor agregador do top-level lido
   let pendingTopWasUsed = false;
 
-  for (const tr of trs) {
+  for (const tr of linhas) {
     const cells = Array.from(tr.children);
     if (cells.length === 0) continue;
 

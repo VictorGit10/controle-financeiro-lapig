@@ -134,7 +134,7 @@ function contemCpf(texto) {
 }
 
 /** Pura: compara valores já extraídos/RPC, sem somar ou projetar no MCP. */
-export function montarPropostaPlano({ extraido, arquivoNome, tipo, planoAtivo = null }) {
+export function montarPropostaPlano({ extraido, arquivoNome, tipo, hashArquivo, planoAtivo = null }) {
   const recusar = motivo => ({ ok: false, problemas: [motivo] });
   if (!['original', 'remanejamento'].includes(tipo)) return recusar('Tipo do plano: original ou remanejamento.');
   if (!extraido?.data || !Array.isArray(extraido.data.rubricas) || !extraido.data.rubricas.length) {
@@ -175,7 +175,7 @@ export function montarPropostaPlano({ extraido, arquivoNome, tipo, planoAtivo = 
   );
   return {
     ok: true, problemas: [],
-    chave: `${tipo}:${data.data_documento || arquivoNome}`,
+    chave: `${tipo}:${data.data_documento || hashArquivo}`,
     resumo: `${tipo === 'original' ? 'Plano original' : 'Remanejamento'} · ${BRL(totalNovo)} · ${data.rubricas.length} rubrica(s) · ${avisos.length} aviso(s)`,
     payload: { versao: 1, arquivo_nome: arquivoNome, tipo, extraido: { data, warnings }, avisos,
       conferencias: {

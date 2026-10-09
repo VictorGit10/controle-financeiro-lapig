@@ -13,6 +13,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { textoDoPdf, montarPropostaBalancete, montarPropostaPlano, DATA } from './buriti-proposta.js';
 import { lerPlano } from './buriti-plano-leitura.js';
@@ -118,11 +119,12 @@ export async function proporPlano({ caminho, centro_de_custo, tipo, simular = fa
     throw err;
   }
   // Recusa CPF antes de consultar contexto, enviar arquivo ou criar proposta.
-  const preliminar = montarPropostaPlano({ extraido, arquivoNome, tipo });
+  const hashArquivo = createHash('sha256').update(bytes).digest('hex').slice(0, 16);
+  const preliminar = montarPropostaPlano({ extraido, arquivoNome, tipo, hashArquivo });
   if (!preliminar.ok) return { criada: false, motivo: preliminar.problemas.join(' ') };
   const centro = await centroPorCodigo(centro_de_custo.trim());
   const planoAtivo = await rpc('get_plano_ativo', { p_project_id: centro.id });
-  const p = montarPropostaPlano({ extraido, arquivoNome, tipo, planoAtivo });
+  const p = montarPropostaPlano({ extraido, arquivoNome, tipo, hashArquivo, planoAtivo });
   if (simular) return {
     criada: false, simulacao: true, centro: centro.name, resumo: p.resumo,
     avisos: p.payload.avisos, conferencias: p.payload.conferencias,

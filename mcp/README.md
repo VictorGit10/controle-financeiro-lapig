@@ -157,7 +157,7 @@ Para conferir um plano antes de propor, chame `propor_plano` com
 `{ caminho: "C:/planos/sintetico.docx", centro_de_custo: "30.068", tipo: "remanejamento", simular: true }`.
 Sem `simular`, o original é anexado em `propostas-agente`; só um humano
 grava o orçamento na página Buriti. Refazer com o mesmo tipo e data do
-documento (ou nome do arquivo quando o parser não fornece data) substitui
+documento (ou hash do conteúdo do arquivo quando o parser não fornece data) substitui
 a proposta pendente. O MCP não converte formatos nem preenche modelos
 fora do padrão; CPF detectado no resultado é recusado antes do upload.
 A migração 056 precisa estar aplicada para criar/aplicar propostas de plano.
