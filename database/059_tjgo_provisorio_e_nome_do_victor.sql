@@ -18,8 +18,10 @@ begin
     if exists (select 1 from public.projects where lower(btrim(name)) = 'tjgo') then
       raise exception '059: já existe projeto TJGO com outro código; conferir antes de cadastrar o 30.121';
     end if;
-    insert into public.projects (name, code, active, notes)
-    values ('TJGO', '30.121', true,
+    -- id fixo (não gen_random_uuid): o id aparece na atribuição e na auditoria, e o cofre só aplica se o
+    -- efeito for idêntico ao do ensaio. Com id aleatório o código de aprovação mudava a cada execução.
+    insert into public.projects (id, name, code, active, notes)
+    values (md5('lapig:projeto:30.121')::uuid, 'TJGO', '30.121', true,
       'Cadastro provisório feito pelo Claude em 09/10/2026 a pedido do Victor (contrato 23/2026 TJGO × UFG × FUNAPE; '
       || '1º Termo Aditivo assinado em 07/10/2026). Falta: vigência, saldo, plano de trabalho e pasta do Drive.')
     returning id into v;
