@@ -91,9 +91,9 @@ describe('tela de Atividades', () => {
     expect(minha.querySelector('.ativ__proximo').textContent).toContain('Remanejar rubricas');
     expect(minha.querySelector('.ativ__quem').textContent).toBe('Você');
     expect(root.querySelector('[data-id="vencida"] .ativ__prazo').textContent).toBe('venceu há 2 dias');
-    expect(root.querySelector('[data-id="vencida"] .ativ__quem').textContent).toBe('Arthurpietro.lapig');
+    expect(root.querySelector('[data-id="vencida"] .ativ__quem').textContent).toBe('Arthurpietro');
     expect([...root.querySelectorAll('[data-filtro]')].map(b => b.textContent.replace(/\s+/g, ' ').trim()))
-      .toEqual(['Tudo 3', 'Comigo 2', 'Com Arthurpietro.lapig 1']);
+      .toEqual(['Tudo 3', 'Comigo 2', 'Com Arthurpietro 1']);
   });
   it('filtra por responsável e agrupa por projeto', async () => {
     await window.AtividadesPage.render(root);
