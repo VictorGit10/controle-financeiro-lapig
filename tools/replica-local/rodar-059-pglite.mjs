@@ -80,7 +80,7 @@ try {
   if (JSON.stringify(antes058) !== JSON.stringify(depois)) throw new Error('058 alterou helper protegido.');
   // 059: como em produção, o admin está sem nome; o 30.121 não existe.
   // O stub.sql simplifica projects; em produção a coluna notes existe desde a 001.
-  await sql(`alter table public.projects add column if not exists notes text; update public.app_users set display_name=null, email='victor.sintetico@exemplo.invalid' where role='admin';`);
+  await sql(`alter table public.projects add column if not exists notes text, add column if not exists created_at timestamptz not null default now(), add column if not exists updated_at timestamptz not null default now(); update public.app_users set display_name=null, email='victor.sintetico@exemplo.invalid' where role='admin';`);
   if ((await db.query("select 1 from public.projects where code='30.121'")).rows.length) throw new Error('stub já tem 30.121');
   await arquivo('database/059_tjgo_provisorio_e_nome_do_victor.sql');
   const p = (await db.query("select id,name,active from public.projects where code='30.121'")).rows;
